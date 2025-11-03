@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 # =========================================================================
 # Enhanced Sync Script (Minimalist Output)
 # Finds and synchronizes all Git repositories in the parent directory.
