@@ -1,28 +1,23 @@
 #!/bin/bash
 
 # =========================================================================
-# Enhanced Sync Script
-# Runs from ANYWHERE: Automatically finds and synchronizes all Git 
-# repositories within the directory containing the script's parent folder.
+# Enhanced Sync Script (Minimalist Output)
+# Finds and synchronizes all Git repositories in the parent directory.
+# Only outputs details for repos that have changes or errors.
 # =========================================================================
 
-# Exit immediately if a command exits with a non-zero status.
-set -e
+# Temporarily disable 'set -e' to allow us to handle non-zero exit codes (like git pull failure) gracefully inside the loop.
+# We will use explicit checks ($? -ne 0) instead.
+# set -e
 
 echo "========================================="
-echo " Starting Universal Git Sync "
+echo " Starting Universal Git Sync (Minimalist) "
 echo "========================================="
 echo ""
 
 # --- 0. DETERMINE REPOSITORY ROOT DIRECTORY ---
 
-# Get the directory where this script file lives.
-# Note: BASH_SOURCE[0] holds the path used to execute the script.
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-
-# Set the root directory for all repositories to the PARENT directory of the script.
-# If the script is in: /MyWebsiteGIT/Scripts
-# Then the REPO_ROOT_DIR will be: /MyWebsiteGIT/
 REPO_ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
 echo "Repository Root Directory: $REPO_ROOT_DIR"
@@ -30,7 +25,6 @@ echo ""
 
 # --- 1. PROMPT FOR COMMIT MESSAGE ---
 
-# Prompt for commit message once
 echo "Enter commit message for any repos with changes (or press Enter for default):"
 read -r COMMIT_MESSAGE
 
@@ -44,28 +38,19 @@ echo ""
 
 # --- 2. FIND ALL REPOSITORIES (AUTOMATIC DISCOVERY) ---
 
-# Find all .git directories starting the search from the determined REPO_ROOT_DIR.
-# Exclude directories containing backup suffixes (*.BKUP, *.bkp, *.BKUP-*).
 REPOS=()
 while IFS= read -r DIR; do
-    # Strip the trailing /.git to get the repository path
     REPO_PATH="${DIR%/.git}"
-    # Ensure the script's directory itself (if it's a repo) is processed, but only once
     if [ "$REPO_PATH" == "$SCRIPT_DIR" ]; then
-        # If the script folder is a repo, it must be the first element
         REPOS=("${REPO_PATH}" "${REPOS[@]}")
         continue
     fi
     REPOS+=("$REPO_PATH")
 done < <(
-    # The find command now starts from the absolute path of REPO_ROOT_DIR
-    # It finds all .git directories, pruning out any directories matching backup patterns.
     find "$REPO_ROOT_DIR" -type d \( -name "*.BKUP" -o -name "*.bkp" -o -name "*.BKUP-*" \) -prune -o -type d -name ".git" -print
 )
 
-# Remove duplicates (important if the script folder is found multiple times)
 REPOS=($(printf "%s\n" "${REPOS[@]}" | sort -u))
-
 
 if [ ${#REPOS[@]} -eq 0 ]; then
     echo "❌ Error: No git repositories found in '$REPO_ROOT_DIR' or its subdirectories."
@@ -73,133 +58,125 @@ if [ ${#REPOS[@]} -eq 0 ]; then
 fi
 
 echo "Found ${#REPOS[@]} repositories to process."
+echo "-----------------------------------------"
 
 # --- 3. LOOP AND SYNC ---
 
-# Store the starting directory
 START_DIR=$(pwd)
+ERROR_LOG=""
 
-# Loop through each repo
 for REPO_PATH in "${REPOS[@]}"; do
     
     # Reset tracking variables for this repo
     COMMITTED_FILES=""
+    PULL_SUCCESS=true
     PUSH_SUCCESS=false
+    CHANGES_DETECTED=false
 
-    # Calculate the relative name for display
     REPO_NAME=$(basename "$REPO_PATH")
 
-    echo "========================================="
-    echo "Syncing: $REPO_NAME ($REPO_PATH)"
-    echo "========================================="
-    
     # Change to repo directory
     if ! cd "$REPO_PATH" 2>/dev/null; then
-        echo "❌ Error: Could not access $REPO_PATH"
+        ERROR_LOG+="\n❌ Error: Could not access $REPO_PATH"
         continue
     fi
     
     # Stage all changes
-    echo "Staging changes..."
     git add -A
     
-    # Check if there are changes to commit
-    if git diff --staged --quiet; then
-        echo "✓ No changes to commit."
-    else
-        # Capture the list of files about to be committed (Local changes)
+    # --- A. COMMIT LOCAL CHANGES ---
+    if ! git diff --staged --quiet; then
+        CHANGES_DETECTED=true
         COMMITTED_FILES=$(git diff --name-only --staged)
-        echo "--- ⬆️ Files Committed Locally (Mac) --------------------"
-        echo "$COMMITTED_FILES"
-        echo "--------------------------------------------------------"
         
         # Commit changes
-        echo "Committing changes..."
         if git commit -m "$COMMIT_MESSAGE"; then
-            echo "✓ Changes committed."
+            : # Commit successful, COMMITTED_FILES is set
         else
-            echo "❌ Commit failed for $REPO_NAME."
+            ERROR_LOG+="\n❌ Commit failed for $REPO_NAME."
             cd "$START_DIR"
             continue
         fi
     fi
     
-    # --- PULL/PUSH BLOCK ---
+    # --- B. PULL REMOTE CHANGES ---
     
-    # Pull remote changes (using rebase to avoid unnecessary merge commits)
-    echo "Pulling from remote (Web -> Mac)..."
-    
-    # Capture the output of the pull operation to see what changed
+    # Capture the output of the pull operation
     PULL_OUTPUT=$(git pull --rebase 2>&1)
     PULL_STATUS=$?
     
     if [ $PULL_STATUS -ne 0 ]; then
-        # Display the full error output if the pull failed
-        echo "$PULL_OUTPUT"
-        echo "❌ PULL FAILED! Please resolve conflicts manually in $REPO_PATH"
+        PULL_SUCCESS=false
+        ERROR_LOG+="\n❌ PULL FAILED in $REPO_NAME:\n$PULL_OUTPUT\n   Please resolve conflicts manually in $REPO_PATH"
         cd "$START_DIR"
         continue
     fi
-    
-    echo "✓ Pull complete."
-    
-    # Log the files that were updated during the pull/rebase (Web to Mac changes)
-    if echo "$PULL_OUTPUT" | grep -q "Fast-forward\|Updated"; then
-        # Find files updated by the last pull (which is a merge or rebase)
-        PULLED_FILES=$(echo "$PULL_OUTPUT" | grep -E '(\S+)(\s*)\|' | awk '{print $1}')
-        
-        echo "--- ⬇️ Files Updated from Web (Pull) -------------------"
-        if [ -n "$PULLED_FILES" ]; then
-            echo "$PULLED_FILES"
-        else
-            echo "No files updated in pull (or changes were only metadata)."
-        fi
-        echo "--------------------------------------------------------"
-    elif [ "$PULL_OUTPUT" != "Current branch main is up to date." ] && [ "$PULL_OUTPUT" != "Current branch master is up to date." ]; then
-        # For other non-failure messages, just confirm no file changes
-        echo "No file changes detected during pull."
-    fi
 
+    # Check for files updated during pull/rebase
+    PULLED_FILES=""
+    if echo "$PULL_OUTPUT" | grep -q "Fast-forward\|Updated"; then
+        CHANGES_DETECTED=true
+        PULLED_FILES=$(echo "$PULL_OUTPUT" | grep -E '(\S+)(\s*)\|' | awk '{print $1}')
+    fi
     
-    # Push local changes
-    echo "Pushing to remote (Mac -> Web)..."
+    # --- C. PUSH LOCAL CHANGES ---
     
     # 1. Attempt standard push
     PUSH_OUTPUT=$(git push 2>&1)
     if [ $? -eq 0 ]; then
         PUSH_SUCCESS=true
-        echo "✓ Successfully synced $REPO_NAME"
     # 2. If standard push fails (e.g., first push or missing upstream), try -u
     else
-        # Attempt the explicit first-push command for new repos
         PUSH_OUTPUT=$(git push -u origin main 2>&1)
         if [ $? -eq 0 ]; then
             PUSH_SUCCESS=true
-            echo "✓ Successfully synced $REPO_NAME (Set upstream branch)"
+            CHANGES_DETECTED=true # Force detail output if tracking was set
         else
-            # If both attempts fail
-            echo "$PUSH_OUTPUT"
-            echo "❌ Push failed for $REPO_NAME"
+            ERROR_LOG+="\n❌ PUSH FAILED in $REPO_NAME:\n$PUSH_OUTPUT"
+            cd "$START_DIR"
+            continue
         fi
     fi
 
-    # Log the files that were pushed ONLY IF a commit was made locally AND push was successful
-    if $PUSH_SUCCESS && [ -n "$COMMITTED_FILES" ]; then
-        echo "--- ⬆️ Files Pushed to Web (Mac) ----------------------"
-        echo "$COMMITTED_FILES"
-        echo "--------------------------------------------------------"
-    elif $PUSH_SUCCESS; then
-        echo "✓ Push successful. Remote was up-to-date with local."
-    fi
+    # --- D. CONDENSED OUTPUT ---
     
-    echo ""
+    if $CHANGES_DETECTED; then
+        # Detailed output for changes
+        echo "✅ SYNCED: $REPO_NAME"
+        
+        if [ -n "$PULLED_FILES" ]; then
+            echo "   --- ⬇️ UPDATED FROM WEB -------------------"
+            echo "$PULLED_FILES" | sed 's/^/   /g'
+            echo "   -----------------------------------------"
+        fi
+
+        if [ -n "$COMMITTED_FILES" ]; then
+            echo "   --- ⬆️ PUSHED TO WEB ----------------------"
+            echo "$COMMITTED_FILES" | sed 's/^/   /g'
+            echo "   -----------------------------------------"
+        fi
+        
+    # We intentionally print nothing for a quiet, up-to-date repository
+    # The final summary handles the overall status
+    fi
     
     # Return to the starting directory after processing this repo
     cd "$START_DIR"
     
 done
 
-echo "========================================="
-echo "All repositories processed!"
+# --- 4. FINAL SUMMARY AND ERROR REPORT ---
+
+echo "-----------------------------------------"
+echo "         SUMMARY & ERRORS"
+echo "-----------------------------------------"
+
+if [ -z "$ERROR_LOG" ]; then
+    echo "All repositories processed successfully."
+else
+    echo "Processing complete, but the following errors occurred:"
+    echo -e "$ERROR_LOG"
+fi
+
 echo "========================================="
 
