@@ -72,12 +72,14 @@ for REPO_PATH in "${REPOS[@]}"; do
     PULL_SUCCESS=true
     PUSH_SUCCESS=false
     CHANGES_DETECTED=false
-
+    REPO_PROCESSED=true # Flag to ensure we don't print twice
+    
     REPO_NAME=$(basename "$REPO_PATH")
 
     # Change to repo directory
     if ! cd "$REPO_PATH" 2>/dev/null; then
         ERROR_LOG+="\n❌ Error: Could not access $REPO_PATH"
+        REPO_PROCESSED=false
         continue
     fi
     
@@ -90,10 +92,9 @@ for REPO_PATH in "${REPOS[@]}"; do
         COMMITTED_FILES=$(git diff --name-only --staged)
         
         # Commit changes
-        if git commit -m "$COMMIT_MESSAGE"; then
-            : # Commit successful, COMMITTED_FILES is set
-        else
+        if ! git commit -m "$COMMIT_MESSAGE"; then
             ERROR_LOG+="\n❌ Commit failed for $REPO_NAME."
+            REPO_PROCESSED=false
             cd "$START_DIR"
             continue
         fi
@@ -108,6 +109,7 @@ for REPO_PATH in "${REPOS[@]}"; do
     if [ $PULL_STATUS -ne 0 ]; then
         PULL_SUCCESS=false
         ERROR_LOG+="\n❌ PULL FAILED in $REPO_NAME:\n$PULL_OUTPUT\n   Please resolve conflicts manually in $REPO_PATH"
+        REPO_PROCESSED=false
         cd "$START_DIR"
         continue
     fi
@@ -133,6 +135,7 @@ for REPO_PATH in "${REPOS[@]}"; do
             CHANGES_DETECTED=true # Force detail output if tracking was set
         else
             ERROR_LOG+="\n❌ PUSH FAILED in $REPO_NAME:\n$PUSH_OUTPUT"
+            REPO_PROCESSED=false
             cd "$START_DIR"
             continue
         fi
@@ -155,9 +158,9 @@ for REPO_PATH in "${REPOS[@]}"; do
             echo "$COMMITTED_FILES" | sed 's/^/   /g'
             echo "   -----------------------------------------"
         fi
-        
-    # We intentionally print nothing for a quiet, up-to-date repository
-    # The final summary handles the overall status
+    else
+        # One-liner for quiet, up-to-date repository
+        echo "✓ $REPO_NAME: Up-to-date"
     fi
     
     # Return to the starting directory after processing this repo
