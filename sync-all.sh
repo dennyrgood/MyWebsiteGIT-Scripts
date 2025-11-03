@@ -49,6 +49,30 @@ while IFS= read -r DIR; do
     # Get the parent directory of the .git folder (which is the repo root)
     REPO_PATH=$(dirname "$DIR")
     REPOS+=("$REPO_PATH")
+done < <(find "$REPO_ROOT_DIR" -maxdepth 3 -type d \
+    -not -path "$REPO_ROOT_DIR/.git" \
+    -not -name "*.[Bb][Kk][Uu][Pp]*" \
+    -not -name "*.[Bb][Aa][Kk]*" \
+    -name ".git" \
+    -prune 2>/dev/null | sed 's/\/\.git$//')
+
+# OLD FIND COMMAND (Removed for replacement below):
+# done < <(find "$REPO_ROOT_DIR" -maxdepth 3 -type d -name ".git" -not -path "$REPO_ROOT_DIR/.git")
+
+# NEW FIND COMMAND EXPLANATION:
+# The `find` command is complex to handle the exclusion reliably while finding the .git folders.
+# The most robust way to exclude paths is to use `-prune` on the directory name itself.
+# However, for simplicity and cross-compatibility, we will refine the initial approach.
+
+# REVISED: Using find to exclude directory names before finding .git
+REPOS=()
+while IFS= read -r DIR; do
+    REPO_PATH=$(dirname "$DIR")
+    # Simple check to skip directories containing common backup strings (case-insensitive check)
+    if [[ "$REPO_PATH" =~ \.BKUP|\.BAK|\.bkup|\.bak ]]; then
+        continue
+    fi
+    REPOS+=("$REPO_PATH")
 done < <(find "$REPO_ROOT_DIR" -maxdepth 3 -type d -name ".git" -not -path "$REPO_ROOT_DIR/.git")
 
 REPO_COUNT=${#REPOS[@]}
@@ -60,6 +84,11 @@ echo "-----------------------------------------"
 for REPO_PATH in "${REPOS[@]}"; do
     
     REPO_NAME=$(basename "$REPO_PATH")
+
+    # Double check to ensure we aren't processing backup directories. This should catch any misses from the find filter.
+    if [[ "$REPO_NAME" =~ \.BKUP|\.BAK|\.bkup|\.bak ]]; then
+        continue
+    fi
     
     # Initialize status variables for this repo
     COMMITTED_CHANGES=""
