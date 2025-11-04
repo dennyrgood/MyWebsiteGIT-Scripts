@@ -1,10 +1,11 @@
 #!/bin/bash
 
 # =========================================================================
-# Final Robust Sync Script with Self-Healing and Error Resilience
+# Minimal Git Sync Script
+# Syncs all Git repositories, showing only essential information
 # =========================================================================
 
-set -e # Exit immediately if a command exits with a non-zero status (unless handled)
+set -e
 
 # --- SETUP ---
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
@@ -31,49 +32,20 @@ done < <(find "$REPO_ROOT_DIR" -maxdepth 3 -type d -name ".git" -not -path "$REP
 for REPO_PATH in "${REPOS[@]}"; do
     REPO_NAME=$(basename "$REPO_PATH")
     
-    # Temporarily disable set -e before cd, as cd failure should be handled, not script-fatal
-    set +e
     cd "$REPO_PATH" || { 
         echo "❌ $REPO_NAME: Cannot access directory" >&2
         ERROR_COUNT=$((ERROR_COUNT + 1))
         cd "$START_DIR"
-        set -e
         continue
     }
-    set -e
     
-    echo "━━━━━━━━━━━━━━━━━━━━" 
     echo "📂 $REPO_NAME"
-
-    # --- 1. REPOSITORY SELF-HEALING CHECK ---
-    set +e
-    FSCK_OUTPUT=$(git fsck --full 2>&1)
-    set -e
     
-    CORRUPT_REF=$(echo "$FSCK_OUTPUT" | grep -oE "error: refs/heads/[^:]+ [0-9]+")
-    
-    if [ -n "$CORRUPT_REF" ]; then
-        CORRUPT_FILE_NAME=$(echo "$CORRUPT_REF" | awk '{print $2}')
-        CORRUPT_FILE_PATH=".git/$CORRUPT_FILE_NAME"
-        
-        echo "   🚨 CORRUPTION DETECTED: $CORRUPT_FILE_NAME" 
-        
-        set +e
-        if rm -f "$CORRUPT_FILE_PATH"; then
-            echo "   ✅ Corrupted file removed: $CORRUPT_FILE_PATH"
-            git gc --prune=now &>/dev/null 
-            echo "   ✅ Repository cleaned (git gc)"
-        else
-            echo "   ❌ Failed to remove corrupted file. Manual review needed." >&2
-            ERROR_COUNT=$((ERROR_COUNT + 1))
-        fi
-        set -e
-    fi
-    
-    # --- 2. COMMIT LOCAL CHANGES ---
+    # --- COMMIT LOCAL CHANGES ---
     git add -A
     
     if ! git diff --staged --quiet; then
+        # List changed files
         echo "   Changes to commit:"
         git diff --staged --name-status | while read status file; do
             case "$status" in
@@ -84,28 +56,18 @@ for REPO_PATH in "${REPOS[@]}"; do
             esac
         done
         
-        # DEBUGGING CHANGE: Removed '&>/dev/null' to show the real commit error
-        set +e
-        COMMIT_OUTPUT=$(git commit -m "$COMMIT_MESSAGE" --no-verify 2>&1) 
-        COMMIT_EXIT_CODE=$?
-        set -e
-        
-        if [ $COMMIT_EXIT_CODE -eq 0 ]; then
+        if git commit -m "$COMMIT_MESSAGE" --no-verify &>/dev/null; then
             echo "   ✓ Committed"
         else
-            echo "   ❌ Commit failed. Error details:" >&2
-            echo "$COMMIT_OUTPUT" # Print the actual error message
+            echo "   ❌ Commit failed" >&2
             ERROR_COUNT=$((ERROR_COUNT + 1))
         fi
     fi
     
-    # --- 3. PULL FROM REMOTE ---
-    set +e # Disable set -e for the pull command
+    # --- PULL FROM REMOTE ---
     PULL_OUTPUT=$(git pull --rebase 2>&1)
-    PULL_EXIT_CODE=$?
-    set -e # Re-enable set -e
-
-    if [ $PULL_EXIT_CODE -ne 0 ]; then
+    
+    if [ $? -ne 0 ]; then
         if echo "$PULL_OUTPUT" | grep -q 'CONFLICT'; then
             echo "   ❌ CONFLICT - resolve manually" >&2
             ERROR_COUNT=$((ERROR_COUNT + 1))
@@ -119,10 +81,8 @@ for REPO_PATH in "${REPOS[@]}"; do
         echo "   ↓ Pulled changes"
     fi
     
-    # --- 4. PUSH TO REMOTE ---
-    set +e # Disable set -e for the push command
+    # --- PUSH TO REMOTE ---
     PUSH_OUTPUT=$(git push 2>&1)
-    set -e # Re-enable set -e
     
     if echo "$PUSH_OUTPUT" | grep -q 'error'; then
         echo "   ❌ Push failed" >&2
