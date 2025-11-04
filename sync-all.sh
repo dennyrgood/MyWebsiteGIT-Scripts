@@ -58,12 +58,9 @@ for REPO_PATH in "${REPOS[@]}"; do
     # Stage all changes
     git add -A
     
-    # Commit changes.
-    # We remove the output redirection that might be happening implicitly
-    # and use '--quiet' flags on the 'git add' and 'git pull' commands 
-    # if we want to silence them later, but for now we keep the commit
-    # command simple to let it print the change summary.
-    git commit -m "$COMMIT_MESSAGE" --no-verify
+    # Commit changes. Use '|| true' so 'set -e' doesn't stop the script if there are no changes (exit code 1).
+    # The output (like the file summary) will still be printed on success.
+    git commit -m "$COMMIT_MESSAGE" --no-verify || true
     
     # --- PULL BLOCK (Web -> Local) ---
     
