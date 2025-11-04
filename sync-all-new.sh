@@ -92,8 +92,7 @@ process_repo() {
         else
             echo "❌ ERROR: Commit failed for $REPO_NAME. See $LOG_FILE for details."
             REPO_STATUS="COMMIT_FAIL"
-            # Return early if commit failed
-            echo "COMMIT FAILED for $REPO_NAME" >> "$LOG_FILE"
+            # Return failure status (1) if commit failed
             return 1
         fi
     fi
@@ -171,7 +170,11 @@ for REPO_PATH in "${REPOS[@]}"; do
     REPO_NAME=$(basename "$REPO_PATH")
     
     # Change to the repository directory
-    cd "$REPO_PATH"
+    if ! cd "$REPO_PATH"; then
+        echo "❌ ERROR: Could not enter directory $REPO_PATH. Skipping."
+        ERROR_COUNT=$((ERROR_COUNT + 1))
+        continue
+    fi
     
     # Execute the processing function and capture its output (the COMMITTED|PULLED|STATUS string)
     RESULT=$(process_repo "$REPO_PATH" "$REPO_NAME" "$START_DIR" "$COMMIT_MESSAGE" "$LOG_FILE")
@@ -233,4 +236,3 @@ else
     echo "All repositories processed successfully."
 fi
 echo "========================================="
-
