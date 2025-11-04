@@ -69,10 +69,11 @@ for REPO_PATH in "${REPOS[@]}"; do
         # Commit changes.
         COMMIT_OUTPUT=$(git commit -m "$COMMIT_MESSAGE" --no-verify 2>&1)
         
-        # Check if commit was successful
-        if echo "$COMMIT_OUTPUT" | grep -q 'file changed'; then
+        # Check if commit was successful by ensuring it did NOT result in "nothing to commit"
+        if ! echo "$COMMIT_OUTPUT" | grep -q 'nothing to commit'; then
             echo "$REPO_NAME: Committed changes."
         else
+            # This path *shouldn't* be hit if STAGED_FILES check worked, but catches genuine commit errors
             echo "ERROR: Commit failed for $REPO_NAME." >&2
             ERROR_COUNT=$((ERROR_COUNT + 1))
             cd "$START_DIR"
