@@ -47,6 +47,9 @@ done < <(find "$REPO_ROOT_DIR" -maxdepth 3 -type d -name ".git" -not -path "$REP
 for REPO_PATH in "${REPOS[@]}"; do
     
     REPO_NAME=$(basename "$REPO_PATH")
+    
+    # Initialize status variable for this repo
+    WAS_ACTIVE=false
 
     # Skip backup directories. 
     if [[ "$REPO_NAME" =~ \.BKUP|\.BAK|\.bkup|\.bak ]]; then
@@ -65,6 +68,7 @@ for REPO_PATH in "${REPOS[@]}"; do
     STAGED_FILES=$(git diff --name-only --staged)
     
     if [ -n "$STAGED_FILES" ]; then
+        WAS_ACTIVE=true
         
         # Commit changes.
         COMMIT_OUTPUT=$(git commit -m "$COMMIT_MESSAGE" --no-verify 2>&1)
@@ -87,6 +91,7 @@ for REPO_PATH in "${REPOS[@]}"; do
     PULL_EXIT_CODE=$?
 
     if [ $PULL_EXIT_CODE -ne 0 ]; then
+        WAS_ACTIVE=true # Log error/warning
         if echo "$PULL_OUTPUT" | grep -q 'CONFLICT'; then
             echo "FATAL ERROR: Pull failed with conflicts in $REPO_PATH. Resolve manually." >&2
             ERROR_COUNT=$((ERROR_COUNT + 1))
@@ -99,6 +104,7 @@ for REPO_PATH in "${REPOS[@]}"; do
         cd "$START_DIR"
         continue
     elif ! echo "$PULL_OUTPUT" | grep -q 'up to date'; then
+        WAS_ACTIVE=true
         echo "$REPO_NAME: Pulled changes from remote."
     fi
 
@@ -109,11 +115,18 @@ for REPO_PATH in "${REPOS[@]}"; do
     if echo "$PUSH_OUTPUT" | grep -q 'Everything up-to-date'; then
         : # Quiet push
     elif echo "$PUSH_OUTPUT" | grep -q 'error'; then
+        WAS_ACTIVE=true # Log error
         # Push failure
         echo "ERROR: PUSH FAILED for $REPO_NAME. Details: $PUSH_OUTPUT" >&2
         ERROR_COUNT=$((ERROR_COUNT + 1))
     else
+        WAS_ACTIVE=true
         echo "$REPO_NAME: Successfully pushed changes."
+    fi
+    
+    # --- LISTING OUTPUT ---
+    if [ "$WAS_ACTIVE" = false ]; then
+        echo "$REPO_NAME: Up-to-date"
     fi
     
     # Return to the starting directory after processing this repo
