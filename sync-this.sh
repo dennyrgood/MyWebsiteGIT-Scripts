@@ -1,8 +1,12 @@
 #!/bin/bash
 
-# --- 1. Get Commit Message ---
+# --- 1. Get Current Branch Name ---
+# This command gets the name of the currently checked-out branch.
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-DEFAULT_MESSAGE="Cleaning up files/sync from local to web"
+# --- 2. Get Commit Message ---
+
+DEFAULT_MESSAGE="Cleaning up files/sync from local to remote branch: $CURRENT_BRANCH"
 
 # Prompt user for input
 echo "Enter commit message (or press Enter to use default):"
@@ -16,8 +20,10 @@ else
 fi
 
 echo "--- Using commit message: \"$COMMIT_MESSAGE\" ---"
+echo "--- Syncing current branch: $CURRENT_BRANCH ---"
 
-# --- 2. Git Operations ---
+
+# --- 3. Git Operations: Commit Local Changes ---
 
 # Stage all changes (additions, modifications, deletions)
 echo "Staging all changes..."
@@ -29,15 +35,18 @@ git commit -m "$COMMIT_MESSAGE"
 
 # Check if the commit was successful before proceeding
 if [ $? -ne 0 ]; then
-    # The commit fails if there are no changes to commit.
-    # We will still proceed to pull/push, which is often desirable for a sync script.
     echo "Warning: No changes to commit. Proceeding with pull/push sync."
 fi
 
-# PULL: Fetch and merge remote changes before pushing local changes
-echo "Pulling remote changes from origin main..."
-git pull origin main
+
+# --- 4. Git Operations: Pull and Push to Current Branch ---
+
+# PULL: Fetch and merge remote changes for the current branch
+echo "Pulling remote changes from origin/$CURRENT_BRANCH..."
+git pull origin "$CURRENT_BRANCH"
 
 # PUSH: Send local changes to the remote branch
-echo "Pushing local changes to origin main..."
-git push origin main
+echo "Pushing local changes to origin/$CURRENT_BRANCH..."
+# The -u flag is included in case this is a brand new local branch 
+# that hasn't been pushed upstream yet.
+git push -u origin "$CURRENT_BRANCH"
