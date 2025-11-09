@@ -25,9 +25,9 @@ echo "--- Syncing current branch: $CURRENT_BRANCH ---"
 
 # --- 3. Git Operations: Commit Local Changes ---
 
-# Stage all changes (additions, modifications, deletions)
+# Stage all changes (additions, modifications, deletions) with verbose output
 echo "Staging all changes..."
-git add -A
+git add -A -v
 
 # Commit staged changes
 echo "Committing staged changes..."
@@ -45,8 +45,46 @@ fi
 echo "Pulling remote changes from origin/$CURRENT_BRANCH..."
 git pull origin "$CURRENT_BRANCH"
 
+# Check if pull was successful (handles merge conflicts)
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "ERROR: Pull failed - likely due to merge conflicts"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "What to do next:"
+    echo "  1. Run 'git status' to see conflicting files"
+    echo "  2. Open and resolve conflicts in each file"
+    echo "  3. Run 'git add <resolved-files>'"
+    echo "  4. Run 'git commit' to complete the merge"
+    echo "  5. Run this script again to push changes"
+    echo ""
+    exit 1
+fi
+
 # PUSH: Send local changes to the remote branch
 echo "Pushing local changes to origin/$CURRENT_BRANCH..."
 # The -u flag is included in case this is a brand new local branch 
 # that hasn't been pushed upstream yet.
 git push -u origin "$CURRENT_BRANCH"
+
+# Check if push was successful
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "ERROR: Push failed"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Possible reasons:"
+    echo "  - Network connectivity issues"
+    echo "  - No permission to push to origin/$CURRENT_BRANCH"
+    echo "  - Remote branch has been force-updated"
+    echo ""
+    echo "Your changes are still committed locally."
+    echo "Run 'git status' for more information."
+    echo ""
+    exit 1
+fi
+
+echo ""
+echo "✓ Sync complete! All changes pushed to origin/$CURRENT_BRANCH"
