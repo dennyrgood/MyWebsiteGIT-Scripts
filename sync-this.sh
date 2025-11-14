@@ -62,9 +62,9 @@ git pull origin "$CURRENT_BRANCH"
 # Check if pull was successful (handles merge conflicts)
 if [ $? -ne 0 ]; then
     echo ""
-    echo "==================================================="
+    echo "â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â""
     echo "ERROR: Pull failed - likely due to merge conflicts"
-    echo "==================================================="
+    echo "â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â""
     echo ""
     echo "What to do next:"
     echo "  1. Run 'git status' to see conflicting files"
@@ -85,9 +85,9 @@ git push -u origin "$CURRENT_BRANCH"
 # Check if push was successful
 if [ $? -ne 0 ]; then
     echo ""
-    echo "==================================================="
+    echo "â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â""
     echo "ERROR: Push failed"
-    echo "==================================================="
+    echo "â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â""
     echo ""
     echo "Possible reasons:"
     echo "  - Network connectivity issues"
@@ -101,4 +101,4 @@ if [ $? -ne 0 ]; then
 fi
 
 echo ""
-echo "Sync complete! All changes pushed to origin/$CURRENT_BRANCH"
+echo "âœ" Sync complete! All changes pushed to origin/$CURRENT_BRANCH"
