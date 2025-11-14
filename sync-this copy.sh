@@ -8,30 +8,20 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 DEFAULT_MESSAGE="Cleaning up files/sync from local to remote branch: $CURRENT_BRANCH"
 
-# Check if message provided as command line argument
-if [ -n "$1" ]; then
-    COMMIT_MESSAGE="$1"
-else
-    # Prompt user for input
-    echo "Enter commit message (or press Enter to use default):"
-    read -r USER_MESSAGE
+# Prompt user for input
+echo "Enter commit message (or press Enter to use default):"
+read -r USER_MESSAGE
 
-    # Set the final commit message
-    if [ -z "$USER_MESSAGE" ]; then
-        COMMIT_MESSAGE="$DEFAULT_MESSAGE"
-    else
-        COMMIT_MESSAGE="$USER_MESSAGE"
-    fi
+# Set the final commit message
+if [ -z "$USER_MESSAGE" ]; then
+    COMMIT_MESSAGE="$DEFAULT_MESSAGE"
+else
+    COMMIT_MESSAGE="$USER_MESSAGE"
 fi
 
 echo "--- Using commit message: \"$COMMIT_MESSAGE\" ---"
 echo "--- Syncing current branch: $CURRENT_BRANCH ---"
-echo ""
 
-# --- Show what's about to be committed ---
-echo "Files to be committed:"
-git status --short
-echo ""
 
 # --- 3. Git Operations: Commit Local Changes ---
 
@@ -58,9 +48,9 @@ git pull origin "$CURRENT_BRANCH"
 # Check if pull was successful (handles merge conflicts)
 if [ $? -ne 0 ]; then
     echo ""
-    echo "---------------------------------------------------"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "ERROR: Pull failed - likely due to merge conflicts"
-    echo "---------------------------------------------------"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
     echo "What to do next:"
     echo "  1. Run 'git status' to see conflicting files"
@@ -81,9 +71,9 @@ git push -u origin "$CURRENT_BRANCH"
 # Check if push was successful
 if [ $? -ne 0 ]; then
     echo ""
-    echo "---------------------------------------------------"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "ERROR: Push failed"
-    echo "---------------------------------------------------"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
     echo "Possible reasons:"
     echo "  - Network connectivity issues"
@@ -97,4 +87,4 @@ if [ $? -ne 0 ]; then
 fi
 
 echo ""
-echo "Sync complete! All changes pushed to origin/$CURRENT_BRANCH"
+echo "✓ Sync complete! All changes pushed to origin/$CURRENT_BRANCH"
