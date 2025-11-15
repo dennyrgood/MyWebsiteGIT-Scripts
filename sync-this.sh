@@ -46,14 +46,19 @@ echo "=========================================="
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 DEFAULT_MESSAGE="Cleaning up files/sync from local to remote branch: $CURRENT_BRANCH"
 
-# Prompt user for commit message
-echo "Enter commit message (or press Enter to use default):"
-read -r USER_MESSAGE
-
-if [ -z "$USER_MESSAGE" ]; then
-    COMMIT_MESSAGE="$DEFAULT_MESSAGE"
+# Check if message provided as command line argument
+if [ -n "$1" ]; then
+    COMMIT_MESSAGE="$1"
 else
-    COMMIT_MESSAGE="$USER_MESSAGE"
+    # Prompt user for commit message
+    echo "Enter commit message (or press Enter to use default):"
+    read -r USER_MESSAGE
+
+    if [ -z "$USER_MESSAGE" ]; then
+        COMMIT_MESSAGE="$DEFAULT_MESSAGE"
+    else
+        COMMIT_MESSAGE="$USER_MESSAGE"
+    fi
 fi
 
 echo "--- Using commit message: \"$COMMIT_MESSAGE\" ---"
