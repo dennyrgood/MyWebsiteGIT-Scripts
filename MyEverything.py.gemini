@@ -130,8 +130,8 @@ class MyEverythingApp:
         other_entry.grid(row=5, column=0, columnspan=7, padx=5, pady=(0, 5), sticky="ew")
 
         # Examples Label
-        examples = r'e.g., -perm 644 | ! -name ".*" | -exec "mv {} {}.bak" \;'
-        ttk.Label(filters_frame, text=examples, font=('Courier', 10)).grid(row=6, column=0, columnspan=7, padx=5, pady=(0, 5), sticky="w")
+        examples = "e.g., -perm 644 -user root -delete -exec 'mv {} {}.bak' \\;"
+        ttk.Label(filters_frame, text=examples, font=('Courier', 8)).grid(row=6, column=0, columnspan=7, padx=5, pady=(0, 5), sticky="w")
         
         filters_frame.grid_columnconfigure(6, weight=1) 
 
@@ -159,7 +159,7 @@ class MyEverythingApp:
         self.command_output = ttk.Entry(command_frame, state='readonly', font=('Courier', 10))
         self.command_output.pack(padx=5, pady=(0, 5), fill="x")
 
-        self.error_status_label = ttk.Label(command_frame, text="Command Errors (stderr):", foreground='black')
+        self.error_status_label = ttk.Label(command_frame, text="Command Errors (stderr):", foreground='red')
         self.error_status_label.pack(padx=5, pady=(5, 0), anchor="w")
         
         error_text_frame = ttk.Frame(command_frame)
@@ -390,7 +390,7 @@ class MyEverythingApp:
         self.error_output.delete('1.0', tk.END)
         
         if not message:
-            self.error_status_label.config(text="Command Errors (stderr):", foreground='black')
+            self.error_status_label.config(text="Command Errors (stderr):", foreground='red')
             self.error_output.config(state='disabled')
             return
 

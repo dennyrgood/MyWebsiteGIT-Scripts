@@ -6,8 +6,8 @@ import shlex
 import os
 import datetime 
 import sys 
-import threading 
-import queue 
+import threading # NEW: For running search in background
+import queue # NEW: For thread-safe communication
 
 class MyEverythingApp:
     
@@ -53,9 +53,9 @@ class MyEverythingApp:
         self.ctime_val = tk.StringVar(value="")
         self.other_args = tk.StringVar(value="") 
         
-        # --- Threading/Process Variables ---
+        # --- Threading/Process Variables (NEW) ---
         self.search_thread = None
-        self.process = None # Holds the subprocess.Popen instance (SHARED)
+        self.process = None # Holds the subprocess.Popen instance
         self.output_queue = queue.Queue() # Thread-safe queue for result communication
         self.temp_stderr = "" # Temporary holder for stderr output
         
@@ -130,19 +130,19 @@ class MyEverythingApp:
         other_entry.grid(row=5, column=0, columnspan=7, padx=5, pady=(0, 5), sticky="ew")
 
         # Examples Label
-        examples = r'e.g., -perm 644 | ! -name ".*" | -exec "mv {} {}.bak" \;'
-        ttk.Label(filters_frame, text=examples, font=('Courier', 10)).grid(row=6, column=0, columnspan=7, padx=5, pady=(0, 5), sticky="w")
+        examples = "e.g., -perm 644 -user root -delete -exec 'mv {} {}.bak' \\;"
+        ttk.Label(filters_frame, text=examples, font=('Courier', 8)).grid(row=6, column=0, columnspan=7, padx=5, pady=(0, 5), sticky="w")
         
         filters_frame.grid_columnconfigure(6, weight=1) 
 
-        # 3. Execution Controls
+        # 3. Execution Controls (NEW: Progress bar and Cancel button)
         exec_frame = ttk.Frame(self.master)
         exec_frame.pack(pady=5, padx=10, fill="x")
 
         self.run_button = ttk.Button(exec_frame, text="▶️ Run Find Command", command=self._start_search)
         self.run_button.pack(side="left", fill="x", expand=True)
 
-        # Progress Bar
+        # Progress Bar (Indeterminate style for background processing)
         self.progress_bar = ttk.Progressbar(exec_frame, mode='indeterminate')
         self.progress_bar.pack(side="left", padx=(10, 5), fill="x", expand=True)
         
@@ -159,7 +159,7 @@ class MyEverythingApp:
         self.command_output = ttk.Entry(command_frame, state='readonly', font=('Courier', 10))
         self.command_output.pack(padx=5, pady=(0, 5), fill="x")
 
-        self.error_status_label = ttk.Label(command_frame, text="Command Errors (stderr):", foreground='black')
+        self.error_status_label = ttk.Label(command_frame, text="Command Errors (stderr):", foreground='red')
         self.error_status_label.pack(padx=5, pady=(5, 0), anchor="w")
         
         error_text_frame = ttk.Frame(command_frame)
@@ -205,12 +205,12 @@ class MyEverythingApp:
         
         self.results_tree.bind('<Double-1>', self._open_folder_in_finder)
         
-        # Status Label
+        # Status Label (Uses the 'Taller.TLabel' style)
         self.status_label = ttk.Label(self.master, text="Ready.", relief=tk.SUNKEN, anchor="w", style='Taller.TLabel')
         self.status_label.pack(fill="x", padx=10, pady=(0, 5))
 
     
-    # --- THREADING & EXECUTION METHODS ---
+    # --- THREADING & EXECUTION METHODS (PRIORITY 1) ---
     
     def _set_running_state(self, running):
         """Sets the state of the Run/Cancel buttons and progress bar."""
@@ -232,12 +232,9 @@ class MyEverythingApp:
         self.temp_stderr = "" # Clear temporary stderr holder
 
         try:
-            # 1. Clear results and force immediate redraw
+            find_command = self._build_find_command()
             self.results_tree.delete(*self.results_tree.get_children())
             self.file_data = {}
-            self.master.update_idletasks() 
-
-            find_command = self._build_find_command()
 
             # Display command being run
             quoted_command = ' '.join(shlex.quote(arg) for arg in find_command)
@@ -264,12 +261,9 @@ class MyEverythingApp:
 
     def _execute_search_threaded(self, command):
         """Executes the find command in a worker thread using Popen."""
-        
-        # Use a local variable for the process object to prevent the NoneType crash
-        p = None 
         try:
-            # 1. Create Popen instance (local reference 'p')
-            p = subprocess.Popen(
+            # Use Popen to get streaming output
+            self.process = subprocess.Popen(
                 command, 
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.PIPE,
@@ -277,36 +271,30 @@ class MyEverythingApp:
                 bufsize=1
             )
             
-            # 2. Set the shared variable for the main thread (cancellation)
-            self.process = p 
-            
-            # 3. Stream stdout line by line and put into queue
-            if p.stdout:
-                for line in p.stdout:
-                    # Use the local 'p' for polling
-                    if p.poll() is not None and not line.strip(): 
+            # Stream stdout line by line and put into queue
+            if self.process.stdout:
+                for line in self.process.stdout:
+                    if self.process.poll() is not None and not line.strip(): # Check if process terminated early
                         break
                     self.output_queue.put(('result', line.strip()))
 
-            # 4. Wait for process to finish
-            p.wait()
+            # Wait for process to finish
+            self.process.wait()
 
-            # 5. Get stderr
-            stderr_output = p.stderr.read() if p.stderr else ""
+            # Put stderr into queue only if results were not processed
+            stderr_output = self.process.stderr.read() if self.process.stderr else ""
             if stderr_output:
                 self.output_queue.put(('error_output', stderr_output))
                 
-            # 6. Signal the end of the search
-            self.output_queue.put(('complete', p.returncode))
+            # Signal the end of the search
+            self.output_queue.put(('complete', self.process.returncode))
 
         except Exception as e:
             # Signal a hard error in the worker thread
             self.output_queue.put(('hard_error', f"Subprocess execution failed: {e}"))
         finally:
-            # IMPORTANT: Only clear the shared reference if it is the one we started.
-            # This prevents a slow thread from overwriting a new search's process reference.
-            if self.process is p:
-                 self.process = None
+            # Ensure process handle is cleared in the thread context
+            pass 
 
     def _process_stream_output(self):
         """Checks the queue for results/errors and updates the GUI."""
@@ -351,7 +339,7 @@ class MyEverythingApp:
         """Cleans up the state and updates the GUI with the final result."""
         
         self._set_running_state(False)
-        self.process = None # This is now less critical due to the change in _execute_search_threaded finally block
+        self.process = None
         self.search_thread = None
 
         count = len(self.results_tree.get_children())
@@ -390,7 +378,7 @@ class MyEverythingApp:
         self.error_output.delete('1.0', tk.END)
         
         if not message:
-            self.error_status_label.config(text="Command Errors (stderr):", foreground='black')
+            self.error_status_label.config(text="Command Errors (stderr):", foreground='red')
             self.error_output.config(state='disabled')
             return
 
