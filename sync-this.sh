@@ -79,8 +79,8 @@ fi
 
 # PULL: Fetch and merge remote changes
 echo ""
-echo "--- Running git pull to merge remote changes ---"
-git pull origin "$CURRENT_BRANCH"
+echo "--- Running git pull to rebase remote changes ---"
+git pull --rebase origin "$CURRENT_BRANCH"
 
 # PUSH: Send local changes to the remote branch
 echo ""
