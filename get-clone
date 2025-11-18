@@ -1,0 +1,15 @@
+#!/bin/bash
+echo
+echo cd ~/Documents/MyWebsiteGIT/
+echo
+echo get link for the CODE on website
+echo
+echo git clone https://github.com/CODE_LINK_HERE
+echo
+echo Examples:
+echo
+echo " ---> git clone https://github.com/dennyrgood/PlaceObjects"
+echo
+echo " ---> git clone --branch copilot/build-visionos-app-apple-vision-pro https://github.com/dennyrgood/PlaceObjects"
+echo
+
