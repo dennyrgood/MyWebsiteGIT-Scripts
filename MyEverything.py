@@ -10,7 +10,7 @@ class MyEverythingApp:
     def __init__(self, master):
         self.master = master
         master.title("MyEverything: macOS Find GUI")
-        master.geometry("1000x750") # Increased height slightly
+        master.geometry("1000x750")
 
         # --- Variables (Base) ---
         self.search_name = tk.StringVar(value="*")
@@ -84,16 +84,34 @@ class MyEverythingApp:
         # 4. Execute Button
         ttk.Button(self.master, text="▶️ Run Find Command", command=self.run_find).pack(pady=5, padx=10, fill="x")
 
-        # --- NEW COMMAND DISPLAY SECTION ---
+        # --- COMMAND & ERROR DISPLAY SECTION ---
         command_frame = ttk.LabelFrame(self.master, text="Command Status")
         command_frame.pack(padx=10, pady=5, fill="x")
         
+        # Command Status Label (Running/Ran)
         self.command_status_label = ttk.Label(command_frame, text="Ready.")
         self.command_status_label.pack(padx=5, pady=2, anchor="w")
 
         # Command Text Box (Read-only Entry)
         self.command_output = ttk.Entry(command_frame, state='readonly', font=('Courier', 10))
         self.command_output.pack(padx=5, pady=(0, 5), fill="x")
+
+        # Error Status Label
+        self.error_status_label = ttk.Label(command_frame, text="Command Errors (stderr):", foreground='red')
+        self.error_status_label.pack(padx=5, pady=(5, 0), anchor="w")
+        
+        # Error Text Box (Scrollable, Read-only)
+        error_text_frame = ttk.Frame(command_frame)
+        error_text_frame.pack(padx=5, pady=(0, 5), fill="x")
+        
+        # FIX: Explicitly set foreground to black for contrast
+        self.error_output = tk.Text(error_text_frame, height=4, state='disabled', wrap='word', font=('Courier', 10), background='#FFEDED', foreground='black') 
+        
+        error_scrollbar = ttk.Scrollbar(error_text_frame, command=self.error_output.yview)
+        error_scrollbar.pack(side="right", fill="y")
+        self.error_output.config(yscrollcommand=error_scrollbar.set)
+        
+        self.error_output.pack(side="left", fill="x", expand=True)
         # ------------------------------------
 
         # 5. Results Area
@@ -181,20 +199,24 @@ class MyEverythingApp:
         self.file_data = {}
         self.status_label.config(text="Searching...", foreground='black')
 
+        # Clear error output box at the start
+        self.error_output.config(state='normal')
+        self.error_output.delete('1.0', tk.END)
+        self.error_output.config(state='disabled')
+        self.error_status_label.config(text="Command Errors (stderr):", foreground='red') # Reset label
+
         try:
             find_command = self._build_find_command()
-            # Quote arguments for safe display
             quoted_command = ' '.join(shlex.quote(arg) for arg in find_command)
 
-            # --- 1. SET RUNNING STATUS AND DISPLAY COMMAND ---
+            # 1. SET RUNNING STATUS AND DISPLAY COMMAND
             self.command_status_label.config(text="Running command:")
-            # Need to enable editing to change content, then disable
+            
             self.command_output.config(state='normal')
             self.command_output.delete(0, tk.END)
             self.command_output.insert(0, quoted_command)
             self.command_output.config(state='readonly')
-            self.master.update() # Force GUI update to show the command before the long search starts
-            # ------------------------------------------------
+            self.master.update() 
 
             process = subprocess.run(
                 find_command, 
@@ -204,9 +226,8 @@ class MyEverythingApp:
                 timeout=300
             )
 
-            # --- 2. UPDATE TO RAN STATUS ---
+            # 2. UPDATE TO RAN STATUS
             self.command_status_label.config(text="Ran command:")
-            # -------------------------------
 
             results = process.stdout.splitlines()
             count = 0
@@ -253,13 +274,31 @@ class MyEverythingApp:
                 count += 1
 
             if process.stderr:
-                self.status_label.config(text=f"Completed with {count} results. NOTE: Errors occurred (see terminal).", foreground='red')
-                print(f"--- FIND ERRORS ---\n{process.stderr}") 
+                # Display error in error box
+                self.error_output.config(state='normal')
+                self.error_output.insert(tk.END, process.stderr)
+                self.error_output.see('1.0') 
+                self.error_output.config(state='disabled')
+                
+                self.master.update_idletasks() 
+                
+                self.error_status_label.config(text="Command Errors (stderr) - FOUND:", foreground='red')
+                self.status_label.config(text=f"Completed with {count} results. NOTE: Errors occurred (see error box).", foreground='red')
             else:
                 self.status_label.config(text=f"Search complete. Found {count} results.", foreground='green')
 
         except Exception as e:
-            self.command_status_label.config(text="Ran command (Error):") # Update status even on general error
+            self.command_status_label.config(text="Ran command (Error):")
+            
+            # Display Python error in error box
+            self.error_output.config(state='normal')
+            self.error_output.insert(tk.END, f"An unexpected Python error occurred:\n{e}")
+            self.error_output.see('1.0') 
+            self.error_output.config(state='disabled')
+            
+            self.master.update_idletasks()
+
+            self.error_status_label.config(text="Command Errors (Python Exception) - FOUND:", foreground='red')
             self.status_label.config(text=f"An unexpected error occurred: {e}", foreground='red')
 
     def _human_readable_size(self, size_bytes):
