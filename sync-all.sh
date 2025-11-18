@@ -6,7 +6,7 @@
 # =========================================================================
 
 # --- CONFIGURATION ---
-USE_REBASE=false      # Set to true to use rebase instead of merge
+USE_REBASE=true       # Set to true to use rebase instead of merge
 VERIFY_COMMITS=true   # Set to false to skip pre-commit hooks
 SHOW_COMMANDS=true    # Set to false to hide git command traces
 DRY_RUN=false         # Set to true to see what would happen without doing it
