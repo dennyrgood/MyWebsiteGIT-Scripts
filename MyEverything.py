@@ -10,7 +10,7 @@ class MyEverythingApp:
     def __init__(self, master):
         self.master = master
         master.title("MyEverything: macOS Find GUI")
-        master.geometry("1000x700")
+        master.geometry("1000x750") # Increased height slightly
 
         # --- Variables (Base) ---
         self.search_name = tk.StringVar(value="*")
@@ -60,10 +60,10 @@ class MyEverythingApp:
         
         # Size Filter (UPDATED DESCRIPTION)
         size_desc = "Size (-size): +/-N[cKMG] (e.g., +10M = >10MB, -500k = <500KB)"
-        ttk.Label(options_frame, text=size_desc).grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        ttk.Entry(options_frame, textvariable=self.size_val, width=15).grid(row=1, column=1, padx=5, pady=5, sticky="w")
+        ttk.Label(options_frame, text=size_desc).grid(row=1, column=0, columnspan=4, padx=5, pady=5, sticky="w")
+        ttk.Entry(options_frame, textvariable=self.size_val, width=15).grid(row=1, column=4, padx=5, pady=5, sticky="w")
         
-        options_frame.grid_columnconfigure(3, weight=1)
+        options_frame.grid_columnconfigure(4, weight=1)
 
         # 3. Time Filter Frame (UPDATED DESCRIPTION and structure)
         time_desc = "Days: (+N = >N full days ago; -N = <N full days ago)"
@@ -84,13 +84,25 @@ class MyEverythingApp:
         # 4. Execute Button
         ttk.Button(self.master, text="▶️ Run Find Command", command=self.run_find).pack(pady=5, padx=10, fill="x")
 
+        # --- NEW COMMAND DISPLAY SECTION ---
+        command_frame = ttk.LabelFrame(self.master, text="Command Status")
+        command_frame.pack(padx=10, pady=5, fill="x")
+        
+        self.command_status_label = ttk.Label(command_frame, text="Ready.")
+        self.command_status_label.pack(padx=5, pady=2, anchor="w")
+
+        # Command Text Box (Read-only Entry)
+        self.command_output = ttk.Entry(command_frame, state='readonly', font=('Courier', 10))
+        self.command_output.pack(padx=5, pady=(0, 5), fill="x")
+        # ------------------------------------
+
         # 5. Results Area
         ttk.Label(self.master, text="Results (Click headers to sort):").pack(padx=10, pady=2, anchor="w")
         
         results_frame = ttk.Frame(self.master)
         results_frame.pack(padx=10, pady=5, fill="both", expand=True)
 
-        # Treeview setup for columns (ADDED Accessed and Changed)
+        # Treeview setup for columns
         self.results_tree = ttk.Treeview(results_frame, 
                                          columns=("Folder", "Size", "Modified", "Accessed", "Changed"), 
                                          show="tree headings") 
@@ -99,17 +111,17 @@ class MyEverythingApp:
         self.results_tree.heading("#0", text="File Name", command=lambda: self._sort_column(self.results_tree, "#0", False))
         self.results_tree.heading("Folder", text="Folder", command=lambda: self._sort_column(self.results_tree, "Folder", False))
         self.results_tree.heading("Size", text="Size", command=lambda: self._sort_column(self.results_tree, "Size", False))
-        self.results_tree.heading("Modified", text="Modified Date", command=lambda: self._sort_column(self.results_tree, "Modified", False)) # Renamed 'Date' to 'Modified'
-        self.results_tree.heading("Accessed", text="Accessed Date", command=lambda: self._sort_column(self.results_tree, "Accessed", False)) # NEW
-        self.results_tree.heading("Changed", text="Changed Date", command=lambda: self._sort_column(self.results_tree, "Changed", False))   # NEW
+        self.results_tree.heading("Modified", text="Modified Date", command=lambda: self._sort_column(self.results_tree, "Modified", False))
+        self.results_tree.heading("Accessed", text="Accessed Date", command=lambda: self._sort_column(self.results_tree, "Accessed", False))
+        self.results_tree.heading("Changed", text="Changed Date", command=lambda: self._sort_column(self.results_tree, "Changed", False))
         
         # Column widths
         self.results_tree.column("#0", width=200, stretch=tk.YES, anchor='w') 
         self.results_tree.column("Folder", width=250, stretch=tk.YES, anchor='w')
         self.results_tree.column("Size", width=80, stretch=tk.NO, anchor='e')
         self.results_tree.column("Modified", width=120, stretch=tk.NO, anchor='e')
-        self.results_tree.column("Accessed", width=120, stretch=tk.NO, anchor='e') # NEW
-        self.results_tree.column("Changed", width=120, stretch=tk.NO, anchor='e')   # NEW
+        self.results_tree.column("Accessed", width=120, stretch=tk.NO, anchor='e')
+        self.results_tree.column("Changed", width=120, stretch=tk.NO, anchor='e')
 
         # Scrollbars
         v_scrollbar = ttk.Scrollbar(results_frame, orient="vertical", command=self.results_tree.yview)
@@ -171,8 +183,19 @@ class MyEverythingApp:
 
         try:
             find_command = self._build_find_command()
-            self.status_label.config(text=f"Running: {' '.join(shlex.quote(arg) for arg in find_command)}")
-            
+            # Quote arguments for safe display
+            quoted_command = ' '.join(shlex.quote(arg) for arg in find_command)
+
+            # --- 1. SET RUNNING STATUS AND DISPLAY COMMAND ---
+            self.command_status_label.config(text="Running command:")
+            # Need to enable editing to change content, then disable
+            self.command_output.config(state='normal')
+            self.command_output.delete(0, tk.END)
+            self.command_output.insert(0, quoted_command)
+            self.command_output.config(state='readonly')
+            self.master.update() # Force GUI update to show the command before the long search starts
+            # ------------------------------------------------
+
             process = subprocess.run(
                 find_command, 
                 capture_output=True, 
@@ -180,6 +203,10 @@ class MyEverythingApp:
                 check=False,
                 timeout=300
             )
+
+            # --- 2. UPDATE TO RAN STATUS ---
+            self.command_status_label.config(text="Ran command:")
+            # -------------------------------
 
             results = process.stdout.splitlines()
             count = 0
@@ -192,23 +219,23 @@ class MyEverythingApp:
                 
                 size_bytes = 0
                 mtime_timestamp = 0
-                atime_timestamp = 0 # NEW
-                ctime_timestamp = 0 # NEW
+                atime_timestamp = 0
+                ctime_timestamp = 0
                 
                 try:
                     stat_info = os.stat(path)
                     size_bytes = stat_info.st_size
                     mtime_timestamp = stat_info.st_mtime
-                    atime_timestamp = stat_info.st_atime # NEW
-                    ctime_timestamp = stat_info.st_ctime # NEW
+                    atime_timestamp = stat_info.st_atime
+                    ctime_timestamp = stat_info.st_ctime
                 except Exception:
                     pass
 
                 # Convert size and timestamp for display
                 human_size = self._human_readable_size(size_bytes)
                 mtime_date = datetime.datetime.fromtimestamp(mtime_timestamp).strftime('%Y-%m-%d %H:%M') if mtime_timestamp else "N/A"
-                atime_date = datetime.datetime.fromtimestamp(atime_timestamp).strftime('%Y-%m-%d %H:%M') if atime_timestamp else "N/A" # NEW
-                ctime_date = datetime.datetime.fromtimestamp(ctime_timestamp).strftime('%Y-%m-%d %H:%M') if ctime_timestamp else "N/A" # NEW
+                atime_date = datetime.datetime.fromtimestamp(atime_timestamp).strftime('%Y-%m-%d %H:%M') if atime_timestamp else "N/A"
+                ctime_date = datetime.datetime.fromtimestamp(ctime_timestamp).strftime('%Y-%m-%d %H:%M') if ctime_timestamp else "N/A"
                 
                 # Insert into Treeview: text=name, values=(Folder, Size, Modified, Accessed, Changed)
                 item_id = self.results_tree.insert("", tk.END, text=name, values=(folder, human_size, mtime_date, atime_date, ctime_date))
@@ -219,8 +246,8 @@ class MyEverythingApp:
                     "Folder": folder, 
                     "Size_Bytes": size_bytes, 
                     "Modified_Timestamp": mtime_timestamp,
-                    "Accessed_Timestamp": atime_timestamp, # NEW
-                    "Changed_Timestamp": ctime_timestamp    # NEW
+                    "Accessed_Timestamp": atime_timestamp,
+                    "Changed_Timestamp": ctime_timestamp
                 }
                 
                 count += 1
@@ -232,6 +259,7 @@ class MyEverythingApp:
                 self.status_label.config(text=f"Search complete. Found {count} results.", foreground='green')
 
         except Exception as e:
+            self.command_status_label.config(text="Ran command (Error):") # Update status even on general error
             self.status_label.config(text=f"An unexpected error occurred: {e}", foreground='red')
 
     def _human_readable_size(self, size_bytes):
@@ -248,32 +276,23 @@ class MyEverythingApp:
     def _sort_column(self, tree, col, reverse):
         """Sorts the Treeview column by the relevant stored data."""
         if col == "#0":
-            # Sort by File Name (text)
             l = [(tree.item(k, 'text').lower(), k) for k in tree.get_children('')]
         elif col == "Size":
-            # Sort by raw size in bytes (numeric)
             l = [(self.file_data[k]["Size_Bytes"], k) for k in tree.get_children('')]
         elif col == "Modified":
-            # Sort by raw mtime timestamp (numeric)
             l = [(self.file_data[k]["Modified_Timestamp"], k) for k in tree.get_children('')]
-        elif col == "Accessed": # NEW
-            # Sort by raw atime timestamp (numeric)
+        elif col == "Accessed":
             l = [(self.file_data[k]["Accessed_Timestamp"], k) for k in tree.get_children('')]
-        elif col == "Changed": # NEW
-            # Sort by raw ctime timestamp (numeric)
+        elif col == "Changed":
             l = [(self.file_data[k]["Changed_Timestamp"], k) for k in tree.get_children('')]
         else:
-            # Sort by Folder (text)
             l = [(tree.set(k, col).lower(), k) for k in tree.get_children('')]
 
-        # Apply the sort order
         l.sort(reverse=reverse)
 
-        # Rearrange items in the Treeview
         for index, (val, k) in enumerate(l):
             tree.move(k, '', index)
 
-        # Reverse sort next time
         tree.heading(col, command=lambda: self._sort_column(tree, col, not reverse))
 
 
