@@ -5,7 +5,7 @@ import subprocess
 import shlex
 import os
 import datetime 
-import sys # Import for better error logging
+import sys 
 
 class MyEverythingApp:
     
@@ -23,7 +23,6 @@ class MyEverythingApp:
     }
     
     # Maps GUI variables to their corresponding 'find' command flags.
-    # The case-sensitive name filter is handled separately below.
     FIND_FILTERS = [
         ("file_type", "-type"),
         ("size_val", "-size"),
@@ -152,7 +151,7 @@ class MyEverythingApp:
         column_ids = list(self.COLUMN_SETUP.keys())[1:] # Skip "#0"
         self.results_tree = ttk.Treeview(results_frame, columns=column_ids, show="tree headings") 
         
-        # Iterate over COLUMN_SETUP to configure columns and headings (Leaner setup)
+        # Iterate over COLUMN_SETUP to configure columns and headings
         for col_id, config in self.COLUMN_SETUP.items():
             sort_command = lambda c=col_id: self._sort_column(self.results_tree, c, False)
             self.results_tree.heading(col_id, text=config["text"], command=sort_command)
@@ -175,6 +174,9 @@ class MyEverythingApp:
         h_scrollbar.pack(side="bottom", fill="x")
         self.results_tree.pack(fill="both", expand=True)
         
+        # FEATURE: Bind double-click to open the folder in Finder
+        self.results_tree.bind('<Double-1>', self._open_folder_in_finder)
+        
         # Status Label
         self.status_label = ttk.Label(self.master, text="Ready.", relief=tk.SUNKEN, anchor="w")
         self.status_label.pack(fill="x", padx=10, pady=(0, 5))
@@ -196,6 +198,13 @@ class MyEverythingApp:
         """Helper to insert and display errors in the dedicated error box."""
         self.error_output.config(state='normal')
         self.error_output.delete('1.0', tk.END)
+        
+        # If message is empty, we just clear the box and reset the label, don't update status
+        if not message:
+            self.error_status_label.config(text="Command Errors (stderr):", foreground='red')
+            self.error_output.config(state='disabled')
+            return
+
         self.error_output.insert(tk.END, message)
         self.error_output.see('1.0') # Scrolls to the top
         self.error_output.config(state='disabled')
@@ -225,9 +234,39 @@ class MyEverythingApp:
             if var_instance and var_instance.get().strip():
                 command.extend([flag, var_instance.get().strip()])
         
+        # The macOS 'find' command implicitly prints unless an action is specified.
+        # We explicitly add -print to ensure consistent behavior across most environments.
         command.append("-print")
         
         return command
+
+    def _open_folder_in_finder(self, event):
+        """
+        FEATURE: Executes 'open -R <path>' to reveal the selected file or directory in macOS Finder.
+        This method is bound to the double-click event on the results tree.
+        """
+        
+        # Identify the selected item
+        item_id = self.results_tree.focus()
+        if not item_id:
+            return
+
+        # Retrieve the necessary data from internal storage
+        data = self.file_data.get(item_id)
+        if not data:
+            return
+
+        # Construct the full path
+        full_path = os.path.join(data.get("Folder"), data.get("Name"))
+        
+        # Execute the 'open -R' command (macOS native command)
+        try:
+            # -R flag reveals the file/folder in Finder, highlighting the item.
+            subprocess.run(['open', '-R', full_path], check=False)
+        except Exception as e:
+            # Log this error specifically to console or a debug log, as it's not a 'find' error
+            print(f"Error opening item in Finder: {e}")
+
 
     def run_find(self):
         """Executes the constructed find command and displays output."""
@@ -249,7 +288,6 @@ class MyEverythingApp:
             self.command_output.config(state='readonly')
             self.master.update() 
 
-            # Use os.fsdecode for robust path handling across OSes (Python 3.6+)
             process = subprocess.run(
                 find_command, 
                 capture_output=True, 
@@ -312,6 +350,9 @@ class MyEverythingApp:
             if process.stderr:
                 self._log_error(process.stderr)
                 self._update_status(f"Completed with {count} results. NOTE: Errors occurred (see error box).", 'red')
+            elif count == 0:
+                # FEATURE: No Results Found
+                self._update_status("Search complete. NO RESULTS FOUND.", 'orange') 
             else:
                 self._update_status(f"Search complete. Found {count} results.", 'green')
 
@@ -333,7 +374,7 @@ class MyEverythingApp:
         
     def _sort_column(self, tree, col_id, reverse):
         """
-        Sorts the Treeview column.
+        Sorts the Treeview column using internal raw data keys.
         (LEANER LOGIC: Looks up data key from COLUMN_SETUP instead of using a long if/elif chain.)
         """
         
@@ -344,7 +385,7 @@ class MyEverythingApp:
             # Numeric/Timestamp sort: use the raw data stored in self.file_data
             l = [(self.file_data[k][data_key], k) for k in tree.get_children('')]
         else:
-            # String sort (Name/Folder): use the data stored directly in the Treeview item (or stored Name/Folder)
+            # String sort (Name/Folder): use the data stored in self.file_data
             if col_id == "#0":
                 l = [(self.file_data[k]["Name"].lower(), k) for k in tree.get_children('')]
             else:
