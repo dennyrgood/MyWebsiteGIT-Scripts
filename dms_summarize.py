@@ -22,7 +22,7 @@ def load_config() -> dict:
     if not config_path.exists():
         return {
             "ollama_model": "qwen2.5-coder:1.5b",
-            "ollama_host": "http://localhost:11434",
+            "ollama_host": "http://ollama.ldmathes.cc:11434",
             "summary_max_words": 50,
             "temperature": 0.3
         }
@@ -54,7 +54,30 @@ def check_ollama(host: str, model: str) -> bool:
         return False
 
 def read_file_content(file_path: Path, max_chars: int = 4000) -> str:
-    """Read file content, truncate if too large"""
+    """
+    Read content. If file is binary (image/docx), 
+    look for the converted text file in md_outputs/ 
+    """
+    suffix = file_path.suffix.lower()
+    binary_exts = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.docx', '.doc', '.pdf'}
+    
+    # Check if we need to redirect to the converted text file
+    if suffix in binary_exts:
+        # Logic from your image_to_text script: 
+        # Doc/image.png -> Doc/md_outputs/image.png.txt
+        converted_path = file_path.parent / "md_outputs" / (file_path.name + ".txt")
+        
+        if converted_path.exists():
+            try:
+                # Read the converted text instead of the binary
+                content = converted_path.read_text(encoding='utf-8', errors='replace')
+                return f"[Content extracted from {converted_path.name}]:\n\n{content}"
+            except Exception as e:
+                return f"[Error reading converted text file: {e}]"
+        else:
+            return f"[Binary file ({suffix}). No converted text found in md_outputs/]"
+
+    # Standard reading for non-binary files
     try:
         content = file_path.read_text(encoding='utf-8', errors='replace')
         if len(content) > max_chars:
@@ -69,35 +92,33 @@ def generate_summary_and_category(
     existing_categories: list[str],
     config: dict
 ) -> dict:
-    """Call Ollama to generate summary and suggest category"""
-    
+    """Call Ollama to generate summary and suggest category (with Regex Rescue)"""
+    import re # Import re for the rescue mission
+
     file_path = Path(file_info['abs_path'])
     file_name = file_path.name
-    file_ext = file_info['ext']
-    
-    # Read content
-    content = read_file_content(file_path, max_chars=4000)
-    
+
+    # Read content (using the binary-safe reader you hopefully added)
+    content = read_file_content(file_path)
+
     # Build prompt
     categories_str = ", ".join(existing_categories)
-    
-    prompt = f"""Analyze this document and provide:
-1. A brief technical summary (max 50 words)
-2. A suggested category from this list: {categories_str}
-   (or suggest a new category if none fit)
 
+    prompt = f"""Analyze this document.
 Filename: {file_name}
-File type: {file_ext}
-
-Document content:
+Content Snippet:
 {content}
 
-Respond ONLY with valid JSON in this format:
+Instructions:
+1. Write a 1-sentence Technical Summary.
+2. Pick a Category from: {categories_str}
+
+Format your response as JSON:
 {{
   "summary": "your summary here",
-  "category": "suggested category name",
-  "is_new_category": false
-}}"""
+  "category": "category name"
+}}
+"""
 
     # Call Ollama
     try:
@@ -107,62 +128,59 @@ Respond ONLY with valid JSON in this format:
                 "model": config['ollama_model'],
                 "prompt": prompt,
                 "stream": False,
-                "options": {
-                    "temperature": config.get('temperature', 0.3)
-                }
+                "options": {"temperature": 0.1}
             },
             timeout=120
         )
         
         if resp.status_code != 200:
-            return {
-                "summary": f"[AI generation failed: {resp.status_code}]",
-                "category": existing_categories[0] if existing_categories else "Uncategorized",
-                "is_new_category": False,
-                "error": True
-            }
+            return {"summary": f"[Error {resp.status_code}]", "category": "Uncategorized", "is_new_category": False, "error": True}
         
         result = resp.json()
-        response_text = result.get('response', '')
+        response_text = result.get('response', '').strip()
         
-        # Try to parse JSON from response
-        # Sometimes models wrap JSON in markdown code blocks
-        json_text = response_text
-        if '```json' in response_text:
-            json_text = response_text.split('```json')[1].split('```')[0].strip()
-        elif '```' in response_text:
-            json_text = response_text.split('```')[1].split('```')[0].strip()
-        
-        parsed = json.loads(json_text)
-        
-        # Validate category
-        suggested_cat = parsed.get('category', 'Uncategorized')
-        is_new = suggested_cat not in existing_categories
+        # --- STRATEGY 1: Try standard JSON ---
+        try:
+            # Clean markdown code blocks if present
+            clean_json = response_text.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(clean_json)
+            return {
+                "summary": parsed.get('summary', '').strip(),
+                "category": parsed.get('category', 'Uncategorized'),
+                "is_new_category": parsed.get('category') not in existing_categories,
+                "error": False
+            }
+        except json.JSONDecodeError:
+            pass # JSON failed, move to Strategy 2
+
+        # --- STRATEGY 2: The "Regex Rescue" (For chatty models) ---
+        # 1. Find the Summary
+        # Looks for "Summary: text" or "### Summary\n text"
+        summary_match = re.search(r'(?:Summary|### Technical Summary)[:\s\n]+(.*?)(?:\n\n|\n###|Category:|$)', response_text, re.IGNORECASE | re.DOTALL)
+        extracted_summary = summary_match.group(1).strip() if summary_match else response_text[:100].replace('\n', ' ')
+
+        # 2. Find the Category
+        # Looks for "Category: name"
+        cat_match = re.search(r'Category[:\s]+([a-zA-Z0-9_\-\s]+)', response_text, re.IGNORECASE)
+        extracted_category = cat_match.group(1).strip() if cat_match else "Uncategorized"
+
+        # Clean up if it grabbed too much
+        if len(extracted_category) > 30: 
+             # If category is huge, it probably failed to match. Default to Uncategorized.
+             extracted_category = "Uncategorized"
+
+        print(f"  (Recovered info from non-JSON response)", file=sys.stderr)
         
         return {
-            "summary": parsed.get('summary', '').strip(),
-            "category": suggested_cat,
-            "is_new_category": is_new,
+            "summary": extracted_summary,
+            "category": extracted_category,
+            "is_new_category": extracted_category not in existing_categories,
             "error": False
         }
         
-    except json.JSONDecodeError as e:
-        print(f"WARNING: Failed to parse AI response as JSON: {e}", file=sys.stderr)
-        print(f"Response was: {response_text[:200]}", file=sys.stderr)
-        return {
-            "summary": "[AI response parsing failed - please enter manually]",
-            "category": existing_categories[0] if existing_categories else "Uncategorized",
-            "is_new_category": False,
-            "error": True
-        }
     except Exception as e:
-        print(f"WARNING: AI generation failed: {e}", file=sys.stderr)
-        return {
-            "summary": "[AI generation error - please enter manually]",
-            "category": existing_categories[0] if existing_categories else "Uncategorized",
-            "is_new_category": False,
-            "error": True
-        }
+        print(f"WARNING: AI failed on {file_name}: {e}", file=sys.stderr)
+        return {"summary": "[AI Error]", "category": "Uncategorized", "is_new_category": False, "error": True}
 
 def extract_categories_from_state(doc_dir: Path) -> list[str]:
     """Extract categories from DMS_STATE in index.html"""

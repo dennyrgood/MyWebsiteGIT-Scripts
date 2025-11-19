@@ -1,5 +1,5 @@
 {
-  "ollama_model": "phi3:mini",
+  "ollama_model": "qwen2.5-coder:1.5b",
   "ollama_host": "https://ollama.ldmathes.cc",
   "summary_max_words": 50,
   "temperature": 0.3,
