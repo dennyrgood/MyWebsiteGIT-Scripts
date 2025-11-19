@@ -42,39 +42,91 @@ def extract_text_from_image(image_path: Path) -> str:
         print(f"WARNING: Failed to extract text from {image_path}: {e}", file=sys.stderr)
         return f"[OCR failed: {e}]"
 
+def convert_docx_to_text(docx_path: Path) -> str:
+    """Use pandoc to convert DOCX to plain text"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['pandoc', '-f', 'docx', '-t', 'plain', str(docx_path)],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        else:
+            return f"[Pandoc conversion failed: {result.stderr}]"
+    except FileNotFoundError:
+        return "[Pandoc not found - install with: brew install pandoc]"
+    except Exception as e:
+        return f"[DOCX conversion error: {e}]"
+
 def process_images(doc_dir: Path, md_dir: Path, pending_report: dict) -> int:
-    """Process all images in the pending report"""
+    """Process all images and DOCX files in the pending report"""
     md_dir.mkdir(parents=True, exist_ok=True)
     
     # Get new files from pending report
     new_files = pending_report.get("new_files", [])
     image_exts = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff'}
+    docx_exts = {'.docx', '.doc'}
     
-    image_files = [f for f in new_files if f['ext'] in image_exts]
+    # Check if text versions already exist
+    files_to_process = []
+    for f in new_files:
+        if f['ext'] in image_exts or f['ext'] in docx_exts:
+            # Check if .txt already exists in md_outputs
+            source_name = Path(f['abs_path']).name
+            txt_name = f"{source_name}.txt"
+            txt_path = md_dir / txt_name
+            
+            if txt_path.exists():
+                print(f"Skipping {source_name} - text file already exists: {txt_path}")
+                # Add existing txt to pending report
+                new_files.append({
+                    "path": f"./md_outputs/{txt_name}",
+                    "abs_path": str(txt_path),
+                    "hash": "",
+                    "size": txt_path.stat().st_size,
+                    "ext": ".txt",
+                    "source_file": f['path']
+                })
+            else:
+                files_to_process.append(f)
     
-    if not image_files:
-        print("No new image files to process.")
+    if not files_to_process:
+        print("No new image/DOCX files to process (or text files already exist).")
         return 0
     
-    print(f"Processing {len(image_files)} image file(s)...\n")
+    print(f"Processing {len(files_to_process)} file(s)...\n")
     
     processed = []
-    for img_info in image_files:
-        img_path = Path(img_info['abs_path'])
-        print(f"Processing: {img_path.name}")
+    for file_info in files_to_process:
+        file_path = Path(file_info['abs_path'])
+        print(f"Processing: {file_path.name}")
         
-        # Extract text
-        text = extract_text_from_image(img_path)
+        # Determine processing method
+        if file_info['ext'] in {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff'}:
+            # Extract text via OCR
+            text = extract_text_from_image(file_path)
+            header = f"# {file_path.stem}\n\n"
+            header += f"Source: {file_path.name} (OCR extracted)\n"
+            header += f"Extracted: {datetime.now().isoformat()}\n\n"
+            header += "---\n\n"
+        
+        elif file_info['ext'] in {'.docx', '.doc'}:
+            # Convert DOCX via pandoc
+            text = convert_docx_to_text(file_path)
+            header = f"# {file_path.stem}\n\n"
+            header += f"Source: {file_path.name} (converted from DOCX)\n"
+            header += f"Converted: {datetime.now().isoformat()}\n\n"
+            header += "---\n\n"
+        else:
+            print(f"  Skipping unsupported file type: {file_info['ext']}")
+            continue
         
         # Save to md_outputs/
-        output_name = f"{img_path.name}.txt"
+        output_name = f"{file_path.name}.txt"
         output_path = md_dir / output_name
-        
-        # Add header
-        header = f"# {img_path.stem}\n\n"
-        header += f"Source: {img_path.name} (OCR extracted)\n"
-        header += f"Extracted: {datetime.now().isoformat()}\n\n"
-        header += "---\n\n"
         
         output_path.write_text(header + text, encoding='utf-8')
         print(f"  → Saved to: {output_path}")
@@ -86,7 +138,7 @@ def process_images(doc_dir: Path, md_dir: Path, pending_report: dict) -> int:
             "hash": "",  # Will be computed in next scan
             "size": output_path.stat().st_size,
             "ext": ".txt",
-            "source_image": img_info['path']
+            "source_file": file_info['path']
         }
         processed.append(new_text_file)
     
