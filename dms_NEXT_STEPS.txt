@@ -1,0 +1,30 @@
+cn config for model:
+
+
+  - name: Qwen2.5 Coder (Default - 986mb 10s 4s)
+    provider: ollama
+    model: "qwen2.5-coder:1.5b"
+    apiBase: https://ollama.ldmathes.cc
+    baseUrl: https://ollama.ldmathes.cc
+    contextLength: 32768
+    default: true
+    roles:
+      - chat
+      - edit
+    capabilities:
+      - tool_use
+    requestOptions:
+      timeout: 600000
+      keepAlive: 600000
+
+bootstrap worked
+
+image to text worked
+
+dms scan - still working
+
+Summary/suggestedd cat - integrated is fine
+
+continue with remaining modules
+
+(at some point i want a 'initialize' for a brand new Doc in a different repo)
