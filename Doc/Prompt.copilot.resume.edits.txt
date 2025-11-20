@@ -1,0 +1,38 @@
+  CONTEXT: I've been working on a Document Management System (DMS) for 
+   managing a
+   Doc/ directory in git repos. The system is located at 
+   ~/Documents/MyWebsiteGIT/Scripts and has two active repos:
+
+     - ~/Documents/MyWebsiteGIT/LLM/Doc (main testing repo)
+     - ~/Documents/MyWebsiteGIT/Scripts/Doc (new repo, just initialized)
+
+   KEY FACTS ABOUT THE SYSTEM:
+
+     - All scripts use hardcoded absolute path: Path.home() / 
+   "Documents/MyWebsiteGIT/Scripts"
+     - Main entry point: dms command (interactive menu-driven)
+     - Workflow: scan → image-to-text → summarize → review → apply
+     - AI summaries are truncated to max 50 words
+     - Images: OCR via tesseract, output to md_outputs/*.txt
+     - PDFs: Either AI reads directly (if text-selectable) OR convert via dms 
+   image-to-text (uses tools_pdf_to_md_textonly.py)
+     - State files: .dms_state.json, .dms_scan.json (cleaned after apply), 
+   .dms_pending_*.json
+     - Index rendering: index.html with image viewer (displays images when 
+   clicked)
+     - Category suggestions: AI picks from existing list or suggests new ones
+     - Image/text linking: OCR'd text files linked to original images with 
+   "View Image" button
+
+   SCRIPTS LOCATION:
+
+     - Main wrapper: /Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms
+     - Menu: /Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms_menu.py
+     - Utilities: 
+   /Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms_util/dms_*.py
+     - Config: 
+   /Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms_config.json
+
+   CURRENT STATUS:
+
+     - System is working and ready for daily use

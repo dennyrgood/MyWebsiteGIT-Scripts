@@ -79,9 +79,9 @@ def cmd_scan(args, scripts_dir: Path, config: dict):
     return run_dms_script("dms_util/dms_scan.py", ["--doc", "Doc"], scripts_dir)
 
 def cmd_process_images(args, scripts_dir: Path, config: dict):
-    """Convert images to text descriptions"""
-    print("==> Processing images...")
-    return run_dms_script("dms_util/dms_image_to_text.py", ["--doc", "Doc", "--md", "Doc/md_outputs"], scripts_dir)
+    """Convert images and PDFs to text"""
+    print("==> Processing images and PDFs...")
+    return run_dms_script("dms_util/dms_image_to_text.py", ["--doc", "Doc"], scripts_dir)
 
 def cmd_summarize(args, scripts_dir: Path, config: dict):
     """Generate AI summaries via Ollama"""
