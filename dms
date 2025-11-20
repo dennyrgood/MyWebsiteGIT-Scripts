@@ -17,6 +17,7 @@ Usage (from repo root):
   dms review            # Interactive approval
   dms apply             # Write approved changes to index.html
   dms cleanup           # Remove deleted files from index.html
+  dms orphans           # Remove orphaned entries from DMS_STATE
   dms auto              # Run full workflow (scan → image-to-text → summarize → review → apply)
   dms init              # Create new index.html for a fresh Doc/ directory
   dms status            # Show current state
@@ -115,6 +116,11 @@ def cmd_cleanup(args, scripts_dir: Path, config: dict):
     print("==> Cleaning up deleted files...")
     return run_dms_script("dms_util/dms_cleanup.py", ["--doc", "Doc", "--index", "Doc/index.html"], scripts_dir)
 
+def cmd_orphans(args, scripts_dir: Path, config: dict):
+    """Remove orphaned entries from DMS_STATE"""
+    print("==> Removing orphaned entries...")
+    return run_dms_script("dms_util/dms_delete_orphans.py", ["--index", "Doc/index.html"], scripts_dir)
+
 def cmd_auto(args, scripts_dir: Path, config: dict):
     """Run full workflow"""
     print("==> Running full DMS workflow...\n")
@@ -182,6 +188,9 @@ def main():
     # cleanup
     subparsers.add_parser("cleanup", help="Remove deleted files from index.html")
     
+    # orphans
+    subparsers.add_parser("orphans", help="Remove orphaned entries from DMS_STATE")
+    
     # auto
     subparsers.add_parser("auto", help="Run full workflow (scan → process → summarize → review → apply)")
     
@@ -197,23 +206,22 @@ def main():
         parser.print_help()
         return 0
     
-    # Check we're in a repo root with Doc/
-    doc_dir = Path("Doc")
+    # Check we're in a git repository
+    cwd = Path.cwd()
     
-    # Verify we're at repo root (not in a subdirectory)
-    if doc_dir.exists() or args.command == "init":
-        # We're at repo root - good
-        pass
-    else:
-        # Not at repo root
-        print("ERROR: DMS must be run from the ROOT of a repository", file=sys.stderr)
-        print("       where a Doc/ directory exists or will be created.", file=sys.stderr)
+    # Look for .git in current dir or parent dir (if we're in Doc/)
+    has_git = (cwd / ".git").exists() or (cwd.parent / ".git").exists()
+    
+    if not has_git and args.command != "init":
+        print("ERROR: DMS must be run from a git repository", file=sys.stderr)
+        print("       (or from the Doc/ subdirectory of a git repository)", file=sys.stderr)
         print("", file=sys.stderr)
-        print("Current directory: " + str(Path.cwd()), file=sys.stderr)
+        print("Current directory: " + str(cwd), file=sys.stderr)
         print("", file=sys.stderr)
         print("To use DMS:", file=sys.stderr)
-        print("  1. Navigate to your repository root (where Doc/ is located)", file=sys.stderr)
-        print("  2. Run: dms <command>", file=sys.stderr)
+        print("  1. Navigate to a git repository root", file=sys.stderr)
+        print("  2. Or navigate into the Doc/ directory", file=sys.stderr)
+        print("  3. Run: dms <command>", file=sys.stderr)
         print("", file=sys.stderr)
         print("For a fresh repo, use: dms init", file=sys.stderr)
         return 1
@@ -228,6 +236,7 @@ def main():
         "review": cmd_review,
         "apply": cmd_apply,
         "cleanup": cmd_cleanup,
+        "orphans": cmd_orphans,
         "auto": cmd_auto,
         "init": cmd_init,
         "status": cmd_status

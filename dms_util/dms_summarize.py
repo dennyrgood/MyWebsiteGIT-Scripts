@@ -18,11 +18,12 @@ from datetime import datetime
 
 def load_config() -> dict:
     """Load DMS config"""
-    config_path = Path(__file__).parent / "dms_config.json"
+    # Config is in Scripts root, not in dms_util/
+    config_path = Path(__file__).parent.parent / "dms_config.json"
     if not config_path.exists():
         return {
-            "ollama_model": "qwen2.5-coder:1.5b",
-            "ollama_host": "http://localhost:11434",
+            "ollama_model": "phi3:mini",
+            "ollama_host": "https://ollama.ldmathes.cc",
             "summary_max_words": 50,
             "temperature": 0.3
         }

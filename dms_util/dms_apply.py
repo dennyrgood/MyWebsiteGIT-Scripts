@@ -69,7 +69,8 @@ def update_dms_state(content: str, new_state: dict) -> str:
     
     # Check if a state block already exists
     if state_pattern.search(content):
-        return state_pattern.sub(new_block, content, count=1)
+        # Use lambda to avoid backslash interpretation issues with Unicode in JSON
+        return state_pattern.sub(lambda m: new_block, content, count=1)
     
     # If no state block exists, try to insert it before the closing </main> tag
     if '</main>' in content:
@@ -87,8 +88,9 @@ def find_category_section(content: str, category_name: str) -> Tuple[int, int] |
     Returns: (start_index, end_index) of the <ul> content, or None if not found.
     """
     # Regex to find the <section> with the correct data-category
+    # Make it flexible to handle attributes in any order
     category_pattern = re.compile(
-        rf'<section class="category".*?data-category="{re.escape(category_name)}".*?>',
+        rf'<section\s+class="category"\s+data-category="{re.escape(category_name)}"\s*>',
         re.DOTALL | re.IGNORECASE
     )
     
@@ -99,7 +101,7 @@ def find_category_section(content: str, category_name: str) -> Tuple[int, int] |
     section_start = match_section.end()
     
     # Now find the <ul> inside this section
-    ul_pattern = re.compile(r'<ul class="files">', re.DOTALL)
+    ul_pattern = re.compile(r'<ul\s+class="files"\s*>', re.DOTALL)
     ul_end_pattern = re.compile(r'</ul>', re.DOTALL)
     
     match_ul_start = ul_pattern.search(content, section_start)
@@ -123,10 +125,9 @@ def create_file_entry(summary_info: dict, doc_dir: Path) -> str:
     file_path = summary_info['file']['path']
     # If the path is to a generated text file (in md_outputs), link to the original
     if 'md_outputs' in file_path and file_path.endswith('.txt'):
-        # Original file path is typically file_path.removesuffix('.txt')
-        # We need to strip the Doc/ prefix
-        original_path = Path(file_path.removesuffix('.txt')).relative_to(doc_dir)
-        link_path = str(original_path)
+        # Original file path - strip the .txt extension
+        # Paths are already relative (./md_outputs/...), so just remove .txt
+        link_path = file_path.removesuffix('.txt')
     else:
         # Standard link to the file itself
         link_path = file_path

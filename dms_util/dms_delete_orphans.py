@@ -49,12 +49,14 @@ def delete_orphans(index_path: Path):
             removed += 1
             print(f"  - {path}")
     
-    # Update the DMS_STATE comment in HTML
+    # Update the DMS_STATE comment in HTML (use re.sub with lambda to avoid backslash issues)
     updated = content
     new_state_json = json.dumps(state, indent=2)
-    old_state_block = state_match.group(0)
     new_state_block = f"<!-- DMS_STATE\n{new_state_json}\n-->"
-    updated = updated.replace(old_state_block, new_state_block)
+    
+    # Use regex to replace the old state block safely
+    state_pattern = re.compile(r'<!-- DMS_STATE\n.*?\n-->', re.DOTALL)
+    updated = state_pattern.sub(lambda m: new_state_block, updated, count=1)
     
     # Backup and save
     if removed > 0:
