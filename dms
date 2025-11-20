@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """
-DMS_manager.py - Document Management System Wrapper
+dms - Document Management System Wrapper
 
 Main CLI for managing Doc/ directories across repos.
 Orchestrates scanning, image processing, AI summarization, and index updates.
 
-Usage:
+REQUIREMENTS:
+  - Must be run from the ROOT of a repository (not from subdirectories)
+  - A Doc/ directory must exist in the repository root
+  - The index.html file is stored in Doc/index.html
+
+Usage (from repo root):
   dms scan              # Find new/changed files
-  dms process-images    # Convert images to text
+  dms image-to-text     # Convert images to text
   dms summarize         # Generate AI summaries (dry-run by default)
   dms review            # Interactive approval
   dms apply             # Write approved changes to index.html
-  dms auto              # Run full workflow (scan → process → summarize → review → apply)
+  dms cleanup           # Remove deleted files from index.html
+  dms auto              # Run full workflow (scan → image-to-text → summarize → review → apply)
   dms init              # Create new index.html for a fresh Doc/ directory
   dms status            # Show current state
 """
@@ -38,7 +44,7 @@ def find_scripts_dir() -> Path:
     
     # Try to find via PATH
     import shutil
-    test_script = shutil.which("DMS_scan.py")
+    test_script = shutil.which("dms_scan.py")
     if test_script:
         return Path(test_script).parent
     
@@ -78,31 +84,36 @@ def run_dms_script(script_name: str, args: list[str], scripts_dir: Path) -> int:
 def cmd_scan(args, scripts_dir: Path, config: dict):
     """Scan Doc/ for new or changed files"""
     print("==> Scanning Doc/ directory...")
-    return run_dms_script("DMS_scan.py", ["--doc", "Doc", "--index", "Doc/index.html"], scripts_dir)
+    return run_dms_script("dms_util/dms_scan.py", ["--doc", "Doc", "--index", "Doc/index.html"], scripts_dir)
 
 def cmd_process_images(args, scripts_dir: Path, config: dict):
     """Convert images to text descriptions"""
     print("==> Processing images...")
-    return run_dms_script("DMS_image_to_text.py", ["--doc", "Doc", "--md", "Doc/md_outputs"], scripts_dir)
+    return run_dms_script("dms_util/dms_image_to_text.py", ["--doc", "Doc", "--md", "Doc/md_outputs"], scripts_dir)
 
 def cmd_summarize(args, scripts_dir: Path, config: dict):
     """Generate AI summaries via Ollama"""
     print("==> Generating AI summaries...")
     dry_run = ["--dry-run"] if args.dry_run else []
-    model = ["--model", args.model] if args.model else ["--model", config.get("ollama_model", "qwen2.5-coder:14b")]
-    return run_dms_script("DMS_summarize.py", 
+    model = ["--model", args.model] if args.model else []
+    return run_dms_script("dms_util/dms_summarize.py", 
                          ["--doc", "Doc", "--index", "Doc/index.html"] + dry_run + model, 
                          scripts_dir)
 
 def cmd_review(args, scripts_dir: Path, config: dict):
     """Interactive review of proposed changes"""
     print("==> Starting interactive review...")
-    return run_dms_script("DMS_review.py", ["--index", "Doc/index.html"], scripts_dir)
+    return run_dms_script("dms_util/dms_review.py", ["--index", "Doc/index.html"], scripts_dir)
 
 def cmd_apply(args, scripts_dir: Path, config: dict):
     """Apply approved changes to index.html"""
     print("==> Applying changes to index.html...")
-    return run_dms_script("DMS_apply.py", ["--index", "Doc/index.html"], scripts_dir)
+    return run_dms_script("dms_util/dms_apply.py", ["--index", "Doc/index.html"], scripts_dir)
+
+def cmd_cleanup(args, scripts_dir: Path, config: dict):
+    """Remove deleted files from index.html"""
+    print("==> Cleaning up deleted files...")
+    return run_dms_script("dms_util/dms_cleanup.py", ["--doc", "Doc", "--index", "Doc/index.html"], scripts_dir)
 
 def cmd_auto(args, scripts_dir: Path, config: dict):
     """Run full workflow"""
@@ -136,12 +147,12 @@ def cmd_auto(args, scripts_dir: Path, config: dict):
 def cmd_init(args, scripts_dir: Path, config: dict):
     """Initialize new index.html for a fresh Doc/ directory"""
     print("==> Initializing new Doc/index.html...")
-    return run_dms_script("DMS_init.py", ["--doc", "Doc", "--index", "Doc/index.html"], scripts_dir)
+    return run_dms_script("dms_util/dms_init.py", ["--doc", "Doc", "--index", "Doc/index.html"], scripts_dir)
 
 def cmd_status(args, scripts_dir: Path, config: dict):
     """Show current DMS state"""
     print("==> Checking DMS status...")
-    return run_dms_script("DMS_scan.py", ["--doc", "Doc", "--index", "Doc/index.html", "--status-only"], scripts_dir)
+    return run_dms_script("dms_util/dms_scan.py", ["--doc", "Doc", "--index", "Doc/index.html", "--status-only"], scripts_dir)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -154,8 +165,8 @@ def main():
     # scan
     subparsers.add_parser("scan", help="Scan for new/changed files")
     
-    # process-images
-    subparsers.add_parser("process-images", help="Convert images to text")
+    # image-to-text
+    subparsers.add_parser("image-to-text", help="Convert images to text")
     
     # summarize
     p_sum = subparsers.add_parser("summarize", help="Generate AI summaries")
@@ -167,6 +178,9 @@ def main():
     
     # apply
     subparsers.add_parser("apply", help="Apply approved changes to index.html")
+    
+    # cleanup
+    subparsers.add_parser("cleanup", help="Remove deleted files from index.html")
     
     # auto
     subparsers.add_parser("auto", help="Run full workflow (scan → process → summarize → review → apply)")
@@ -185,9 +199,23 @@ def main():
     
     # Check we're in a repo root with Doc/
     doc_dir = Path("Doc")
-    if not doc_dir.exists() and args.command != "init":
-        print("ERROR: No Doc/ directory found in current directory.", file=sys.stderr)
-        print("Please run from a repository root, or use 'dms init' to create one.", file=sys.stderr)
+    
+    # Verify we're at repo root (not in a subdirectory)
+    if doc_dir.exists() or args.command == "init":
+        # We're at repo root - good
+        pass
+    else:
+        # Not at repo root
+        print("ERROR: DMS must be run from the ROOT of a repository", file=sys.stderr)
+        print("       where a Doc/ directory exists or will be created.", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Current directory: " + str(Path.cwd()), file=sys.stderr)
+        print("", file=sys.stderr)
+        print("To use DMS:", file=sys.stderr)
+        print("  1. Navigate to your repository root (where Doc/ is located)", file=sys.stderr)
+        print("  2. Run: dms <command>", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("For a fresh repo, use: dms init", file=sys.stderr)
         return 1
     
     scripts_dir = find_scripts_dir()
@@ -195,10 +223,11 @@ def main():
     
     commands = {
         "scan": cmd_scan,
-        "process-images": cmd_process_images,
+        "image-to-text": cmd_process_images,
         "summarize": cmd_summarize,
         "review": cmd_review,
         "apply": cmd_apply,
+        "cleanup": cmd_cleanup,
         "auto": cmd_auto,
         "init": cmd_init,
         "status": cmd_status

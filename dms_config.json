@@ -3,5 +3,11 @@
   "ollama_host": "https://ollama.ldmathes.cc",
   "summary_max_words": 50,
   "temperature": 0.3,
-  "enable_vision": false
+  "enable_vision": false,
+  "_comment": "For RTX 3060 upgrade, uncomment below and update ollama_model:",
+  "_rtx3060_models": {
+    "ollama_model_better": "qwen2.5-coder:7b",
+    "ollama_model_fastest": "mistral:7b",
+    "ollama_model_balanced": "neural-chat:7b"
+  }
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DMS_review.py - Interactive review of AI-generated summaries
+dms_review.py - Interactive review of AI-generated summaries
 
 Presents each file summary for approval/editing.
 User can:
@@ -91,7 +91,7 @@ def review_summaries(pending_report: dict) -> dict:
         print()
         
         while True:
-            choice = input("Action [a/e/s/q]: ").strip().lower()
+            choice = input("Action [a/e/s/q] (default=a): ").strip().lower() or 'a'
             
             if choice == 'a':
                 # Approve as-is

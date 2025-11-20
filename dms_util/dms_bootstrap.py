@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-DMS_bootstrap.py - Bootstrap DMS_STATE from existing index.html
+dms_bootstrap.py - Bootstrap DMS_STATE from existing index.html
 
 Parses an existing index.html that was created manually or by old tools,
 computes file hashes for all referenced files, and injects a DMS_STATE
 comment block so the system knows which files are already processed.
 
 Usage:
-  python DMS_bootstrap.py --index Doc/index.html --doc Doc
+  python dms_bootstrap.py --index Doc/index.html --doc Doc
 """
 from __future__ import annotations
 import argparse

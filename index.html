@@ -1,0 +1,1013 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Project Docs Index — Doc/</title>
+  <style>
+    :root{
+      --bg:#0f1720;
+      --panel:#0b1220;
+      --muted:#9aa4b2;
+      --accent:#79c0ff;
+      --accent-2:#7ee787;
+      --card:#0f1726;
+      --glass: rgba(255,255,255,0.03);
+    }
+    html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;}
+    body{display:flex;flex-direction:column;background:linear-gradient(180deg,#071422 0%, #071522 60%);color:#e6eef6}
+    header{padding:18px 20px;border-bottom:1px solid rgba(255,255,255,0.03);display:flex;align-items:center;gap:18px}
+    header h1{font-size:18px;margin:0}
+    header p{margin:0;color:var(--muted);font-size:13px}
+    main{display:flex;flex:1;overflow:hidden}
+    /* left pane */
+    #sidebar{width:420px;max-width:46%;min-width:300px;padding:18px;border-right:1px solid rgba(255,255,255,0.03);overflow:auto;background:linear-gradient(180deg, rgba(255,255,255,0.012), rgba(255,255,255,0.008));}
+    .controls{display:flex;gap:8px;align-items:center;margin-bottom:14px}
+    .search{flex:1;display:flex;align-items:center;background:var(--glass);padding:8px;border-radius:8px}
+    .search input{flex:1;border:0;background:transparent;color:inherit;padding:6px 8px;font-size:14px;outline:none}
+    .search small{color:var(--muted);font-size:12px;margin-left:6px}
+    .category {margin-top:10px}
+    .category h2{margin:6px 0 6px;font-size:13px;color:var(--accent)}
+    ul.files{list-style:none;padding:0;margin:0}
+    li.file{padding:10px;border-radius:8px;margin:6px 0;display:flex;gap:10px;align-items:flex-start;background:linear-gradient(180deg, rgba(255,255,255,0.008), rgba(255,255,255,0.006));cursor:pointer}
+    li.file:hover{box-shadow:0 2px 14px rgba(2,6,23,0.6)}
+    .file .meta{flex:1}
+    .file .title{color:#dff3ff;font-weight:600;font-size:14px;margin-bottom:4px}
+    .file .title a{color:inherit;text-decoration:none}
+    .file .desc{font-size:13px;color:var(--muted);line-height:1.3}
+    .file .tags{font-size:12px;color:var(--muted);margin-top:6px}
+    .file .fmt{font-size:11px;padding:4px 6px;background:rgba(255,255,255,0.02);border-radius:6px;color:var(--muted);margin-left:6px}
+
+    /* right pane viewer */
+    #viewer{flex:1;display:flex;flex-direction:column;min-width:360px}
+    #viewerHeader{padding:14px;border-bottom:1px solid rgba(255,255,255,0.03);display:flex;align-items:center;gap:12px}
+    #viewerHeader h3{margin:0;font-size:15px}
+    #viewerBody{padding:18px;overflow:auto;background:linear-gradient(180deg, rgba(255,255,255,0.006), rgba(255,255,255,0.004))}
+    /* content area */
+    #content{max-width:1000px;margin:0 auto}
+    /* markdown container */
+    #mdViewer{background:rgba(255,255,255,0.01);padding:18px;border-radius:8px}
+    #mdViewer h1,#mdViewer h2,#mdViewer h3{color:#e8faff}
+    pre code{background:#011627;color:#c9dfff;padding:8px;border-radius:6px;display:block;overflow:auto}
+    a.inline-link{color:var(--accent);text-decoration:none}
+    .small-muted{color:var(--muted);font-size:13px}
+
+    /* RAW viewer: preserve CR/LF and indentation for text files */
+    #rawViewer{
+      display:none;
+      background:rgba(255,255,255,0.02);
+      padding:12px;
+      border-radius:8px;
+      color:var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace;
+      white-space: pre-wrap;        /* preserve newlines and wrap long lines */
+      word-break: break-word;
+      line-height:1.45;
+      font-size:13px;
+    }
+
+    /* responsive */
+    @media(max-width:980px){
+      #sidebar{display:block;position:relative;width:100%;max-height:360px;overflow:auto}
+      #viewer{min-height:calc(100vh - 360px)}
+    }
+  </style>
+  <!-- marked.js for markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+<!-- DMS_STATE
+{
+  "processed_files": {
+    "./GROK.Ollama.on.Win11.Ultimate.Perf.Guide.md": {
+      "hash": "sha256:fee677939504bf8219e90c3ae4bd32d06848b35edea79db9faba09b5cbd57ac7",
+      "last_processed": "2025-11-19T10:46:04.748805",
+      "summary_approved": true,
+      "title": "GROK.Ollama.on.Win11.Ultimate.Perf.Guide.md",
+      "description": "Ollama on Windows 11 \u2013 Ultimate Performance Guide for RTX 3060: drivers, CUDA, Ollama settings, quantization, monitoring and model leaderboard."
+    },
+    "./New RTX 3060 Setup - SETTING_UP_REAL_IMAGE_MANIPULATION_LOCAL_SERVER.md": {
+      "hash": "sha256:f606b26297f251eee0a97ded31579e1a58e450add2f1da375610cf1b9db5b761",
+      "last_processed": "2025-11-19T10:46:04.749222",
+      "summary_approved": true,
+      "title": "New RTX 3060 Setup - SETTING_UP_REAL_IMAGE_MANIPULATION_LOCAL_SERVER.md",
+      "description": "ComfyUI + Flux image pipeline step-by-step, ControlNet, workflows (background replace, restoration), and Open WebUI integration."
+    },
+    "./Setting Up Real Image Manipulation on Your Local Server.pdf": {
+      "hash": "sha256:f9ba490eee11c5bd1c08fe604d677712ac46127ff3b4580bf3c0b19641080937",
+      "last_processed": "2025-11-19T10:46:04.750696",
+      "summary_approved": true,
+      "title": "New RTX 3060 Setup - SETTING_UP_REAL_IMAGE_MANIPULATION_LOCAL_SERVER.md",
+      "description": ""
+    },
+    "./Using 1040 until 3060 Gets Here.txt": {
+      "hash": "sha256:5532031a61034cb24173bdc24da086622fb5286ca7ab2def5c0f01f8ac4dce5d",
+      "last_processed": "2025-11-19T10:46:04.751073",
+      "summary_approved": true,
+      "title": "Using 1040 until 3060 Gets Here",
+      "description": "Tactical guidance and default model choices while on CPU / GTX 1040, with suggested timeouts and quick model picks."
+    },
+    "./Claude session - started the whole rabbit trail of hosting my own LLM.md": {
+      "hash": "sha256:983f583038f283e3dfb7118a34e61c5ae272599d00476ca4795c66788f196100",
+      "last_processed": "2025-11-19T10:46:04.751906",
+      "summary_approved": true,
+      "title": "Claude session - started the whole rabbit trail of hosting my own LLM.md",
+      "description": "Experiment notes: commit-message automation approaches, Ollama examples, costs, and a copilot-like script for local usage."
+    },
+    "./Prep for 3060 - in the mean time as well.txt": {
+      "hash": "sha256:ab50fc09893389a733eb1bd2df6f5b3a58c90d3e819bded65cc4c8427c04243f",
+      "last_processed": "2025-11-19T10:46:04.752441",
+      "summary_approved": true,
+      "title": "Prep for 3060 - in the mean time as well",
+      "description": "Preparation checklist and setup notes saved as plain text (converted from DOCX). Treat as a Guide; convert to MD for full searchability."
+    },
+    "./md_outputs/RTX 3060 Setup Guide - Complete AI Coding Workflow.md": {
+      "hash": "sha256:08bd7cd0c263679f9561760c5b27bd0fc33f5cbe3622706df582562b7624b4a4",
+      "last_processed": "2025-11-19T10:46:04.753189",
+      "summary_approved": true,
+      "title": "RTX 3060 Setup Guide - Complete AI Coding Workflow (md)",
+      "description": "Converted from PDF: hardware & software phases, model pulls (qwen2.5-coder:14b, deepseek-coder-v2:16b), Continue config and benchmarks."
+    },
+    "./RTX 3060 Setup Guide - Complete AI Coding Workflow.pdf": {
+      "hash": "sha256:ec57cf0a75712d023f2fefcd7e923a2bb0b3e86c0a81830da3e18f6821aa51e7",
+      "last_processed": "2025-11-19T10:46:04.755420",
+      "summary_approved": true,
+      "title": "RTX 3060 Setup Guide - Complete AI Coding Workflow (md)",
+      "description": ""
+    },
+    "./md_outputs/Setting Up Real Image Manipulation on Your Local Server.md": {
+      "hash": "sha256:ef0819cb504527343672411b32568978450a981b90eec34736746d8bf38b2b09",
+      "last_processed": "2025-11-19T10:46:04.755783",
+      "summary_approved": true,
+      "title": "Setting Up Real Image Manipulation on Your Local Server (md)",
+      "description": "Converted from PDF: ComfyUI + Flux install, models, Manager, workflows and Open WebUI integration."
+    },
+    "./md_outputs/Open WebUI Management Guide.md": {
+      "hash": "sha256:a0dfcaefc4c9ed05feb6ed6dba37666d9dc8184290ec66f3658223afca7c7d89",
+      "last_processed": "2025-11-19T10:46:04.768917",
+      "summary_approved": true,
+      "title": "Open WebUI Management Guide (md)",
+      "description": "Converted from PDF: management commands, service notes, and backup recommendations."
+    },
+    "./Open WebUI Management Guide.pdf": {
+      "hash": "sha256:48b93f0e708f7210ce98270f435ec182060b12a9b2841cfbb0befad0e78b9a48",
+      "last_processed": "2025-11-19T10:46:04.757070",
+      "summary_approved": true,
+      "title": "Open WebUI Management Guide (md)",
+      "description": ""
+    },
+    "./md_outputs/AIChat CLI_ Capabilities and User Guide Summary.md": {
+      "hash": "sha256:60bae954c4cf75aa2481f70a981755a4ee569d2c07843cfbb47e6acc970ec36c",
+      "last_processed": "2025-11-19T10:46:04.757247",
+      "summary_approved": true,
+      "title": "AIChat CLI: Capabilities and User Guide Summary (md)",
+      "description": "Converted from PDF: modes (one-liner, REPL, shell assistant), context (-f), roles (-r), RAG and local API serve mode."
+    },
+    "./AIChat CLI_ Capabilities and User Guide Summary.pdf": {
+      "hash": "sha256:b26eaf339d07393e6acc8a4a8db8fa09b92572a5b9d17e961804efe4e0541a47",
+      "last_processed": "2025-11-19T10:46:04.758420",
+      "summary_approved": true,
+      "title": "AIChat CLI: Capabilities and User Guide Summary (md)",
+      "description": ""
+    },
+    "./Image Generation Options for Open WebUI.pdf": {
+      "hash": "sha256:14bf125afa91e2cf5780e1c8236afaaab6d3a9f521e8b54f513b5691480c4d39",
+      "last_processed": "2025-11-19T10:46:04.759579",
+      "summary_approved": true,
+      "title": "Image Generation Options for Open WebUI",
+      "description": "image gen"
+    },
+    "./md_outputs/Image Generation Options for Open WebUI.md": {
+      "hash": "sha256:e305be48c301af12d53b78a35376805902d294f1e60fc6b3893d5d556fa3db1b",
+      "last_processed": "2025-11-19T10:46:04.759793",
+      "summary_approved": true,
+      "title": "Image Generation Options for Open WebUI",
+      "description": ""
+    },
+    "./Rtx3060 Supplemental Improvements.pdf": {
+      "hash": "sha256:c21729399953589884770d51e0c79a89a217518b45e396bad3b85adf3e5c0b61",
+      "last_processed": "2025-11-19T10:46:04.760708",
+      "summary_approved": true,
+      "title": "Rtx3060 Supplemental Improvements",
+      "description": ""
+    },
+    "./md_outputs/LLM Recommendations for Programming and Development.md": {
+      "hash": "sha256:38275f58a9365a5a3d33d897fedb5387466194dad700069931c7b39602f08086",
+      "last_processed": "2025-11-19T10:46:04.760898",
+      "summary_approved": true,
+      "title": "LLM Recommendations for Programming and Development",
+      "description": ""
+    },
+    "./LLM Recommendations for Programming and Development.pdf": {
+      "hash": "sha256:04d1cdbfcf361d8a06ad8ff45b627ba7cee3ae2ab32299071edab1d921eb4779",
+      "last_processed": "2025-11-19T10:46:04.768018",
+      "summary_approved": true,
+      "title": "LLM Recommendations for Programming and Development",
+      "description": ""
+    },
+    "./md_outputs/Rtx3060 Supplemental Improvements.md": {
+      "hash": "sha256:fbd1b4e98b1ca759f5f8126621a8035236280441b5ad35264daab1f08d162560",
+      "last_processed": "2025-11-19T10:46:04.761662",
+      "summary_approved": true,
+      "title": "Rtx3060 Supplemental Improvements",
+      "description": ""
+    },
+    "./Quantization & Context Tokens \u2014 A One\u2011Page Practical Guide.md": {
+      "hash": "sha256:a66c9cd80237456b86492c9a88daeb69b5cca69ed1da8d02a3541bf44dee092f",
+      "last_processed": "2025-11-19T10:46:04.762051",
+      "summary_approved": true,
+      "title": "Quantization & Context Tokens \u2014 A One\u2011Page Practical Guide.md",
+      "description": "Token heuristics and practical summary of quantization labels (Q4_K_M, Q4_0, BF16, FP8). Good cheat-sheet for offline decisions."
+    },
+    "./Quantization and Context Tokens \u2014 One\u2011Page Guide.html": {
+      "hash": "sha256:b6f2140bb43ed885059a81748b05097450be36fb790ebff28b0b0ccfb9e86173",
+      "last_processed": "2025-11-19T10:46:04.762222",
+      "summary_approved": true,
+      "title": "Quantization and Context Tokens \u2014 One\u2011Page Guide.html",
+      "description": "HTML view of the one-page guide (open in browser for nicely formatted view)."
+    },
+    "./LLM QUICK SELECTION GUIDE.txt": {
+      "hash": "sha256:e9437455ba51a8ba2455fd30484ca832109aa3cde125d611f60643ed6cccad35",
+      "last_processed": "2025-11-19T10:46:04.762464",
+      "summary_approved": true,
+      "title": "LLM QUICK SELECTION GUIDE.txt",
+      "description": "Quick model-selection cheat sheet: what model to use for reasoning, coding, vision, or speed."
+    },
+    "./Ollama Download Commands for Recommended LLMs.pdf": {
+      "hash": "sha256:5ffe3eebb971f1cdeac71f7aced7c341b578280c7c651b8c85dd9beb432a34cb",
+      "last_processed": "2025-11-19T10:46:04.762827",
+      "summary_approved": true,
+      "title": "Ollama Download Commands for Recommended LLMs.pdf",
+      "description": "PDF with quick `ollama pull` commands \u2014 useful to reference when provisioning models."
+    },
+    "./Doc_INDEX_Version6.md": {
+      "hash": "sha256:9d0aee3859fdd0fd162bb6279aff6dc830eb108c1e2208472140b00187a43a23",
+      "last_processed": "2025-11-19T10:46:04.763009",
+      "summary_approved": true,
+      "title": "Doc_INDEX_Version6",
+      "description": "Curated toc"
+    },
+    "./md_outputs/LLM Infrastructure Cheat Sheet (Updated).md": {
+      "hash": "sha256:8b8ac34b44867116200278c22f2cbc9e0076daecd7f5784b7a7d6aa372912418",
+      "last_processed": "2025-11-19T10:46:04.763186",
+      "summary_approved": true,
+      "title": "LLM Infrastructure Cheat Sheet (Updated)",
+      "description": ""
+    },
+    "./LLM Infrastructure Cheat Sheet (Updated).pdf": {
+      "hash": "sha256:14cc6e1554b911c0530ea4a92429de3b5b07289ba5396f1e35973c90f463db62",
+      "last_processed": "2025-11-19T10:46:04.765305",
+      "summary_approved": true,
+      "title": "LLM Infrastructure Cheat Sheet (Updated)",
+      "description": ""
+    },
+    "./LLM Infrastructure Cheat Sheet_old.pdf": {
+      "hash": "sha256:aabfcb7a6ce319541e74320e2f20d7d7588f42c9a2a0077d5d1e64737360b302",
+      "last_processed": "2025-11-19T10:46:04.765125",
+      "summary_approved": true,
+      "title": "LLM Infrastructure Cheat Sheet_old",
+      "description": ""
+    },
+    "./md_outputs/LLM Infrastructure Cheat Sheet_old.md": {
+      "hash": "sha256:44ce1b4175b7322d146307f7963ddd98a963d314c48099cedb56e85132053aeb",
+      "last_processed": "2025-11-19T10:46:04.765528",
+      "summary_approved": true,
+      "title": "LLM Infrastructure Cheat Sheet_old",
+      "description": ""
+    },
+    "./md_outputs/Ollama Download Commands for Recommended LLMs.md": {
+      "hash": "sha256:01bc0e7384befd124ce5128dbcccb12403580909c74792f70bc883d8056ac27c",
+      "last_processed": "2025-11-19T10:46:04.765712",
+      "summary_approved": true,
+      "title": "Ollama Download Commands for Recommended LLMs.pdf",
+      "description": ""
+    },
+    "./Ollama Models as of 2025 11 18.txt": {
+      "hash": "sha256:47c565ec0da3735f4ae389eeafa30f0c5b979bea206858395bde5ca73743e19e",
+      "last_processed": "2025-11-19T10:46:04.766397",
+      "summary_approved": true,
+      "title": "Ollama Models as of 2025 11 18",
+      "description": "Model-by-model essentials, suggested defaults, and quantization notes \u2014 guidance for what to keep and what to pull for the 3060."
+    },
+    "./GROK.recommended.llms.w.RTX.3060.txt": {
+      "hash": "sha256:4a4c72e8b790e80f8209589598b88233ad8826f2bdec09e119d3ccbf61dd6a24",
+      "last_processed": "2025-11-19T10:46:04.766769",
+      "summary_approved": true,
+      "title": "GROK.recommended.llms.w.RTX.3060.txt",
+      "description": "Recommended pulls and priority list for RTX 3060 12GB; includes one-line commands to pull recommended models."
+    },
+    "./GROK.recommended.nano.banana.replacement.txt": {
+      "hash": "sha256:5a59429d95cc4e395c2cd302f87a7429805eeadc9c5ca0fc0a9e2c4485046415",
+      "last_processed": "2025-11-19T10:46:04.766969",
+      "summary_approved": true,
+      "title": "GROK.recommended.nano.banana.replacement.txt",
+      "description": "Image-focused recommendations: ComfyUI + Flux (FP8) and the best local tools for image restoration/editing."
+    },
+    "./ollama-ls.txt": {
+      "hash": "sha256:24d1546eb5afe2b3178364a0953530c204aef43c263bfb2fc391c10424df445b",
+      "last_processed": "2025-11-19T10:46:04.767443",
+      "summary_approved": true,
+      "title": "ollama-ls.txt",
+      "description": "Raw output of `ollama ls` showing installed models and sizes (useful for cleanup planning)."
+    },
+    "./ollama-show-out.txt": {
+      "hash": "sha256:9510eb83c3de99cea575e15b32941c3d61faa4a6aef27cba531f36c992e124eb",
+      "last_processed": "2025-11-19T10:46:04.767613",
+      "summary_approved": true,
+      "title": "ollama-show-out.txt",
+      "description": "Collected `ollama show` output for many models with quantization, context lengths and capabilities listed."
+    },
+    "./ollama website list - LLM.txt": {
+      "hash": "sha256:504c8d30ee9c83e05a248d31c90c503c2f45beffa68ae96be2134a4860c3e25d",
+      "last_processed": "2025-11-19T10:46:04.767931",
+      "summary_approved": true,
+      "title": "ollama website list - LLM.txt",
+      "description": "Catalog of model families, sizes and short descriptions to inform pull decisions."
+    },
+    "./OpenWebUI \u2014 Task Scheduler CLI Reference.txt": {
+      "hash": "sha256:24f2a53111ee0ce270f39810bec12fa4b9329c38f660b93e61cbb58e7126ebae",
+      "last_processed": "2025-11-19T10:46:04.768197",
+      "summary_approved": true,
+      "title": "OpenWebUI \u2014 Task Scheduler CLI Reference.txt",
+      "description": "Run OpenWebUI via Task Scheduler at startup (SYSTEM): run script sample, schtasks commands, and logging/debugging tips."
+    },
+    "./Open WebUI Installation Guide for Windows 11.pdf": {
+      "hash": "sha256:7540c26a3429540e750f2ca96cf6dc2ecb315acab9444ea77ed7e6d4cd1163fd",
+      "last_processed": "2025-11-19T10:46:04.768873",
+      "summary_approved": true,
+      "title": "Open WebUI Installation Guide for Windows 11.pdf",
+      "description": "Installer and service notes; refer to md_outputs/ if converted for management commands."
+    },
+    "./md_outputs/Open WebUI Installation Guide for Windows 11.md": {
+      "hash": "sha256:0141d350d151735e5fdb96d2d8987c2143de1f08ab9dc1e4554bb1acf4ef12b8",
+      "last_processed": "2025-11-19T10:46:04.769131",
+      "summary_approved": true,
+      "title": "Open WebUI Installation Guide for Windows 11.pdf",
+      "description": ""
+    },
+    "./What to Try Next.txt": {
+      "hash": "sha256:394b6abc8707b81d767eb60596197fe551e79650115075914b69bd49a9b6b965",
+      "last_processed": "2025-11-19T10:46:04.769437",
+      "summary_approved": true,
+      "title": "What to Try Next.txt",
+      "description": "Short list of experiments and models to try next using your local setup."
+    },
+    "./a.txt": {
+      "hash": "sha256:c8e985fd58669b089bbe8387ec47c4eaffb71ff13a6fa710118ddcb8a11f4b78",
+      "last_processed": "2025-11-19T10:46:04.769589",
+      "summary_approved": true,
+      "title": "a",
+      "description": "Small file listing `ollama show` commands (binary/encoded text in places)."
+    },
+    "./ollama-show.bat": {
+      "hash": "sha256:4d7cc9928aef5c1f1b9c06f2d68c0c9b6793861aa63c789ae3b68845d1d22c9c",
+      "last_processed": "2025-11-19T10:46:04.769780",
+      "summary_approved": true,
+      "title": "ollama-show.bat",
+      "description": "Windows batch to run a set of `ollama show` commands quickly."
+    },
+    "./index b4 Claude.html": {
+      "hash": "sha256:ee62453aa4217d1602331401ba0f68670827a10045952216d67d0ca2e1e4ae17",
+      "last_processed": "2025-11-19T23:16:56.795297",
+      "summary_approved": true,
+      "title": "index b4 Claude",
+      "description": "This document serves as an index for project documentation with sections on search controls and file viewer functionalities."
+    },
+    "./ollama.help.txt": {
+      "hash": "sha256:b87f997e8a821f4f919028e89404fecfa3c0d251a6ea38d5625eb1e19d852beb",
+      "last_processed": "2025-11-19T23:16:56.795723",
+      "summary_approved": true,
+      "title": "ollama.help",
+      "description": "The document provides instructions and command-line examples for using the Olama model within various contexts such as start, stop, status checks, shutdown procedures, stopping on errors, restarting after crashes, setting up a server with environment variables, starting in interactive mode, running scripts or commands through it, checking its version, downloading source code, and compiling from Git."
+    },
+    "./image descriptions.txt": {
+      "hash": "sha256:1e50efa1034914cf1ca1716e3a49a3ae2b6a947a7c7c92bcbc8ef9544968306d",
+      "last_processed": "2025-11-19T23:16:56.795854",
+      "summary_approved": true,
+      "title": "image descriptions",
+      "description": "The document provides summaries for three images detailing the best open-source coding models and their configurations or usage tips."
+    },
+    "./md_outputs/IMG_4666.jpeg.txt": {
+      "hash": "sha256:ac6d0cff33700975adc6d5e621e4687ba0932ac24b365656bc1e46fa360a43e7",
+      "last_processed": "2025-11-19T23:16:56.796089",
+      "summary_approved": true,
+      "title": "IMG_4666.jpeg",
+      "description": "This document provides instructions for optimizing Ollama's performance and adding models via OpenAI API."
+    },
+    "./md_outputs/Need more info on Tool Use.png.txt": {
+      "hash": "sha256:99bd24d3ce81b595c12f7d660a3cf276738225b6f92ebea142e3a7cdff64fa4e",
+      "last_processed": "2025-11-19T23:16:56.796317",
+      "summary_approved": true,
+      "title": "Need more info on Tool Use.png",
+      "description": "The document seeks additional information on tool use and mentions specific tools needing exact counts."
+    },
+    "./md_outputs/Day of rtx3040 models.png.txt": {
+      "hash": "sha256:f97e2ea32bab67dc9c457da75685283c2828e0bfc9656f05e86a889016f1b351",
+      "last_processed": "2025-11-19T23:16:56.796466",
+      "summary_approved": true,
+      "title": "Day of rtx3040 models.png",
+      "description": "This document provides instructions for setting up and testing RTX3060 models using Ollama on Windows 11."
+    },
+    "./md_outputs/aichat not working.png.txt": {
+      "hash": "sha256:7f8bcad05a68964a2374413125f638e7edacaccde9279bdfa96d8319d7080e6a",
+      "last_processed": "2025-11-19T23:16:56.796724",
+      "summary_approved": true,
+      "title": "aichat not working.png",
+      "description": "The document provides instructions for setting up the AI chatbot 'aichat' using Ollama with specific model configurations and usage commands."
+    },
+    "./md_outputs/IMG_4664.jpeg.txt": {
+      "hash": "sha256:5a7fa32ab92075bd09129245349a4e59fe763a6c221e19c4de6bab1031cd5070",
+      "last_processed": "2025-11-19T23:16:56.796848",
+      "summary_approved": true,
+      "title": "IMG_4664.jpeg",
+      "description": "The document provides instructions for installing and referencing the 'qwen2.5-coder' model using Ollama."
+    },
+    "./md_outputs/IMG_4665.jpeg.txt": {
+      "hash": "sha256:963ad4de771d5c2f38dfaeb95ac9d8316a96afd31182dbeffcf75d11f37ddd59",
+      "last_processed": "2025-11-19T23:16:56.797022",
+      "summary_approved": true,
+      "title": "IMG_4665.jpeg",
+      "description": "The document contains OCR-extracted text from an image discussing AI coding tasks and file management strategies."
+    },
+    "./md_outputs/what is a tool enabled prompt.png.txt": {
+      "hash": "sha256:f757bd6fb462ffbf5995715710ea39d83ed467c2473981cff970d990a9c78643",
+      "last_processed": "2025-11-19T23:16:56.797305",
+      "summary_approved": true,
+      "title": "what is a tool enabled prompt.png",
+      "description": "The document provides quick commands for testing Ollama models and instructions on adjusting settings upon the arrival of an RTX 3CTX."
+    },
+    "./md_outputs/what does local api server mean.png.txt": {
+      "hash": "sha256:2d36c119ddf5592b13b9a38a1078740ac8b5e120e853359b3d9e174616a0da7a",
+      "last_processed": "2025-11-19T23:16:56.797463",
+      "summary_approved": true,
+      "title": "what does local api server mean.png",
+      "description": "This document explains how to start a local HTTP server for OpenAl API using 'aichat' models and redirect existing applications from standard APIs."
+    },
+    "./md_outputs/Prep for 3060 - in the mean time as well.docx.txt": {
+      "hash": "sha256:62352add10f6cff7af11175086ed22524fef33bd15d011d17f4c2dbba2a32dd4",
+      "last_processed": "2025-11-19T23:16:56.797875",
+      "summary_approved": true,
+      "title": "Prep for 3060 - in the mean time as well.docx",
+      "description": "This document details the configuration for using various AI models on different hardware until an RTX 3060 GPU becomes available."
+    },
+    "./md_outputs/DMS Summarization Pipeline Debug Report - Gemini fixing Claude Code.md": {
+      "hash": "sha256:26a3bedaa74c731ae9d8a66a0b792bc86f714fb871583f098b8b2482f9806ac0",
+      "last_processed": "2025-11-19T23:16:56.798005",
+      "summary_approved": true,
+      "title": "DMS Summarization Pipeline Debug Report - Gemini fixing Claude Code",
+      "description": "Debug report details fixes in DMS summarization pipeline for connection stability and model reliability."
+    },
+    "./i.html": {
+      "hash": "sha256:eae492aa49003a225abb5fe5d3b0e52e5e4228b5f4d6d8d894fdc0f033f67761",
+      "last_processed": "2025-11-20T07:48:20.618226",
+      "summary_approved": true,
+      "title": "i",
+      "description": "This document serves as an index for project documentation with sections on setup and usage guides."
+    }
+  },
+  "categories": [
+    "Guides",
+    "Junk",
+    "Models",
+    "QuickRefs",
+    "Scripts",
+    "Workflows"
+  ],
+  "last_scan": "2025-11-20T07:48:20.618243",
+  "bootstrap_version": "1.0"
+}
+-->
+
+  <header>
+    <div style="display:flex;flex-direction:column">
+      <h1>Project Docs Index</h1>
+      <p>Browse Doc/ and Doc/md_outputs/ — click a file name to view it. Markdown is rendered client-side. PDFs open in an embedded viewer.</p>
+    </div>
+  </header>
+
+  <main>
+    <aside id="sidebar" aria-label="Docs list">
+      <div class="controls">
+        <div class="search">
+          <svg width="16" height="16" viewBox="0 0 24 24" style="opacity:.7;margin-right:6px"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l4.25 4.25 1.5-1.5L15.5 14z"></path></svg>
+          <input id="searchInput" placeholder="Search files, descriptions, tags..." />
+          <small id="resultCount"></small>
+        </div>
+        <div style="min-width:86px;text-align:right" class="small-muted">Click a file to preview</div>
+      </div>
+
+      <!-- Categories and files -->
+      <div id="lists">
+        <!-- Guides -->
+        <section class="category" data-category="Guides">
+          <h2>Guides (setup, long-form)</h2>
+          <ul class="files" id="guidesList">
+            <li class="file" data-path="./GROK.Ollama.on.Win11.Ultimate.Perf.Guide.md" data-pdf="./GROK.Ollama.on.Win11.Ultimate.Perf.Guide.md">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">GROK.Ollama.on.Win11.Ultimate.Perf.Guide.md</a></div>
+                <div class="desc">Ollama on Windows 11 – Ultimate Performance Guide for RTX 3060: drivers, CUDA, Ollama settings, quantization, monitoring and model leaderboard.</div>
+                <div class="tags small-muted">file: MD (searchable) &middot; category: Guides</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./New RTX 3060 Setup - SETTING_UP_REAL_IMAGE_MANIPULATION_LOCAL_SERVER.md" data-pdf="./Setting Up Real Image Manipulation on Your Local Server.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">New RTX 3060 Setup - SETTING_UP_REAL_IMAGE_MANIPULATION_LOCAL_SERVER.md</a></div>
+                <div class="desc">ComfyUI + Flux image pipeline step-by-step, ControlNet, workflows (background replace, restoration), and Open WebUI integration.</div>
+                <div class="tags small-muted">MD (readable) · PDF: Setting Up Real Image Manipulation on Your Local Server.pdf</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./Using 1040 until 3060 Gets Here.txt" data-pdf="./Using 1040 until 3060 Gets Here.txt">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Using 1040 until 3060 Gets Here</a></div>
+                <div class="desc">Tactical guidance and default model choices while on CPU / GTX 1040, with suggested timeouts and quick model picks.</div>
+                <div class="tags small-muted">text file · Guides</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./Claude session - started the whole rabbit trail of hosting my own LLM.md" data-pdf="">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Claude session - started the whole rabbit trail of hosting my own LLM.md</a></div>
+                <div class="desc">Experiment notes: commit-message automation approaches, Ollama examples, costs, and a copilot-like script for local usage.</div>
+                <div class="tags small-muted">MD · Guides</div>
+              </div>
+            </li>
+
+<li class="file" data-path="./Prep for 3060 - in the mean time as well.txt" data-pdf="">
+  <div class="meta">
+    <div class="title"><a href="#" class="file-link">Prep for 3060 - in the mean time as well</a></div>
+    <div class="desc">Preparation checklist and setup notes saved as plain text (converted from DOCX). Treat as a Guide; convert to MD for full searchability.</div>
+    <div class="tags small-muted">TXT · Guides</div>
+  </div>
+</li>
+
+            <li class="file" data-path="./md_outputs/RTX 3060 Setup Guide - Complete AI Coding Workflow.md" data-pdf="./RTX 3060 Setup Guide - Complete AI Coding Workflow.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">RTX 3060 Setup Guide - Complete AI Coding Workflow (md)</a></div>
+                <div class="desc">Converted from PDF: hardware & software phases, model pulls (qwen2.5-coder:14b, deepseek-coder-v2:16b), Continue config and benchmarks.</div>
+                <div class="tags small-muted">MD · PDF available</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./md_outputs/Setting Up Real Image Manipulation on Your Local Server.md" data-pdf="./Setting Up Real Image Manipulation on Your Local Server.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Setting Up Real Image Manipulation on Your Local Server (md)</a></div>
+                <div class="desc">Converted from PDF: ComfyUI + Flux install, models, Manager, workflows and Open WebUI integration.</div>
+                <div class="tags small-muted">MD · PDF available</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./md_outputs/Open WebUI Management Guide.md" data-pdf="./Open WebUI Management Guide.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Open WebUI Management Guide (md)</a></div>
+                <div class="desc">Converted management guide: NSSM service commands, webui.db locations, backups and Cloudflare tunnel notes.</div>
+                <div class="tags small-muted">MD · PDF available</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./md_outputs/AIChat CLI_ Capabilities and User Guide Summary.md" data-pdf="./AIChat CLI_ Capabilities and User Guide Summary.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">AIChat CLI: Capabilities and User Guide Summary (md)</a></div>
+                <div class="desc">Converted from PDF: modes (one-liner, REPL, shell assistant), context (-f), roles (-r), RAG and local API serve mode.</div>
+                <div class="tags small-muted">MD · PDF available</div>
+              </div>
+            </li>
+
+          
+            <li class="file" data-path="./Image Generation Options for Open WebUI.pdf" data-pdf="./Image Generation Options for Open WebUI.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Image Generation Options for Open WebUI</a></div>
+                <div class="desc">image gen</div>
+                <div class="tags small-muted">PDF · Guides (setup, long-form)</div>
+              </div>
+            </li>
+<li class="file" data-path="./md_outputs/Image Generation Options for Open WebUI.md" data-pdf="./Image Generation Options for Open WebUI.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Image Generation Options for Open WebUI</a></div>
+                <div class="desc"></div>
+                <div class="tags small-muted">MD · Guides (setup, long-form)</div>
+              </div>
+            </li><li class="file" data-path="./Rtx3060 Supplemental Improvements.pdf" data-pdf="./Rtx3060 Supplemental Improvements.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Rtx3060 Supplemental Improvements</a></div>
+                <div class="desc"></div>
+                <div class="tags small-muted">PDF · Guides (setup, long-form)</div>
+              </div>
+            </li><li class="file" data-path="./md_outputs/LLM Recommendations for Programming and Development.md" data-pdf="./LLM Recommendations for Programming and Development.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">LLM Recommendations for Programming and Development</a></div>
+                <div class="desc"></div>
+                <div class="tags small-muted">MD · Guides (setup, long-form)</div>
+              </div>
+            </li><li class="file" data-path="./md_outputs/Rtx3060 Supplemental Improvements.md" data-pdf="./Rtx3060 Supplemental Improvements.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Rtx3060 Supplemental Improvements</a></div>
+                <div class="desc"></div>
+                <div class="tags small-muted">MD · Guides (setup, long-form)</div>
+              </div>
+            </li></ul>
+        </section>
+
+        <!-- Quick refs -->
+        <section class="category" data-category="QuickRefs">
+          <h2>Quick references / cheat sheets</h2>
+          <ul class="files" id="quickList">
+            <li class="file" data-path="./Quantization & Context Tokens — A One‑Page Practical Guide.md" data-pdf="./Quantization & Context Tokens — A One‑Page Practical Guide.md">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Quantization & Context Tokens — A One‑Page Practical Guide.md</a></div>
+                <div class="desc">Token heuristics and practical summary of quantization labels (Q4_K_M, Q4_0, BF16, FP8). Good cheat-sheet for offline decisions.</div>
+                <div class="tags small-muted">MD · QuickRef</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./Quantization and Context Tokens — One‑Page Guide.html" data-pdf="./Quantization and Context Tokens — One‑Page Guide.html">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Quantization and Context Tokens — One‑Page Guide.html</a></div>
+                <div class="desc">HTML view of the one-page guide (open in browser for nicely formatted view).</div>
+                <div class="tags small-muted">HTML · QuickRef</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./LLM QUICK SELECTION GUIDE.txt" data-pdf="./LLM QUICK SELECTION GUIDE.txt">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">LLM QUICK SELECTION GUIDE.txt</a></div>
+                <div class="desc">Quick model-selection cheat sheet: what model to use for reasoning, coding, vision, or speed.</div>
+                <div class="tags small-muted">TXT · QuickRef</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./Ollama Download Commands for Recommended LLMs.pdf" data-pdf="./Ollama Download Commands for Recommended LLMs.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Ollama Download Commands for Recommended LLMs.pdf</a></div>
+                <div class="desc">PDF with quick `ollama pull` commands — useful to reference when provisioning models.</div>
+                <div class="tags small-muted">PDF · QuickRef</div>
+              </div>
+            </li>
+
+          
+            <li class="file" data-path="./Doc_INDEX_Version6.md" data-pdf="">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Doc_INDEX_Version6</a></div>
+                <div class="desc">Curated toc</div>
+                <div class="tags small-muted">MD · Quick references / cheat sheets</div>
+              </div>
+            </li>
+<li class="file" data-path="./md_outputs/LLM Infrastructure Cheat Sheet (Updated).md" data-pdf="./LLM Infrastructure Cheat Sheet (Updated).pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">LLM Infrastructure Cheat Sheet (Updated)</a></div>
+                <div class="desc"></div>
+                <div class="tags small-muted">MD · Quick references / cheat sheets</div>
+              </div>
+            </li><li class="file" data-path="./LLM Infrastructure Cheat Sheet_old.pdf" data-pdf="./LLM Infrastructure Cheat Sheet_old.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">LLM Infrastructure Cheat Sheet_old</a></div>
+                <div class="desc"></div>
+                <div class="tags small-muted">PDF · Quick references / cheat sheets</div>
+              </div>
+            </li><li class="file" data-path="./LLM Infrastructure Cheat Sheet (Updated).pdf" data-pdf="./LLM Infrastructure Cheat Sheet (Updated).pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">LLM Infrastructure Cheat Sheet (Updated)</a></div>
+                <div class="desc"></div>
+                <div class="tags small-muted">PDF · Quick references / cheat sheets</div>
+              </div>
+            </li><li class="file" data-path="./md_outputs/LLM Infrastructure Cheat Sheet_old.md" data-pdf="./LLM Infrastructure Cheat Sheet_old.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">LLM Infrastructure Cheat Sheet_old</a></div>
+                <div class="desc"></div>
+                <div class="tags small-muted">MD · Quick references / cheat sheets</div>
+              </div>
+            </li>
+            <li class="file" data-path="./md_outputs/Ollama Download Commands for Recommended LLMs.md" data-pdf="./Ollama Download Commands for Recommended LLMs.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Ollama Download Commands for Recommended LLMs.pdf</a></div>
+                <div class="desc"></div>
+                <div class="tags small-muted">PDF · QuickRef</div>
+              </div>
+            </li>
+</ul>
+        </section>
+
+        <!-- Models -->
+        <section class="category" data-category="Models">
+          <h2>Models & inventory</h2>
+          <ul class="files" id="modelsList">
+            <li class="file" data-path="./Ollama Models as of 2025 11 18.txt" data-pdf="./Ollama Models as of 2025 11 18.txt">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Ollama Models as of 2025 11 18</a></div>
+                <div class="desc">Model-by-model essentials, suggested defaults, and quantization notes — guidance for what to keep and what to pull for the 3060.</div>
+                <div class="tags small-muted">text · Models</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./GROK.recommended.llms.w.RTX.3060.txt" data-pdf="./GROK.recommended.llms.w.RTX.3060.txt">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">GROK.recommended.llms.w.RTX.3060.txt</a></div>
+                <div class="desc">Recommended pulls and priority list for RTX 3060 12GB; includes one-line commands to pull recommended models.</div>
+                <div class="tags small-muted">TXT · Models</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./GROK.recommended.nano.banana.replacement.txt" data-pdf="./GROK.recommended.nano.banana.replacement.txt">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">GROK.recommended.nano.banana.replacement.txt</a></div>
+                <div class="desc">Image-focused recommendations: ComfyUI + Flux (FP8) and the best local tools for image restoration/editing.</div>
+                <div class="tags small-muted">TXT · Models / Image</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./ollama-ls.txt" data-pdf="./ollama-ls.txt">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">ollama-ls.txt</a></div>
+                <div class="desc">Raw output of `ollama ls` showing installed models and sizes (useful for cleanup planning).</div>
+                <div class="tags small-muted">TXT · Models</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./ollama-show-out.txt" data-pdf="./ollama-show-out.txt">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">ollama-show-out.txt</a></div>
+                <div class="desc">Collected `ollama show` output for many models with quantization, context lengths and capabilities listed.</div>
+                <div class="tags small-muted">TXT · Models</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./ollama website list - LLM.txt" data-pdf="./ollama website list - LLM.txt">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">ollama website list - LLM.txt</a></div>
+                <div class="desc">Catalog of model families, sizes and short descriptions to inform pull decisions.</div>
+                <div class="tags small-muted">TXT · Models</div>
+              </div>
+            </li>
+
+          <li class="file" data-path="./LLM Recommendations for Programming and Development.pdf" data-pdf="./LLM Recommendations for Programming and Development.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">LLM Recommendations for Programming and Development</a></div>
+                <div class="desc"></div>
+                <div class="tags small-muted">PDF · Models &amp; inventory</div>
+              </div>
+            </li></ul>
+        </section>
+
+        <!-- Workflows -->
+        <section class="category" data-category="Workflows">
+          <h2>Workflows & automation</h2>
+          <ul class="files" id="workflowsList">
+
+            <li class="file" data-path="./OpenWebUI — Task Scheduler CLI Reference.txt" data-pdf="./OpenWebUI — Task Scheduler CLI Reference.txt">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">OpenWebUI — Task Scheduler CLI Reference.txt</a></div>
+                <div class="desc">Run OpenWebUI via Task Scheduler at startup (SYSTEM): run script sample, schtasks commands, and logging/debugging tips.</div>
+                <div class="tags small-muted">TXT · Workflows</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./Open WebUI Installation Guide for Windows 11.pdf" data-pdf="./Open WebUI Installation Guide for Windows 11.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Open WebUI Installation Guide for Windows 11.pdf</a></div>
+                <div class="desc">Installer and service notes; refer to md_outputs/ if converted for management commands.</div>
+                <div class="tags small-muted">PDF · Workflows</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./md_outputs/Open WebUI Management Guide.md" data-pdf="./Open WebUI Management Guide.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Open WebUI Management Guide (md)</a></div>
+                <div class="desc">Converted from PDF: management commands, service notes, and backup recommendations.</div>
+                <div class="tags small-muted">MD · Workflows</div>
+              </div>
+            </li>
+
+          
+            <li class="file" data-path="./md_outputs/Open WebUI Installation Guide for Windows 11.md" data-pdf="./Open WebUI Installation Guide for Windows 11.pdf">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">Open WebUI Installation Guide for Windows 11.pdf</a></div>
+                <div class="desc"></div>
+                <div class="tags small-muted">PDF · Workflows</div>
+              </div>
+            </li>
+</ul>
+        </section>
+
+        <!-- Scripts & other -->
+        <section class="category" data-category="Scripts">
+          <h2>Scripts & small artifacts</h2>
+          <ul class="files" id="scriptsList">
+            <li class="file" data-path="./What to Try Next.txt" data-pdf="./What to Try Next.txt">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">What to Try Next.txt</a></div>
+                <div class="desc">Short list of experiments and models to try next using your local setup.</div>
+                <div class="tags small-muted">TXT</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./a.txt" data-pdf="./a.txt">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">a</a></div>
+                <div class="desc">Small file listing `ollama show` commands (binary/encoded text in places).</div>
+                <div class="tags small-muted">misc</div>
+              </div>
+            </li>
+
+            <li class="file" data-path="./ollama-show.bat" data-pdf="./ollama-show.bat">
+              <div class="meta">
+                <div class="title"><a href="#" class="file-link">ollama-show.bat</a></div>
+                <div class="desc">Windows batch to run a set of `ollama show` commands quickly.</div>
+                <div class="tags small-muted">BAT</div>
+              </div>
+            </li>
+
+          </ul>
+        </section>
+
+      
+        <section class="category" data-category="Junk">
+          <h2>Junk</h2>
+          <ul class="files">
+
+            
+
+          </ul>
+        </section>
+
+        
+
+        
+
+        
+
+        
+
+        
+
+        
+
+        
+
+        
+
+        
+
+        
+
+        
+
+        
+</div>
+    </aside>
+
+    <section id="viewer" aria-label="Document viewer">
+      <div id="viewerHeader">
+        <h3 id="viewerTitle">Select a file to preview</h3>
+        <div class="small-muted" id="viewerInfo">Files render client-side. Markdown will be converted to HTML. PDFs embedded if supported by browser.</div>
+      </div>
+      <div id="viewerBody">
+        <div id="content">
+          <div id="mdViewer" style="display:none"></div>
+          <iframe id="pdfViewer" style="display:none;width:100%;height:75vh;border:0;border-radius:8px" sandbox="allow-same-origin allow-scripts allow-forms"></iframe>
+          <div id="rawViewer" style="display:none"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // Helper to decode entities
+    function safeFetchText(path){
+      return fetch(path).then(r=>{
+        if(!r.ok) throw new Error('Fetch failed '+r.status);
+        return r.text();
+      });
+    }
+
+    // Render markdown content into mdViewer using marked.js
+    const mdViewer = document.getElementById('mdViewer');
+    const pdfViewer = document.getElementById('pdfViewer');
+    const rawViewer = document.getElementById('rawViewer');
+    const viewerTitle = document.getElementById('viewerTitle');
+    const viewerInfo = document.getElementById('viewerInfo');
+    const searchInput = document.getElementById('searchInput');
+    const resultCount = document.getElementById('resultCount');
+
+    // Initialize file-link click handlers
+    document.querySelectorAll('.file-link').forEach(link=>{
+      link.addEventListener('click', (ev)=>{
+        ev.preventDefault();
+        const li = ev.target.closest('.file');
+        openFilePreview(li);
+      });
+    });
+
+    // Determine type by extension
+    function extOf(path){
+      const m = path.split('.').pop().toLowerCase();
+      return m;
+    }
+
+    function openFilePreview(li){
+      const path = li.dataset.path;
+      const pdf = li.dataset.pdf || '';
+      viewerTitle.textContent = li.querySelector('.title').innerText;
+      // hide all viewers
+      mdViewer.style.display = 'none';
+      pdfViewer.style.display = 'none';
+      rawViewer.style.display = 'none';
+      // If MD file (or md_outputs) — render
+      const e = extOf(path);
+      if(e === 'md' || path.endsWith('.md') || path.includes('md_outputs')){
+        // prefer MD (path), if path points to an MD file present
+        safeFetchText(path).then(txt=>{
+          // If the MD contains a frontmatter + large content, strip nothing — marked will handle.
+          mdViewer.innerHTML = marked.parse(txt);
+          mdViewer.style.display = 'block';
+          // Add small link to original PDF if available
+          if(pdf){
+            const orig = document.createElement('div');
+            orig.className = 'small-muted';
+            orig.innerHTML = `Source PDF: <a class="inline-link" href="${pdf}" target="_blank" rel="noopener">${pdf}</a>`;
+            if(mdViewer.firstChild) mdViewer.insertBefore(orig, mdViewer.firstChild);
+            else mdViewer.appendChild(orig);
+          }
+        }).catch(err=>{
+          rawViewer.style.display = 'block';
+          rawViewer.textContent = 'Failed to load markdown: ' + err;
+        });
+        return;
+      }
+      // If PDF (or user wants the PDF)
+      if(e === 'pdf' || pdf.toLowerCase().endsWith('.pdf')){
+        const pdfPath = (e === 'pdf') ? path : pdf;
+        pdfViewer.src = pdfPath;
+        pdfViewer.style.display = 'block';
+        return;
+      }
+      // If DOCX or other binary: show link to open externally
+      if(e === 'docx' || e === 'doc'){
+        rawViewer.style.display = 'block';
+        rawViewer.innerHTML = `This is a binary Office file. <a class="inline-link" href="${path}" target="_blank" rel="noopener">Open ${path}</a>`;
+        return;
+      }
+      // For plain text files
+      if(['txt','log','out'].includes(e) || e.length<=4){
+        safeFetchText(path).then(txt=>{
+          rawViewer.style.display = 'block';
+          // textContent preserves newlines as characters, CSS 'white-space: pre-wrap' ensures they are rendered as line breaks
+          rawViewer.textContent = txt;
+        }).catch(err=>{
+          rawViewer.style.display = 'block';
+          rawViewer.textContent = 'Failed to load file: ' + err;
+        });
+        return;
+      }
+      // Fallback: open in new tab
+      rawViewer.style.display = 'block';
+      rawViewer.innerHTML = `Open file: <a class="inline-link" href="${path}" target="_blank" rel="noopener">${path}</a>`;
+    }
+
+    // Simple client-side filter
+    function filterFiles(q){
+      q = (q||'').toLowerCase().trim();
+      const files = document.querySelectorAll('li.file');
+      let visible = 0;
+      files.forEach(li=>{
+        const title = li.querySelector('.title').innerText.toLowerCase();
+        const desc = li.querySelector('.desc').innerText.toLowerCase();
+        const tags = li.querySelector('.tags').innerText.toLowerCase();
+        if(!q || title.includes(q) || desc.includes(q) || tags.includes(q)){
+          li.style.display = '';
+          visible++;
+        } else {
+          li.style.display = 'none';
+        }
+      });
+      resultCount.textContent = visible ? `${visible} shown` : 'no results';
+    }
+
+    searchInput.addEventListener('input', (e)=>{
+      filterFiles(e.target.value);
+    });
+
+    // on load: if hash present, open file
+    window.addEventListener('load', ()=>{
+      const hash = decodeURIComponent(location.hash.replace(/^#/,''));
+      if(hash){
+        // find file with matching data-path or title
+        const el = Array.from(document.querySelectorAll('li.file')).find(li=>{
+          return li.dataset.path===hash || li.dataset.pdf===hash || li.querySelector('.title').innerText===hash;
+        });
+        if(el) openFilePreview(el);
+      }
+      filterFiles('');
+    });
+
+    // For keyboard: press "/" to focus search
+    window.addEventListener('keydown', (e)=>{
+      if(e.key==='/' && document.activeElement !== searchInput){
+        e.preventDefault();
+        searchInput.focus();
+        searchInput.select();
+      }
+    });
+  </script>
+</body>
+</html>

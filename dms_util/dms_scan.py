@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DMS_scan.py - Scan Doc/ directory for new or changed files
+dms_scan.py - Scan Doc/ directory for new or changed files
 
 Compares current filesystem state against DMS_STATE embedded in index.html
 Identifies:

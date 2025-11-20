@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DMS_summarize.py - Generate AI summaries and category suggestions via Ollama
+dms_summarize.py - Generate AI summaries and category suggestions via Ollama
 
 Uses Ollama API to generate:
   - Brief technical summary (<50 words)
@@ -67,9 +67,11 @@ def generate_summary_and_category(
     file_info: dict,
     doc_dir: Path,
     existing_categories: list[str],
-    config: dict
+    config: dict,
+    retry_count: int = 0,
+    max_retries: int = 3
 ) -> dict:
-    """Call Ollama to generate summary and suggest category"""
+    """Call Ollama to generate summary and suggest category (with retries)"""
     
     file_path = Path(file_info['abs_path'])
     file_name = file_path.name
@@ -151,8 +153,15 @@ If proposing a new category, set is_new_category to true."""
         }
         
     except json.JSONDecodeError as e:
-        print(f"WARNING: Failed to parse AI response as JSON: {e}", file=sys.stderr)
-        print(f"Response was: {response_text[:200]}", file=sys.stderr)
+        if retry_count < max_retries:
+            print(f"  ⚠ JSON parse failed (attempt {retry_count + 1}/{max_retries})", file=sys.stderr)
+            choice = input("  Retry? [y/N]: ").strip().lower()
+            if choice == 'y':
+                import time
+                time.sleep(1)  # Brief pause before retry
+                return generate_summary_and_category(file_info, doc_dir, existing_categories, config, retry_count + 1, max_retries)
+        
+        print(f"WARNING: Failed to parse AI response: {e}", file=sys.stderr)
         return {
             "summary": "[AI response parsing failed - please enter manually]",
             "category": existing_categories[0] if existing_categories else "Uncategorized",
@@ -160,7 +169,20 @@ If proposing a new category, set is_new_category to true."""
             "error": True
         }
     except Exception as e:
-        print(f"WARNING: AI generation failed: {e}", file=sys.stderr)
+        error_msg = str(e)
+        if "timeout" in error_msg.lower() or "connection" in error_msg.lower():
+            # Network/timeout error - worth retrying
+            if retry_count < max_retries:
+                print(f"  ⚠ Network error (attempt {retry_count + 1}/{max_retries}): {e}", file=sys.stderr)
+                choice = input("  Retry? [y/N]: ").strip().lower()
+                if choice == 'y':
+                    import time
+                    time.sleep(2)  # Longer pause for network issues
+                    return generate_summary_and_category(file_info, doc_dir, existing_categories, config, retry_count + 1, max_retries)
+        else:
+            # Other error - probably not worth retrying
+            print(f"WARNING: AI generation failed: {e}", file=sys.stderr)
+        
         return {
             "summary": "[AI generation error - please enter manually]",
             "category": existing_categories[0] if existing_categories else "Uncategorized",

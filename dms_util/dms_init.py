@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DMS_init.py - Initialize a new Doc/ directory with index.html
+dms_init.py - Initialize a new Doc/ directory with index.html
 
 Creates:
   - Doc/index.html (with DMS_STATE embedded)

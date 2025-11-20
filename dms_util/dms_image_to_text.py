@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DMS_image_to_text.py - Convert image files to text descriptions
+dms_image_to_text.py - Convert image files to text descriptions
 
 Uses pytesseract for OCR to extract text from images.
 Saves results as .txt files in md_outputs/ parallel to PDF→MD pattern.
