@@ -2,7 +2,7 @@
   "metadata": {
     "created": "2025-11-20T16:31:34.392771",
     "last_scan": null,
-    "last_apply": "2025-11-20T17:14:30.747096"
+    "last_apply": "2025-11-21T13:42:57.996707"
   },
   "categories": [
     "Guides",
@@ -68,6 +68,39 @@
       "summary_approved": true,
       "title": "How_to_look_at_old_file",
       "last_processed": "2025-11-20T17:14:30.747073"
+    },
+    "./index.html": {
+      "hash": "sha256:c571e63a13e26fc6cc82d4900e1b2b674ad59c5496d1f383c12e291486bbfcd2",
+      "category": "Guides",
+      "summary": "HTML documentation for project with navigation and file listing within sidebar.",
+      "summary_approved": true,
+      "title": "index",
+      "last_processed": "2025-11-21T13:17:48.532213"
+    },
+    "./Note.about.tags.txt": {
+      "hash": "sha256:7d3777e3a0ef566a853902380ac659187d83082e51454d37d01db3d2db8a1ca6",
+      "category": "Workflows",
+      "summary": "The document outlines steps for marking the stability of Python code with Git tags and pushing them, followed by creating a release page on GitHub.",
+      "summary_approved": true,
+      "title": "Note.about.tags",
+      "last_processed": "2025-11-21T13:17:48.532290"
+    },
+    "./DMS_Scripts_and_Dependencies.md": {
+      "hash": "sha256:af523afd9b8f253018e7169f0016caaf2cf4c469516a51090907e5553b240ed1",
+      "category": "Scripts",
+      "summary": "Document outlines scripts invoked by 'dms', referenced configuration files and external tools used.",
+      "summary_approved": true,
+      "title": "DMS_Scripts_and_Dependencies",
+      "last_processed": "2025-11-21T13:17:48.532299"
+    },
+    "./IMG_4664.jpeg": {
+      "hash": "sha256:15c3b08105dc9b6c1e1d252b8ff83b4d5555e8ba358e4ca8bcd75efc5674bc7d",
+      "category": "Models",
+      "summary": "The document provides examples for installing and using the ollama model WY ven 2de-coder (14b) in chat applications.",
+      "summary_approved": true,
+      "title": "IMG_4664",
+      "last_processed": "2025-11-21T13:42:57.996684",
+      "readable_version": "./md_outputs/IMG_4664.txt"
     }
   }
 }

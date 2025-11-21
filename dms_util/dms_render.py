@@ -360,7 +360,7 @@ def _generate_category_section(category, docs):
                 label = "View Image"
             else:
                 icon = "📄"
-                label = "View Original"
+                label = "View Text/OCR"
             original_link = f'<br><small><a href="#{readable_path}" style="color:var(--accent-2)">{icon} {label}</a></small>'
         
         li = f"""            <li class="file" data-path="{path_escaped}" data-link="{path_escaped}">

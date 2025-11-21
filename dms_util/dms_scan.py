@@ -73,6 +73,8 @@ def scan_directory(doc_dir: Path, state: dict) -> tuple:
     # Find which files have readable versions in md_outputs
     # Maps original file -> readable file
     readable_versions = {}
+    orphaned_readables = set()  # md_outputs files without a matching original
+    
     for rel_path in disk_files.keys():
         if './md_outputs/' in rel_path:
             # This is a readable version
@@ -84,6 +86,7 @@ def scan_directory(doc_dir: Path, state: dict) -> tuple:
                 filename_no_txt = filename_with_ext[:-4]  # e.g., "IMG_4666.jpeg" or "IMG_4666 copy"
                 
                 # Look for matching original in root
+                found_original = False
                 for orig_path in disk_files.keys():
                     if './md_outputs/' not in orig_path:  # In root
                         orig_name = Path(orig_path).name
@@ -92,52 +95,43 @@ def scan_directory(doc_dir: Path, state: dict) -> tuple:
                         # 2. The original without extension (IMG_4666.jpeg.txt from image-to-text -> IMG_4666.jpeg)
                         if orig_name == filename_no_txt or orig_name.startswith(filename_no_txt):
                             readable_versions[orig_path] = rel_path
+                            found_original = True
                             break
+                
+                if not found_original:
+                    # md_outputs file with no matching original - skip it
+                    orphaned_readables.add(rel_path)
     
     # Check for new and changed files
     for rel_path, file_path in disk_files.items():
-        # Skip readable versions in md_outputs if they're paired with originals
+        # Skip all md_outputs files (whether paired or orphaned)
         if './md_outputs/' in rel_path:
-            # Check if this is a readable version of an original
-            is_paired = False
-            for orig, readable in readable_versions.items():
-                if readable == rel_path:
-                    is_paired = True
-                    break
-            
-            if is_paired:
-                # Skip it - we'll process the original instead
-                continue
+            continue
         
         # For original files that have readable versions:
-        # Track the readable version, not the original
+        # Just process the original file normally, don't track the readable version separately
+        # The readable version is only used during summarization
         if rel_path in readable_versions:
-            readable_path = readable_versions[rel_path]
+            # Process the original file, not the readable version
+            file_hash = compute_file_hash(file_path)
             
-            # Skip the original - process the readable instead
-            if readable_path not in disk_files:
-                # Readable doesn't exist on disk - shouldn't happen but skip anyway
-                continue
-            
-            file_hash = compute_file_hash(disk_files[readable_path])
-            
-            if readable_path not in state_docs:
-                # New readable file
+            if rel_path not in state_docs:
+                # New file
                 new_files.append({
-                    "path": readable_path,
+                    "path": rel_path,
                     "hash": file_hash,
-                    "size": disk_files[readable_path].stat().st_size
+                    "size": file_path.stat().st_size
                 })
             else:
-                # Check if readable version changed
-                if state_docs[readable_path].get("hash") != file_hash:
+                # Check if changed
+                if state_docs[rel_path].get("hash") != file_hash:
                     changed_files.append({
-                        "path": readable_path,
-                        "old_hash": state_docs[readable_path].get("hash"),
+                        "path": rel_path,
+                        "old_hash": state_docs[rel_path].get("hash"),
                         "new_hash": file_hash
                     })
             
-            # Skip processing the original file
+            # Skip to next file
             continue
         
         # For files without readable versions, process normally

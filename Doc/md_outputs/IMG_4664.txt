@@ -1,0 +1,38 @@
+15:58 a! 56
+
+= ChatGPT (GA ov
+
+Best open models for inline
+coding:
+
+-qwen2.5-coder: 7b or 14b
+- codellama:13b or 34b
+*Starcoder2:15b
+
+Install example:
+
+bash © Copy
+
+ollama pull qwen2.5-coder:14b
+
+Then reference it in
+continue.config.json:
+
+json © Copy
+
+"models": [
+{
+"title": WY ven 2.5 Coder"
+"model":  ollama/awen2.5-
+
++  Askanything Q @®
+:q
+
+
+
+
+
+
+
+:q!
+

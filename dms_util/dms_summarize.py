@@ -51,6 +51,23 @@ def read_file_content(file_path: Path) -> str:
     except Exception as e:
         return f"[Error reading file: {e}]"
 
+def find_text_conversion(file_path: str, doc_dir: Path) -> str:
+    """Check if file has a text version in md_outputs/ (for images or PDFs)"""
+    file_name = Path(file_path).name
+    file_stem = Path(file_path).stem
+    
+    # Try exact match first: IMG_4664.jpeg.txt or document.pdf.txt
+    text_file = doc_dir / "md_outputs" / (file_name + ".txt")
+    if text_file.exists():
+        return text_file.read_text(encoding='utf-8', errors='replace')[:2000]
+    
+    # Try stem only: IMG_4664.txt or document.txt
+    text_file = doc_dir / "md_outputs" / (file_stem + ".txt")
+    if text_file.exists():
+        return text_file.read_text(encoding='utf-8', errors='replace')[:2000]
+    
+    return None
+
 def check_ollama(host: str, model: str) -> bool:
     """Check if Ollama is running and model available"""
     try:
@@ -237,8 +254,31 @@ def main():
             print(f"  ⚠ File not found\n")
             continue
         
-        # Read file content
-        content = read_file_content(full_path)
+        # Check if this is an image or PDF and we have a text conversion
+        content = None
+        text_conversion_path = None
+        file_ext = full_path.suffix.lower()
+        
+        if file_ext in {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.pdf'}:
+            converted_text = find_text_conversion(file_path, doc_dir)
+            if converted_text:
+                content = converted_text
+                # Try to find which text file was actually used
+                file_stem = full_path.stem
+                text_file_stem = doc_dir / "md_outputs" / (file_stem + ".txt")
+                text_file_full = doc_dir / "md_outputs" / (full_path.name + ".txt")
+                
+                if text_file_stem.exists():
+                    text_conversion_path = f"./md_outputs/{file_stem}.txt"
+                elif text_file_full.exists():
+                    text_conversion_path = f"./md_outputs/{full_path.name}.txt"
+                
+                conversion_type = "PDF text" if file_ext == '.pdf' else "OCR text"
+                print(f"  ℹ Using {conversion_type} conversion")
+        
+        # If no text conversion, read file content normally
+        if content is None:
+            content = read_file_content(full_path)
         
         # Generate summary AND get category suggestion
         result = generate_summary_and_category(content, Path(file_path).name, existing_categories, config)
@@ -268,8 +308,11 @@ def main():
                 "size": file_info.get('size', 0)
             }
             
+            # If we used a text conversion for an image, record that
+            if text_conversion_path:
+                file_entry['readable_version'] = text_conversion_path
             # If this is a text file in md_outputs, check for original image
-            if './md_outputs/' in file_path and file_path.endswith('.txt'):
+            elif './md_outputs/' in file_path and file_path.endswith('.txt'):
                 image_path = find_image_for_text_file(file_path, doc_dir)
                 if image_path:
                     file_entry['readable_version'] = image_path
