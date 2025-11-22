@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# --- Script: git_status_all.sh ---
+
+echo "🔍 Checking Git status for all subdirectories in: $(pwd)"
+echo "---------------------------------------------------------"
+
+# Find all directories that contain a '.git' directory (i.e., a repo)
+# and iterate over them.
+find . -maxdepth 2 -type d -name ".git" | while read gitdir; do
+    # Remove the '.git' part to get the parent directory (the repo root)
+    # The 'sed' command removes './' and the trailing '/.git'
+    repo_path=$(echo "$gitdir" | sed -E 's/^\.\///; s/\/.git$//')
+
+    # If the repo_path is empty, it means we are in the current directory itself.
+    if [[ -z "$repo_path" || "$repo_path" == "." ]]; then
+        repo_path="."
+    fi
+
+    # Print the repo name
+    echo -e "\n\n🚀 ** REPOSITORY: $repo_path **"
+
+    # Run the git status command from the repository's root directory
+    (cd "$repo_path" && git status --short)
+
+done
+
+echo -e "\n---------------------------------------------------------"
+echo "✅ Status check complete."
