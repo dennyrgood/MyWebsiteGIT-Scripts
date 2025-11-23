@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# 2025 11 23 20 55
+
 """
 MyEverything_tkui.py
 
