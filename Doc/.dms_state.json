@@ -105,16 +105,6 @@
       "last_processed": "2025-11-21T13:17:48.532299",
       "file_mtime": "2025-11-21T11:32:17.756438"
     },
-    "./IMG_4664.jpeg": {
-      "hash": "sha256:15c3b08105dc9b6c1e1d252b8ff83b4d5555e8ba358e4ca8bcd75efc5674bc7d",
-      "category": "Images",
-      "summary": "The document provides examples for installing and using the ollama model WY ven 2de-coder (14b) in chat applications.",
-      "summary_approved": true,
-      "title": "IMG_4664",
-      "last_processed": "2025-11-21T13:42:57.996684",
-      "readable_version": "./md_outputs/IMG_4664.txt",
-      "file_mtime": "2025-11-19T11:42:56.339209"
-    },
     "./NewRepoSetup.txt": {
       "hash": "sha256:57cb247c18c039d1f6e7922f24474c5ec889c444bc5e6def617f09b234e7cf47",
       "category": "GIT",
@@ -150,15 +140,6 @@
       "title": "gh.help",
       "last_processed": "2025-11-22T01:15:40.226695",
       "file_mtime": "2025-11-03T19:34:49.754102"
-    },
-    "./Fix Three Critical Bugs in DMS Pipeline copy.pdf": {
-      "hash": "sha256:2bcb76ff27289a607a8294b25bb0b1230ab6fd3f3b0ef7bd220da26f42b8ee83",
-      "category": "Workflows",
-      "summary": "This document details the resolution of three critical bugs in the DMS pipeline software.",
-      "summary_approved": true,
-      "title": "Fix Three Critical Bugs in DMS Pipeline copy",
-      "last_processed": "2025-11-22T01:15:40.226707",
-      "file_mtime": "2025-11-19T21:06:41.171019"
     },
     "./Git Command Line Workflow Cheatsheet.pdf": {
       "hash": "sha256:641e3a358775f776077a1439301508ce9a6a9a85e6490fa42b79fe3aacf9166d",

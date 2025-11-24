@@ -80,14 +80,19 @@ def convert_image_to_text(image_path: str, doc_dir: Path, md_dir: Path) -> bool:
             print(f"  ✓ Converted: {output_filename}")
             return True
         else:
-            print(f"  ✗ Failed to convert {image_path}: {result.stderr[:100]}")
+            stderr_msg = result.stderr.strip() if result.stderr else "Unknown error"
+            print(f"  ✗ Failed to convert {image_path}")
+            print(f"     tesseract error: {stderr_msg[:150]}")
             return False
             
+    except subprocess.TimeoutExpired:
+        print(f"  ✗ tesseract timeout (60s) on {image_path}")
+        return False
     except FileNotFoundError:
         print(f"  ✗ tesseract not found - install with: brew install tesseract")
         return False
     except Exception as e:
-        print(f"  ✗ Error: {e}")
+        print(f"  ✗ tesseract error on {image_path}: {type(e).__name__}: {e}")
         return False
 
 
@@ -117,21 +122,30 @@ def convert_pdf_to_markdown(pdf_path: str, doc_dir: Path, md_dir: Path) -> bool:
             timeout=120
         )
         
-        if result.returncode == 0 and result.stdout:
-            # Save as markdown with header
-            md_content = f"# {Path(pdf_path).stem}\n\nExtracted from PDF: {Path(pdf_path).name}\n\n---\n\n{result.stdout}"
-            output_path.write_text(md_content, encoding='utf-8')
-            print(f"  ✓ Converted: {output_filename}")
-            return True
-        else:
-            print(f"  ✗ Failed to convert {pdf_path}: {result.stderr[:100]}")
+        if result.returncode != 0:
+            stderr_msg = result.stderr.strip() if result.stderr else "Unknown error"
+            print(f"  ✗ Failed to convert {pdf_path}")
+            print(f"     pdftotext error: {stderr_msg[:150]}")
             return False
+        
+        if not result.stdout or len(result.stdout.strip()) == 0:
+            print(f"  ✗ Failed to convert {pdf_path}: PDF extraction returned empty text")
+            return False
+        
+        # Save as markdown with header
+        md_content = f"# {Path(pdf_path).stem}\n\nExtracted from PDF: {Path(pdf_path).name}\n\n---\n\n{result.stdout}"
+        output_path.write_text(md_content, encoding='utf-8')
+        print(f"  ✓ Converted: {output_filename}")
+        return True
             
+    except subprocess.TimeoutExpired:
+        print(f"  ✗ pdftotext timeout (120s) on {pdf_path}")
+        return False
     except FileNotFoundError:
         print(f"  ✗ pdftotext not found - install with: brew install poppler")
         return False
     except Exception as e:
-        print(f"  ✗ Error: {e}")
+        print(f"  ✗ pdftotext error on {pdf_path}: {type(e).__name__}: {e}")
         return False
 
 
@@ -161,18 +175,27 @@ def convert_docx_to_markdown(docx_path: str, doc_dir: Path, md_dir: Path) -> boo
             timeout=120
         )
         
-        if result.returncode == 0 and output_path.exists():
-            print(f"  ✓ Converted: {output_filename}")
-            return True
-        else:
-            print(f"  ✗ Failed to convert {docx_path}: {result.stderr[:100]}")
+        if result.returncode != 0:
+            stderr_msg = result.stderr.strip() if result.stderr else "Unknown error"
+            print(f"  ✗ Failed to convert {docx_path}")
+            print(f"     pandoc error: {stderr_msg[:150]}")
             return False
+        
+        if not output_path.exists():
+            print(f"  ✗ Failed to convert {docx_path}: Output file not created")
+            return False
+        
+        print(f"  ✓ Converted: {output_filename}")
+        return True
             
+    except subprocess.TimeoutExpired:
+        print(f"  ✗ pandoc timeout (120s) on {docx_path}")
+        return False
     except FileNotFoundError:
         print(f"  ✗ pandoc not found - install with: brew install pandoc")
         return False
     except Exception as e:
-        print(f"  ✗ Error: {e}")
+        print(f"  ✗ pandoc error on {docx_path}: {type(e).__name__}: {e}")
         return False
 
 

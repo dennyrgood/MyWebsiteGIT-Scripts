@@ -87,15 +87,66 @@ def check_ollama(host: str, model: str) -> bool:
             return False
         tags = resp.json().get('models', [])
         return any(model in t.get('name', '') for t in tags)
-    except:
+    except requests.exceptions.Timeout:
+        print(f"ERROR: Ollama timeout at {host} (server not responding)", file=sys.stderr)
+        return False
+    except requests.exceptions.ConnectionError:
+        print(f"ERROR: Cannot connect to Ollama at {host} (connection refused)", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"ERROR: Ollama check failed: {e}", file=sys.stderr)
         return False
 
-def generate_summary_and_category(file_content: str, file_name: str, existing_categories: list, config: dict) -> dict:
-    """Call Ollama to generate both summary AND category suggestion"""
+
+def preload_ollama_model(host: str, model: str) -> bool:
+    """Preload model into Ollama to avoid slow first request
+    
+    This sends a dummy prompt to Ollama to ensure the model is loaded
+    into memory. Prevents timeouts on the first actual summarization request.
+    """
     try:
-        categories_str = ", ".join(existing_categories) if existing_categories else "Guides, Models, Scripts, Workflows, QuickRefs"
+        resp = requests.post(
+            f"{host}/api/generate",
+            json={
+                "model": model,
+                "prompt": "test",
+                "stream": False
+            },
+            timeout=600  # 10 minutes for model load
+        )
         
-        prompt = f"""Analyze this document and provide a summary and category assignment.
+        if resp.status_code == 200:
+            print(f"  ✓ Model ready")
+            return True
+        else:
+            print(f"  ⚠ Model preload returned HTTP {resp.status_code}, continuing...", file=sys.stderr)
+            return False
+            
+    except requests.exceptions.Timeout:
+        print(f"  ⚠ Model still loading. Will use extended timeout for first file...", file=sys.stderr)
+        return False
+    except requests.exceptions.ConnectionError:
+        print(f"  ⚠ Ollama not responding yet. Will retry during summarization...", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"  ⚠ Continuing anyway...", file=sys.stderr)
+        return False
+
+def generate_summary_and_category(file_content: str, file_name: str, existing_categories: list, config: dict, is_first: bool = False) -> dict:
+    """Call Ollama to generate both summary AND category suggestion with retry logic
+    
+    Args:
+        is_first: If True, use extended timeout (600s) for first request after preload
+    """
+    max_retries = 3
+    retry_delay = 2  # seconds
+    
+    # First request gets longer timeout to allow model startup
+    first_attempt_timeout = 600 if is_first else 300
+    
+    categories_str = ", ".join(existing_categories) if existing_categories else "Guides, Models, Scripts, Workflows, QuickRefs"
+    
+    prompt = f"""Analyze this document and provide a summary and category assignment.
 
 Filename: {file_name}
 
@@ -116,45 +167,86 @@ Respond ONLY with valid JSON in this exact format:
 }}
 
 If proposing a new category, set is_new_category to true."""
-
-        resp = requests.post(
-            f"{config['ollama_host']}/api/generate",
-            json={
-                "model": config['ollama_model'],
-                "prompt": prompt,
-                "temperature": 0.2,  # Lower temperature for more consistent output
-                "stream": False
-            },
-            timeout=300
-        )
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Use extended timeout on first attempt, normal on retries
+            timeout = first_attempt_timeout if attempt == 1 else 300
+            
+            resp = requests.post(
+                f"{config['ollama_host']}/api/generate",
+                json={
+                    "model": config['ollama_model'],
+                    "prompt": prompt,
+                    "temperature": 0.2,
+                    "stream": False
+                },
+                timeout=timeout
+            )
+            
+            if resp.status_code != 200:
+                error_msg = resp.text[:100] if resp.text else f"HTTP {resp.status_code}"
+                if attempt < max_retries:
+                    print(f"  ⚠ Ollama error (attempt {attempt}/{max_retries}): {error_msg}. Retrying...", file=sys.stderr)
+                    import time
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    print(f"  ✗ Ollama failed after {max_retries} attempts: {error_msg}", file=sys.stderr)
+                    return {"error": True}
+            
+            response_text = resp.json().get('response', '').strip()
+            
+            # Try to parse JSON from response
+            json_text = response_text
+            if '```json' in response_text:
+                json_text = response_text.split('```json')[1].split('```')[0].strip()
+            elif '```' in response_text:
+                json_text = response_text.split('```')[1].split('```')[0].strip()
+            
+            parsed = json.loads(json_text)
+            
+            return {
+                "summary": parsed.get('summary', '').strip(),
+                "category": parsed.get('category', 'Guides'),
+                "is_new_category": parsed.get('is_new_category', False),
+                "error": False
+            }
         
-        if resp.status_code != 200:
-            return None
+        except requests.exceptions.Timeout:
+            if attempt < max_retries:
+                print(f"  ⚠ Ollama timeout (attempt {attempt}/{max_retries}). Retrying...", file=sys.stderr)
+                import time
+                time.sleep(retry_delay)
+                continue
+            else:
+                print(f"  ✗ Ollama timeout after {max_retries} attempts", file=sys.stderr)
+                return {"error": True}
         
-        response_text = resp.json().get('response', '').strip()
+        except requests.exceptions.ConnectionError:
+            print(f"  ✗ Cannot connect to Ollama at {config['ollama_host']}", file=sys.stderr)
+            return {"error": True}
         
-        # Try to parse JSON from response
-        json_text = response_text
-        if '```json' in response_text:
-            json_text = response_text.split('```json')[1].split('```')[0].strip()
-        elif '```' in response_text:
-            json_text = response_text.split('```')[1].split('```')[0].strip()
+        except json.JSONDecodeError as e:
+            print(f"  ⚠ Failed to parse Ollama response as JSON: {e}", file=sys.stderr)
+            if attempt < max_retries:
+                print(f"  ⚠ Retrying (attempt {attempt}/{max_retries})...", file=sys.stderr)
+                import time
+                time.sleep(retry_delay)
+                continue
+            else:
+                return {"error": True}
         
-        parsed = json.loads(json_text)
-        
-        return {
-            "summary": parsed.get('summary', '').strip(),
-            "category": parsed.get('category', 'Guides'),
-            "is_new_category": parsed.get('is_new_category', False),
-            "error": False
-        }
-        
-    except json.JSONDecodeError as e:
-        print(f"  ⚠ WARNING: Failed to parse AI response as JSON", file=sys.stderr)
-        return None
-    except Exception as e:
-        print(f"  ✗ Error: {e}", file=sys.stderr)
-        return None
+        except Exception as e:
+            print(f"  ✗ Ollama error (attempt {attempt}/{max_retries}): {e}", file=sys.stderr)
+            if attempt < max_retries:
+                import time
+                time.sleep(retry_delay)
+                continue
+            else:
+                return {"error": True}
+    
+    return {"error": True}
 
 def truncate_summary(summary: str, max_words: int = 50) -> tuple:
     """Truncate summary to max_words and return (summary, was_truncated)"""
@@ -223,6 +315,12 @@ def main():
         print(f"ERROR: Cannot connect to Ollama at {config['ollama_host']}")
         print(f"Make sure Ollama is running (ollama serve)")
         return 1
+    
+    # Preload model to avoid slow first request
+    print("\n✓ Ollama is running")
+    print("\nPreloading model (this may take a moment on first run)...")
+    preload_ollama_model(config['ollama_host'], config['ollama_model'])
+    print()
     
     # Load state to get existing categories
     state = load_state(state_path)
@@ -308,7 +406,9 @@ def main():
             content = read_file_content(full_path)
         
         # Generate summary AND get category suggestion
-        result = generate_summary_and_category(content, Path(file_path).name, existing_categories, config)
+        # Pass is_first=True only for the first file (to use extended timeout)
+        is_first_file = (len(already_done) + i == 1)
+        result = generate_summary_and_category(content, Path(file_path).name, existing_categories, config, is_first=is_first_file)
         
         if result and not result.get('error'):
             summary = result['summary']

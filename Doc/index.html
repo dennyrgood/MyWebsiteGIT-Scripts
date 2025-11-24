@@ -48,7 +48,8 @@
     /* PDF viewer should take full height */
     #pdfViewer{height:80vh !important;}
 
-SCRIPTS_DIR = Path.home() / "Documents/MyWebsiteGIT/Scripts"
+# Scripts dir is 2 levels up from this file's location
+SCRIPTS_DIR = Path(__file__).parent.parent
 
     /* markdown container */
     #mdViewer{background:rgba(255,255,255,0.01);padding:18px;border-radius:8px}
@@ -189,16 +190,6 @@ SCRIPTS_DIR = Path.home() / "Documents/MyWebsiteGIT/Scripts"
       "last_processed": "2025-11-21T13:17:48.532299",
       "file_mtime": "2025-11-21T11:32:17.756438"
     },
-    "./IMG_4664.jpeg": {
-      "hash": "sha256:15c3b08105dc9b6c1e1d252b8ff83b4d5555e8ba358e4ca8bcd75efc5674bc7d",
-      "category": "Images",
-      "summary": "The document provides examples for installing and using the ollama model WY ven 2de-coder (14b) in chat applications.",
-      "summary_approved": true,
-      "title": "IMG_4664",
-      "last_processed": "2025-11-21T13:42:57.996684",
-      "readable_version": "./md_outputs/IMG_4664.txt",
-      "file_mtime": "2025-11-19T11:42:56.339209"
-    },
     "./NewRepoSetup.txt": {
       "hash": "sha256:57cb247c18c039d1f6e7922f24474c5ec889c444bc5e6def617f09b234e7cf47",
       "category": "GIT",
@@ -234,15 +225,6 @@ SCRIPTS_DIR = Path.home() / "Documents/MyWebsiteGIT/Scripts"
       "title": "gh.help",
       "last_processed": "2025-11-22T01:15:40.226695",
       "file_mtime": "2025-11-03T19:34:49.754102"
-    },
-    "./Fix Three Critical Bugs in DMS Pipeline copy.pdf": {
-      "hash": "sha256:2bcb76ff27289a607a8294b25bb0b1230ab6fd3f3b0ef7bd220da26f42b8ee83",
-      "category": "Workflows",
-      "summary": "This document details the resolution of three critical bugs in the DMS pipeline software.",
-      "summary_approved": true,
-      "title": "Fix Three Critical Bugs in DMS Pipeline copy",
-      "last_processed": "2025-11-22T01:15:40.226707",
-      "file_mtime": "2025-11-19T21:06:41.171019"
     },
     "./Git Command Line Workflow Cheatsheet.pdf": {
       "hash": "sha256:641e3a358775f776077a1439301508ce9a6a9a85e6490fa42b79fe3aacf9166d",
@@ -301,14 +283,7 @@ SCRIPTS_DIR = Path.home() / "Documents/MyWebsiteGIT/Scripts"
       <section class="category" data-category="Workflows">
         <h2>Workflows</h2>
         <ul class="files">
-            <li class="file" data-path="./Fix Three Critical Bugs in DMS Pipeline copy.pdf" data-link="./Fix Three Critical Bugs in DMS Pipeline copy.pdf">
-      <div class="meta">
-        <div class="title"><a href="#./Fix Three Critical Bugs in DMS Pipeline copy.pdf" class="file-link">Fix Three Critical Bugs in DMS Pipeline copy</a></div>
-        <div class="desc">This document details the resolution of three critical bugs in the DMS pipeline software.</div>
-        <div class="tags small-muted">PDF · Workflows</div>
-        <div class="mtime">📅 2025-11-19 21:06:41</div>
-      </div>
-            </li>            <li class="file" data-path="./Note.about.tags.txt" data-link="./Note.about.tags.txt">
+            <li class="file" data-path="./Note.about.tags.txt" data-link="./Note.about.tags.txt">
       <div class="meta">
         <div class="title"><a href="#./Note.about.tags.txt" class="file-link">Note.about.tags</a></div>
         <div class="desc">The document outlines steps for marking the stability of Python code with Git tags and pushing them, followed by creating a release page on GitHub.</div>
@@ -356,20 +331,6 @@ SCRIPTS_DIR = Path.home() / "Documents/MyWebsiteGIT/Scripts"
         <div class="desc">Debug report for the DMS Summarization Pipeline; details discrepaninues and fixes in summarization process.</div>
         <div class="tags small-muted">PDF · Models</div>
         <div class="mtime">📅 2025-11-19 20:47:51</div>
-      </div>
-            </li>
-        </ul>
-      </section>
-
-      <section class="category" data-category="Images">
-        <h2>Images</h2>
-        <ul class="files">
-            <li class="file" data-path="./IMG_4664.jpeg" data-link="./IMG_4664.jpeg">
-      <div class="meta">
-        <div class="title"><a href="#./IMG_4664.jpeg" class="file-link">IMG_4664</a></div>
-        <div class="desc">The document provides examples for installing and using the ollama model WY ven 2de-coder (14b) in chat applications.<br><small><a href="#./md_outputs/IMG_4664.txt" style="color:var(--accent-2)">📄 View Text/OCR</a></small></div>
-        <div class="tags small-muted">JPEG · Images</div>
-        <div class="mtime">📅 2025-11-19 11:42:56</div>
       </div>
             </li>
         </ul>
@@ -492,6 +453,34 @@ SCRIPTS_DIR = Path.home() / "Documents/MyWebsiteGIT/Scripts"
       rawViewer.style.display = 'none';
       
       const e = extOf(path);
+      
+      // For DOCX files: show markdown version by default
+      if(e === 'docx' || e === 'doc'){
+        const mdPath = './md_outputs/' + path.split('/').pop().split('.')[0] + '.md';
+        safeFetchText(mdPath).then(txt=>{
+          mdViewer.innerHTML = marked.parse(txt);
+          mdViewer.style.display = 'block';
+          const docxInfo = document.createElement('div');
+          docxInfo.className = 'small-muted';
+          docxInfo.style.marginBottom = '12px';
+          docxInfo.innerHTML = `Source DOCX: <a class="inline-link" href="${path}" target="_blank" rel="noopener">📥 Download ${path}</a>`;
+          if(mdViewer.firstChild) mdViewer.insertBefore(docxInfo, mdViewer.firstChild);
+          else mdViewer.appendChild(docxInfo);
+        }).catch(err=>{
+          rawViewer.style.display = 'block';
+          rawViewer.innerHTML = `
+            <div style="padding: 12px;">
+              <p style="margin-top: 0;">DOCX file options:</p>
+              <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <a href="${path}" target="_blank" rel="noopener" style="padding: 8px 12px; background: var(--accent); color: #000; border-radius: 6px; text-decoration: none; font-weight: 500;">📥 Download File</a>
+              </div>
+              <p style="color: var(--muted); font-size: 13px; margin-top: 12px;">Converted markdown preview not available</p>
+            </div>
+          `;
+        });
+        return;
+      }
+      
       if(e === 'md' || path.endsWith('.md') || path.includes('md_outputs')){
         safeFetchText(path).then(txt=>{
           mdViewer.innerHTML = marked.parse(txt);
@@ -514,12 +503,6 @@ SCRIPTS_DIR = Path.home() / "Documents/MyWebsiteGIT/Scripts"
         const pdfPath = (e === 'pdf') ? path : pdf;
         pdfViewer.src = pdfPath;
         pdfViewer.style.display = 'block';
-        return;
-      }
-      
-      if(e === 'docx' || e === 'doc'){
-        rawViewer.style.display = 'block';
-        rawViewer.innerHTML = `This is a binary Office file. <a class="inline-link" href="${path}" target="_blank" rel="noopener">Open ${path}</a>`;
         return;
       }
       
