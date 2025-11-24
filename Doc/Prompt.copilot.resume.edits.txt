@@ -1,15 +1,15 @@
   CONTEXT: I've been working on a Document Management System (DMS) for 
    managing a
    Doc/ directory in git repos. The system is located at 
-   ~/Documents/MyWebsiteGIT/Scripts and has two active repos:
+   ~/repos/scripts and has two active repos:
 
      - ~/Documents/MyWebsiteGIT/LLM/Doc (main testing repo)
-     - ~/Documents/MyWebsiteGIT/Scripts/Doc (new repo, just initialized)
+     - ~/repos/scripts/Doc (new repo, just initialized)
 
    KEY FACTS ABOUT THE SYSTEM:
 
      - All scripts use hardcoded absolute path: Path.home() / 
-   "Documents/MyWebsiteGIT/Scripts"
+   "repos" / "scripts"
      - Main entry point: dms command (interactive menu-driven)
      - Workflow: scan → image-to-text → summarize → review → apply
      - AI summaries are truncated to max 50 words
@@ -26,12 +26,12 @@
 
    SCRIPTS LOCATION:
 
-     - Main wrapper: /Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms
-     - Menu: /Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms_menu.py
+     - Main wrapper: /Users/dennishmathes/repos/scripts/dms
+     - Menu: /Users/dennishmathes/repos/scripts/dms_menu.py
      - Utilities: 
-   /Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms_util/dms_*.py
+   /Users/dennishmathes/repos/scripts/dms_util/dms_*.py
      - Config: 
-   /Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms_config.json
+   /Users/dennishmathes/repos/scripts/dms_config.json
 
    CURRENT STATUS:
 

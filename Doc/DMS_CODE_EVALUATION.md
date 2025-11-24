@@ -65,7 +65,7 @@ Your Document Management System is **well-architected** and **functionally compl
 ### High Priority Issues (Should Fix) ⚠️
 
 #### 1. **Hardcoded Absolute Paths** (Medium Priority)
-**Location**: Multiple files use `Path.home() / "Documents/MyWebsiteGIT/Scripts"`
+**Location**: Multiple files use `Path.home() / "repos" / "scripts"`
 
 **Issue**: 
 - Makes system non-portable to different machines or installations
@@ -79,7 +79,7 @@ Your Document Management System is **well-architected** and **functionally compl
 SCRIPTS_DIR = Path(__file__).resolve().parent
 
 # Option 2: Environment variable
-SCRIPTS_DIR = Path(os.getenv('DMS_SCRIPTS', Path.home() / "Documents/MyWebsiteGIT/Scripts"))
+SCRIPTS_DIR = Path(os.getenv('DMS_SCRIPTS', Path.home() / "repos" / "scripts"))
 
 # Option 3: Look for git root + .dms marker
 def find_scripts_dir():
@@ -89,7 +89,7 @@ def find_scripts_dir():
         if (current / '.dms_root').exists():
             return current
         current = current.parent
-    return Path.home() / "Documents/MyWebsiteGIT/Scripts"  # fallback
+    return Path.home() / "repos" / "scripts"  # fallback
 ```
 
 ---

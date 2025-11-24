@@ -2,7 +2,7 @@
   "metadata": {
     "created": "2025-11-20T16:31:34.392771",
     "last_scan": null,
-    "last_apply": "2025-11-22T01:15:40.226747"
+    "last_apply": "2025-11-25T00:18:27.733013"
   },
   "categories": [
     "Guides",
@@ -16,22 +16,22 @@
   ],
   "documents": {
     "./Prompt.copilot.resume.edits.txt": {
-      "hash": "sha256:1c727e2c6f724905b390786edd075ad8ded5727b9ee724fcf057753ab1645202",
+      "hash": "",
       "category": "Workflows",
-      "summary": "A document detailing the creation and structure of an interactive Document Management System (DMS) for handling scripts within git repositories.",
+      "summary": "Document describes a Document Management System for git repositories with an interactive menu-driven workflow and AI-assisted document processing capabilities.",
       "summary_approved": true,
       "title": "Prompt.copilot.resume.edits",
-      "last_processed": "2025-11-20T17:01:47.477023",
-      "file_mtime": "2025-11-20T16:47:37.383081"
+      "last_processed": "2025-11-25T00:18:27.732795",
+      "file_mtime": "2025-11-25T00:16:22.487813"
     },
     "./DMS_CODE_EVALUATION.md": {
-      "hash": "sha256:2c8136b8e0533ca52c1141c34d0abad6d98c672948ec4f58dfc78f7b46163d75",
-      "category": "Old-Workflows",
-      "summary": "DMS Code Evaluation document evaluates the Document Management System's architecture and implementation for daily use with minor improvements.",
+      "hash": "",
+      "category": "Workflows",
+      "summary": "This document evaluates the architecture and functionality of a Document Management System, highlighting its strengths and areas for improvement with a grading system.",
       "summary_approved": true,
       "title": "DMS_CODE_EVALUATION",
-      "last_processed": "2025-11-20T17:01:47.477058",
-      "file_mtime": "2025-11-20T16:51:06.862744"
+      "last_processed": "2025-11-25T00:18:27.732964",
+      "file_mtime": "2025-11-25T00:16:06.240616"
     },
     "./DMS_REFACTOR_PLAN.md": {
       "hash": "sha256:d858048c1776e52db605d2209afb3903ca86c9e83aab5c831f6bcf79141a571f",
@@ -79,13 +79,13 @@
       "file_mtime": "2025-11-20T17:12:09.046262"
     },
     "./index.html": {
-      "hash": "sha256:c571e63a13e26fc6cc82d4900e1b2b674ad59c5496d1f383c12e291486bbfcd2",
+      "hash": "",
       "category": "Guides",
-      "summary": "HTML documentation for project with navigation and file listing within sidebar.",
+      "summary": "This document is an HTML index page with styled elements for navigation and content display, designed as part of project documentation.",
       "summary_approved": true,
       "title": "index",
-      "last_processed": "2025-11-21T13:17:48.532213",
-      "file_mtime": "2025-11-21T13:59:45.857027"
+      "last_processed": "2025-11-25T00:18:27.732938",
+      "file_mtime": "2025-11-24T18:38:01.719292"
     },
     "./Note.about.tags.txt": {
       "hash": "sha256:7d3777e3a0ef566a853902380ac659187d83082e51454d37d01db3d2db8a1ca6",
@@ -106,13 +106,13 @@
       "file_mtime": "2025-11-21T11:32:17.756438"
     },
     "./NewRepoSetup.txt": {
-      "hash": "sha256:57cb247c18c039d1f6e7922f24474c5ec889c444bc5e6def617f09b234e7cf47",
-      "category": "GIT",
-      "summary": "This document provides a step-by-step guide for creating and syncing an empty GitHub repository using the HTTPS method on macOS.",
+      "hash": "",
+      "category": "Guides",
+      "summary": "This guide provides step-by-step instructions for creating and syncing a GitHub repository using HTTPS on macOS, including both web and terminal commands.",
       "summary_approved": true,
       "title": "NewRepoSetup",
-      "last_processed": "2025-11-22T01:15:40.226628",
-      "file_mtime": "2025-11-03T20:28:49.162468"
+      "last_processed": "2025-11-25T00:18:27.732981",
+      "file_mtime": "2025-11-24T23:45:05.969309"
     },
     "./Complete Guide_ Converting Python Scripts to macOS Apps.pdf": {
       "hash": "sha256:8a0fb72e662597cce5773b0380597747b64f55a12f975282e4d187c35746a835",
