@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# 2025 11 23 14 31
+# 2025 11 23 20 55
 
 """
 MyEverything_tkui.py
@@ -25,16 +25,8 @@ import os
 import sys
 import datetime
 import queue
-import argparse
 
 ORIGINAL_FILE = "/mnt/data/MyEverything.py"
-
-def parse_args():
-    parser = argparse.ArgumentParser(description='MyEverything macOS Find GUI')
-    parser.add_argument('--debug', action='store_true', help='Show stderr debug panel')
-    return parser.parse_args()
-
-DEBUG_MODE = parse_args().debug
 
 class MyEverythingApp(ttk.Frame):
     def __init__(self, parent):
@@ -58,13 +50,12 @@ class MyEverythingApp(ttk.Frame):
         self.result_count = 0
 
     def _create_vars(self):
-        self.debug_mode = DEBUG_MODE  # Add this line
         self.start_path = tk.StringVar(value=os.path.expanduser("~"))
         self.name_pattern = tk.StringVar(value="*")
         self.case_insensitive = tk.BooleanVar(value=True)
         self.file_type = tk.StringVar(value='f')  # f, d, any
 
-      # size filter
+        # size filter
         self.size_op = tk.StringVar(value='>')
         self.size_value = tk.StringVar()
         self.size_unit = tk.StringVar(value='M')
@@ -199,12 +190,11 @@ class MyEverythingApp(ttk.Frame):
         ttk.Label(run_frame, textvariable=self.status_var).pack(side='right')
 
         # STDERR / LOG area (collapsible)
-        if self.debug_mode:
-            stderr_frame = ttk.LabelFrame(self, text='Command Errors (stderr)')
-            stderr_frame.pack(fill='both', expand=False, **pad)
-            self.stderr_text = tk.Text(stderr_frame, height=4, wrap='word', background='#fff3f3')
-            self.stderr_text.pack(fill='both', expand=True, padx=6, pady=6)
-            self.stderr_text.configure(state='disabled')
+        #stderr_frame = ttk.LabelFrame(self, text='Command Errors (stderr)')
+        #stderr_frame.pack(fill='both', expand=False, **pad)
+        #self.stderr_text = tk.Text(stderr_frame, height=4, wrap='word', background='#fff3f3')
+        #self.stderr_text.pack(fill='both', expand=True, padx=6, pady=6)
+        #self.stderr_text.configure(state='disabled')
 
         # RESULTS
         results_frame = ttk.LabelFrame(self, text='Results (Click headers to sort)')
@@ -315,10 +305,9 @@ class MyEverythingApp(ttk.Frame):
         self.cancel_button.state(['!disabled'])
         self.progress_bar.start()
         
-        if self.debug_mode:
-            self.stderr_text.configure(state='normal')
-            self.stderr_text.delete('1.0', 'end')
-            self.stderr_text.configure(state='disabled')
+        #self.stderr_text.configure(state='normal')
+        #self.stderr_text.delete('1.0', 'end')
+        #self.stderr_text.configure(state='disabled')
         self.temp_stderr = ""
         self._clear_results()
 
@@ -385,8 +374,6 @@ class MyEverythingApp(ttk.Frame):
                 
             elif item_type == 'error_output':
                 self.temp_stderr = data
-                if self.debug_mode:
-                    self._append_stderr(data)
                 
             elif item_type == 'complete':
                 self._finalize_search(success=True, return_code=data)
@@ -456,10 +443,10 @@ class MyEverythingApp(ttk.Frame):
             except Exception as e:
                 self.output_queue.put(('hard_error', str(e)))
 
-    def _append_stderr(self, txt):
-        self.stderr_text.configure(state='normal')
-        self.stderr_text.insert('end', txt + '\n')
-        self.stderr_text.configure(state='disabled')
+    #def _append_stderr(self, txt):
+    #    self.stderr_text.configure(state='normal')
+    #    self.stderr_text.insert('end', txt + '\n')
+    #    self.stderr_text.configure(state='disabled')
 
     def _clear_results(self):
         for row in self.tree.get_children():
