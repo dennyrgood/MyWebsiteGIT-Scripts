@@ -264,7 +264,7 @@ def main():
     
     if not args.command:
         # Launch interactive menu
-        menu_script = scripts_dir / "dms_menu.py"
+        menu_script = scripts_dir / "dms_util" / "dms_menu.py"
         result = subprocess.run([sys.executable, str(menu_script)])
         return result.returncode
     

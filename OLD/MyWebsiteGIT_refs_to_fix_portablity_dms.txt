@@ -1,0 +1,6 @@
+/Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms_util/dms_init.py
+/Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms_util/dms_apply.py
+/Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms_util/dms_review.py
+/Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms_util/dms_render.py
+/Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms
+/Users/dennishmathes/Documents/MyWebsiteGIT/Scripts/dms_menu.py
