@@ -164,14 +164,17 @@ class MyEverythingApp(ttk.Frame):
             '-name "*.pyc" -o -name "*.log"',
             r'-exec chmod 644 {} \;',
             '-print0 | xargs -0 grep -l "search_string"',
-            '-print0 | xargs -0 grep -l "MyWebsiteGIT" > /tmp/results.txt']
+            '-print0 | xargs -0 grep -l "MyWebsiteGIT" > /tmp/results.txt',
+            '-not -name "*.pyc" -print0 | xargs -0 grep -l "MyWebsiteGIT"',
+            r'-not \( -name "*.pyc" -or -name "*.txt" -or -name "*.md" \) -print0 | xargs -0 grep -l "MyWebsiteGIT"'
+            ]
  
         def insert_snippet(event=None):
             sel = snippet_box.get()
             if sel:
                 other_entry.insert('end', sel + ' ')
-        snippet_box = ttk.Combobox(filters_frame, values=snippets, state='readonly')
-        snippet_box.grid(row=6, column=1, sticky='w', pady=(6,0))
+        snippet_box = ttk.Combobox(filters_frame, values=snippets, state='readonly', height=15)
+        snippet_box.grid(row=6, column=1, sticky='ew', pady=(6,0))
         snippet_box.bind('<<ComboboxSelected>>', insert_snippet)
 
         filters_frame.columnconfigure(1, weight=1)
