@@ -1,0 +1,8 @@
+{
+  "ignored_files": [
+    "index.html",
+    "DMS_*",
+    "ARCHIVE_*",
+    "CLEANUP_*"
+  ]
+}

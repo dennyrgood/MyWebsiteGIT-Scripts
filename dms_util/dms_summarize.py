@@ -324,8 +324,18 @@ def main():
     
     # Load state to get existing categories
     state = load_state(state_path)
-    existing_categories = state.get('categories', [])
+    all_categories = state.get('categories', [])
+    # Filter out categories starting with ARCHIVE
+    existing_categories = [cat for cat in all_categories if not cat.startswith('ARCHIVE')]
     
+    if all_categories and existing_categories:
+        filtered_out = len(all_categories) - len(existing_categories)
+        print(f"Categories being suggested to Ollama: {', '.join(existing_categories)}")
+        if filtered_out > 0:
+            print(f"  (Filtered out {filtered_out} ARCHIVE categories)")
+    elif all_categories:
+        print(f"All categories filtered out. Using defaults.")
+    print()
     # Load scan results
     scan_results = load_scan_results(scan_path)
     files_to_summarize = scan_results.get('new_files', []) + scan_results.get('changed_files', [])

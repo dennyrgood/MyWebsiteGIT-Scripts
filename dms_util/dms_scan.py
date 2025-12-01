@@ -17,6 +17,7 @@ import hashlib
 import subprocess
 from pathlib import Path
 from datetime import datetime
+from fnmatch import fnmatch
 
 def compute_file_hash(path: Path) -> str:
     """Compute SHA-256 hash of file contents"""
@@ -50,18 +51,57 @@ def load_state(state_path: Path) -> dict:
             "documents": {}
         }
 
-def scan_directory(doc_dir: Path, state: dict) -> tuple:
+def load_ignore_list() -> set:
+    """Load dms_ignore.json from scripts directory"""
+    scripts_dir = Path(__file__).parent.parent
+    ignore_path = scripts_dir / "dms_ignore.json"
+    
+    if not ignore_path.exists():
+        return set()
+    
+    try:
+        data = json.loads(ignore_path.read_text(encoding='utf-8'))
+        ignored = data.get("ignored_files", [])
+        return set(ignored)
+    except Exception as e:
+        print(f"WARNING: Error loading ignore list: {e}", file=sys.stderr)
+        return set()
+
+def is_ignored(filename: str, ignore_list: set) -> bool:
+    """Check if filename matches any pattern in ignore list
+    
+    Supports both exact matches and wildcards (fnmatch patterns)
+    Examples: "index.html", "*.log", "DMS_LOG_*"
+    """
+    for pattern in ignore_list:
+        if fnmatch(filename, pattern):
+            return True
+    return False
+
+def scan_directory(doc_dir: Path, state: dict, ignore_list: set = None) -> tuple:
     """Scan Doc/ directory and detect changes
     
     Handles file pairs:
     - Original file (image, PDF, etc) + readable version in md_outputs/
     - Only the readable version is tracked as a document
     - Original file is linked but ignored during scan
+    
+    Args:
+        doc_dir: Path to Doc directory
+        state: Loaded state dict
+        ignore_list: Set of patterns to ignore (e.g., {"index.html", "DMS_LOG_*"})
+    
+    Returns:
+        Tuple of (new_files, changed_files, missing_files, ignored_files)
     """
+    
+    if ignore_list is None:
+        ignore_list = set()
     
     new_files = []
     changed_files = []
     missing_files = []
+    ignored_files = []
     
     state_docs = state.get("documents", {})
     
@@ -114,6 +154,12 @@ def scan_directory(doc_dir: Path, state: dict) -> tuple:
         if './md_outputs/' in rel_path:
             continue
         
+        # Skip ignored files
+        filename = Path(rel_path).name
+        if is_ignored(filename, ignore_list):
+            ignored_files.append(rel_path)
+            continue
+        
         # For original files that have readable versions:
         # Just process the original file normally, don't track the readable version separately
         # The readable version is only used during summarization
@@ -130,11 +176,12 @@ def scan_directory(doc_dir: Path, state: dict) -> tuple:
                     "file_mtime": get_file_mtime_iso(file_path)
                 })
             else:
-                # Check if changed
-                if state_docs[rel_path].get("hash") != file_hash:
+                # Check if changed (but skip if old hash is empty - file just wasn't hashed yet)
+                old_hash = state_docs[rel_path].get("hash", "")
+                if old_hash and old_hash != file_hash:
                     changed_files.append({
                         "path": rel_path,
-                        "old_hash": state_docs[rel_path].get("hash"),
+                        "old_hash": old_hash,
                         "new_hash": file_hash
                     })
             
@@ -153,11 +200,12 @@ def scan_directory(doc_dir: Path, state: dict) -> tuple:
                 "file_mtime": get_file_mtime_iso(file_path)
             })
         else:
-            # Check if changed
-            if state_docs[rel_path].get("hash") != file_hash:
+            # Check if changed (but skip if old hash is empty - file just wasn't hashed yet)
+            old_hash = state_docs[rel_path].get("hash", "")
+            if old_hash and old_hash != file_hash:
                 changed_files.append({
                     "path": rel_path,
-                    "old_hash": state_docs[rel_path].get("hash"),
+                    "old_hash": old_hash,
                     "new_hash": file_hash
                 })
     
@@ -169,10 +217,13 @@ def scan_directory(doc_dir: Path, state: dict) -> tuple:
                 "was_category": doc_data.get("category", "Unknown")
             })
     
-    return new_files, changed_files, missing_files
+    return new_files, changed_files, missing_files, ignored_files
 
-def print_report(new_files, changed_files, missing_files, status_only=False):
+def print_report(new_files, changed_files, missing_files, ignored_files=None, status_only=False):
     """Print scan report"""
+    
+    if ignored_files is None:
+        ignored_files = []
     
     print(f"\n=== DMS SCAN REPORT ===\n")
     print(f"New files: {len(new_files)}")
@@ -195,6 +246,13 @@ def print_report(new_files, changed_files, missing_files, status_only=False):
             print(f"  - {f['path']} (was {f['was_category']})")
         if len(missing_files) > 10:
             print(f"  ... and {len(missing_files) - 10} more")
+    
+    print(f"\nIgnored files: {len(ignored_files)}")
+    if ignored_files and not status_only:
+        for f in ignored_files[:10]:
+            print(f"  ⊘ {f}")
+        if len(ignored_files) > 10:
+            print(f"  ... and {len(ignored_files) - 10} more")
     
     total = len(new_files) + len(changed_files) + len(missing_files)
     print(f"\nTotal changes: {total}")
@@ -236,11 +294,14 @@ def main():
     # Load state
     state = load_state(state_path)
     
+    # Load ignore list
+    ignore_list = load_ignore_list()
+    
     # Scan directory
-    new_files, changed_files, missing_files = scan_directory(doc_dir, state)
+    new_files, changed_files, missing_files, ignored_files = scan_directory(doc_dir, state, ignore_list)
     
     # Print report
-    total = print_report(new_files, changed_files, missing_files, args.status_only)
+    total = print_report(new_files, changed_files, missing_files, ignored_files, args.status_only)
     
     if total == 0:
         return 0

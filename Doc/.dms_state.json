@@ -2,7 +2,7 @@
   "metadata": {
     "created": "2025-11-20T16:31:34.392771",
     "last_scan": null,
-    "last_apply": "2025-11-25T00:18:27.733013"
+    "last_apply": "2025-12-01T13:19:03.025877"
   },
   "categories": [
     "Guides",
@@ -18,10 +18,10 @@
     "./Prompt.copilot.resume.edits.txt": {
       "hash": "",
       "category": "Workflows",
-      "summary": "Document describes a Document Management System for git repositories with an interactive menu-driven workflow and AI-assisted document processing capabilities.",
+      "summary": "Describes a Document Management System for git repos with scripts for scanning, OCRing images and PDFs, summarizing text, and maintaining state files.",
       "summary_approved": true,
       "title": "Prompt.copilot.resume.edits",
-      "last_processed": "2025-11-25T00:18:27.732795",
+      "last_processed": "2025-12-01T13:19:03.025803",
       "file_mtime": "2025-11-25T00:16:22.487813"
     },
     "./DMS_CODE_EVALUATION.md": {
@@ -78,15 +78,6 @@
       "last_processed": "2025-11-20T17:14:30.747073",
       "file_mtime": "2025-11-20T17:12:09.046262"
     },
-    "./index.html": {
-      "hash": "",
-      "category": "Guides",
-      "summary": "This document is an HTML index page with styled elements for navigation and content display, designed as part of project documentation.",
-      "summary_approved": true,
-      "title": "index",
-      "last_processed": "2025-11-25T00:18:27.732938",
-      "file_mtime": "2025-11-24T18:38:01.719292"
-    },
     "./Note.about.tags.txt": {
       "hash": "sha256:7d3777e3a0ef566a853902380ac659187d83082e51454d37d01db3d2db8a1ca6",
       "category": "Workflows",
@@ -108,10 +99,10 @@
     "./NewRepoSetup.txt": {
       "hash": "",
       "category": "Guides",
-      "summary": "This guide provides step-by-step instructions for creating and syncing a GitHub repository using HTTPS on macOS, including both web and terminal commands.",
+      "summary": "This document provides step-by-step instructions for creating and syncing a new GitHub repository using HTTPS on macOS.",
       "summary_approved": true,
       "title": "NewRepoSetup",
-      "last_processed": "2025-11-25T00:18:27.732981",
+      "last_processed": "2025-12-01T13:19:03.025845",
       "file_mtime": "2025-11-24T23:45:05.969309"
     },
     "./Complete Guide_ Converting Python Scripts to macOS Apps.pdf": {

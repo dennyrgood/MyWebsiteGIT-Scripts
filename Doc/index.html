@@ -26,6 +26,9 @@
     .search{flex:1;display:flex;align-items:center;background:var(--glass);padding:8px;border-radius:8px}
     .search input{flex:1;border:0;background:transparent;color:inherit;padding:6px 8px;font-size:14px;outline:none}
     .search small{color:var(--muted);font-size:12px;margin-left:6px}
+    .sort-btn{padding:8px 12px;background:var(--glass);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:inherit;cursor:pointer;font-size:13px;white-space:nowrap;transition:background 0.2s}
+    .sort-btn:hover{background:rgba(255,255,255,0.08)}
+    .sort-btn.active{background:var(--accent);color:#000;font-weight:600}
     .category {margin-top:10px}
     .category h2{margin:6px 0 6px;font-size:13px;color:var(--accent)}
     ul.files{list-style:none;padding:0;margin:0}
@@ -87,7 +90,7 @@ SCRIPTS_DIR = Path(__file__).parent.parent
   "metadata": {
     "created": "2025-11-20T16:31:34.392771",
     "last_scan": null,
-    "last_apply": "2025-11-25T00:18:27.733013"
+    "last_apply": "2025-12-01T13:19:03.025877"
   },
   "categories": [
     "Guides",
@@ -103,10 +106,10 @@ SCRIPTS_DIR = Path(__file__).parent.parent
     "./Prompt.copilot.resume.edits.txt": {
       "hash": "",
       "category": "Workflows",
-      "summary": "Document describes a Document Management System for git repositories with an interactive menu-driven workflow and AI-assisted document processing capabilities.",
+      "summary": "Describes a Document Management System for git repos with scripts for scanning, OCRing images and PDFs, summarizing text, and maintaining state files.",
       "summary_approved": true,
       "title": "Prompt.copilot.resume.edits",
-      "last_processed": "2025-11-25T00:18:27.732795",
+      "last_processed": "2025-12-01T13:19:03.025803",
       "file_mtime": "2025-11-25T00:16:22.487813"
     },
     "./DMS_CODE_EVALUATION.md": {
@@ -163,15 +166,6 @@ SCRIPTS_DIR = Path(__file__).parent.parent
       "last_processed": "2025-11-20T17:14:30.747073",
       "file_mtime": "2025-11-20T17:12:09.046262"
     },
-    "./index.html": {
-      "hash": "",
-      "category": "Guides",
-      "summary": "This document is an HTML index page with styled elements for navigation and content display, designed as part of project documentation.",
-      "summary_approved": true,
-      "title": "index",
-      "last_processed": "2025-11-25T00:18:27.732938",
-      "file_mtime": "2025-11-24T18:38:01.719292"
-    },
     "./Note.about.tags.txt": {
       "hash": "sha256:7d3777e3a0ef566a853902380ac659187d83082e51454d37d01db3d2db8a1ca6",
       "category": "Workflows",
@@ -193,10 +187,10 @@ SCRIPTS_DIR = Path(__file__).parent.parent
     "./NewRepoSetup.txt": {
       "hash": "",
       "category": "Guides",
-      "summary": "This guide provides step-by-step instructions for creating and syncing a GitHub repository using HTTPS on macOS, including both web and terminal commands.",
+      "summary": "This document provides step-by-step instructions for creating and syncing a new GitHub repository using HTTPS on macOS.",
       "summary_approved": true,
       "title": "NewRepoSetup",
-      "last_processed": "2025-11-25T00:18:27.732981",
+      "last_processed": "2025-12-01T13:19:03.025845",
       "file_mtime": "2025-11-24T23:45:05.969309"
     },
     "./Complete Guide_ Converting Python Scripts to macOS Apps.pdf": {
@@ -250,38 +244,32 @@ SCRIPTS_DIR = Path(__file__).parent.parent
           <input type="text" id="searchInput" placeholder="Search..." />
           <small id="resultCount">0 shown</small>
         </div>
+        <button id="sortBtn" class="sort-btn" title="Sort by date (most recent first)">📅 Newest</button>
       </div>
 
             <section class="category" data-category="Guides">
         <h2>Guides</h2>
         <ul class="files">
-            <li class="file" data-path="./Complete Guide_ Converting Python Scripts to macOS Apps.pdf" data-link="./Complete Guide_ Converting Python Scripts to macOS Apps.pdf">
+            <li class="file" data-path="./Complete Guide_ Converting Python Scripts to macOS Apps.pdf" data-link="./Complete Guide_ Converting Python Scripts to macOS Apps.pdf" data-mtime="2025-11-18T13:45:36.831797">
       <div class="meta">
         <div class="title"><a href="#./Complete Guide_ Converting Python Scripts to macOS Apps.pdf" class="file-link">Complete Guide_ Converting Python Scripts to macOS Apps</a></div>
         <div class="desc">This guide provides comprehensive instructions for converting Python scripts into macOS applications using tools like PyObjC and Applescript.</div>
         <div class="tags small-muted">PDF · Guides</div>
         <div class="mtime">📅 2025-11-18 13:45:36</div>
       </div>
-            </li>            <li class="file" data-path="./How_to_look_at_old_file.md" data-link="./How_to_look_at_old_file.md">
+            </li>            <li class="file" data-path="./How_to_look_at_old_file.md" data-link="./How_to_look_at_old_file.md" data-mtime="2025-11-20T17:12:09.046262">
       <div class="meta">
         <div class="title"><a href="#./How_to_look_at_old_file.md" class="file-link">How_to_look_at_old_file</a></div>
         <div class="desc">This document provides instructions for creating a backup of an old version of &#x27;dms_summarize.py&#x27; from Git using shell commands.</div>
         <div class="tags small-muted">MD · Guides</div>
         <div class="mtime">📅 2025-11-20 17:12:09</div>
       </div>
-            </li>            <li class="file" data-path="./NewRepoSetup.txt" data-link="./NewRepoSetup.txt">
+            </li>            <li class="file" data-path="./NewRepoSetup.txt" data-link="./NewRepoSetup.txt" data-mtime="2025-11-24T23:45:05.969309">
       <div class="meta">
         <div class="title"><a href="#./NewRepoSetup.txt" class="file-link">NewRepoSetup</a></div>
-        <div class="desc">This guide provides step-by-step instructions for creating and syncing a GitHub repository using HTTPS on macOS, including both web and terminal commands.</div>
+        <div class="desc">This document provides step-by-step instructions for creating and syncing a new GitHub repository using HTTPS on macOS.</div>
         <div class="tags small-muted">TXT · Guides</div>
         <div class="mtime">📅 2025-11-24 23:45:05</div>
-      </div>
-            </li>            <li class="file" data-path="./index.html" data-link="./index.html">
-      <div class="meta">
-        <div class="title"><a href="#./index.html" class="file-link">index</a></div>
-        <div class="desc">This document is an HTML index page with styled elements for navigation and content display, designed as part of project documentation.</div>
-        <div class="tags small-muted">HTML · Guides</div>
-        <div class="mtime">📅 2025-11-24 18:38:01</div>
       </div>
             </li>
         </ul>
@@ -290,24 +278,24 @@ SCRIPTS_DIR = Path(__file__).parent.parent
       <section class="category" data-category="Workflows">
         <h2>Workflows</h2>
         <ul class="files">
-            <li class="file" data-path="./DMS_CODE_EVALUATION.md" data-link="./DMS_CODE_EVALUATION.md">
+            <li class="file" data-path="./DMS_CODE_EVALUATION.md" data-link="./DMS_CODE_EVALUATION.md" data-mtime="2025-11-25T00:16:06.240616">
       <div class="meta">
         <div class="title"><a href="#./DMS_CODE_EVALUATION.md" class="file-link">DMS_CODE_EVALUATION</a></div>
         <div class="desc">This document evaluates the architecture and functionality of a Document Management System, highlighting its strengths and areas for improvement with a grading system.</div>
         <div class="tags small-muted">MD · Workflows</div>
         <div class="mtime">📅 2025-11-25 00:16:06</div>
       </div>
-            </li>            <li class="file" data-path="./Note.about.tags.txt" data-link="./Note.about.tags.txt">
+            </li>            <li class="file" data-path="./Note.about.tags.txt" data-link="./Note.about.tags.txt" data-mtime="2025-11-14T21:27:36.749210">
       <div class="meta">
         <div class="title"><a href="#./Note.about.tags.txt" class="file-link">Note.about.tags</a></div>
         <div class="desc">The document outlines steps for marking the stability of Python code with Git tags and pushing them, followed by creating a release page on GitHub.</div>
         <div class="tags small-muted">TXT · Workflows</div>
         <div class="mtime">📅 2025-11-14 21:27:36</div>
       </div>
-            </li>            <li class="file" data-path="./Prompt.copilot.resume.edits.txt" data-link="./Prompt.copilot.resume.edits.txt">
+            </li>            <li class="file" data-path="./Prompt.copilot.resume.edits.txt" data-link="./Prompt.copilot.resume.edits.txt" data-mtime="2025-11-25T00:16:22.487813">
       <div class="meta">
         <div class="title"><a href="#./Prompt.copilot.resume.edits.txt" class="file-link">Prompt.copilot.resume.edits</a></div>
-        <div class="desc">Document describes a Document Management System for git repositories with an interactive menu-driven workflow and AI-assisted document processing capabilities.</div>
+        <div class="desc">Describes a Document Management System for git repos with scripts for scanning, OCRing images and PDFs, summarizing text, and maintaining state files.</div>
         <div class="tags small-muted">TXT · Workflows</div>
         <div class="mtime">📅 2025-11-25 00:16:22</div>
       </div>
@@ -318,7 +306,7 @@ SCRIPTS_DIR = Path(__file__).parent.parent
       <section class="category" data-category="Scripts">
         <h2>Scripts</h2>
         <ul class="files">
-            <li class="file" data-path="./DMS_Scripts_and_Dependencies.md" data-link="./DMS_Scripts_and_Dependencies.md">
+            <li class="file" data-path="./DMS_Scripts_and_Dependencies.md" data-link="./DMS_Scripts_and_Dependencies.md" data-mtime="2025-11-21T11:32:17.756438">
       <div class="meta">
         <div class="title"><a href="#./DMS_Scripts_and_Dependencies.md" class="file-link">DMS_Scripts_and_Dependencies</a></div>
         <div class="desc">Document outlines scripts invoked by &#x27;dms&#x27;, referenced configuration files and external tools used.</div>
@@ -332,14 +320,14 @@ SCRIPTS_DIR = Path(__file__).parent.parent
       <section class="category" data-category="Models">
         <h2>Models</h2>
         <ul class="files">
-            <li class="file" data-path="./AI Models for Python Development_ A Ranked Comparison.pdf" data-link="./AI Models for Python Development_ A Ranked Comparison.pdf">
+            <li class="file" data-path="./AI Models for Python Development_ A Ranked Comparison.pdf" data-link="./AI Models for Python Development_ A Ranked Comparison.pdf" data-mtime="2025-11-21T17:14:32.743442">
       <div class="meta">
         <div class="title"><a href="#./AI Models for Python Development_ A Ranked Comparison.pdf" class="file-link">AI Models for Python Development_ A Ranked Comparison</a></div>
         <div class="desc">The document provides an in-depth comparison and ranking of various AI models specifically tailored for Python development.</div>
         <div class="tags small-muted">PDF · Models</div>
         <div class="mtime">📅 2025-11-21 17:14:32</div>
       </div>
-            </li>            <li class="file" data-path="./DMS Summarization Pipeline Debug Report (Updated).pdf" data-link="./DMS Summarization Pipeline Debug Report (Updated).pdf">
+            </li>            <li class="file" data-path="./DMS Summarization Pipeline Debug Report (Updated).pdf" data-link="./DMS Summarization Pipeline Debug Report (Updated).pdf" data-mtime="2025-11-19T20:47:51.071385">
       <div class="meta">
         <div class="title"><a href="#./DMS Summarization Pipeline Debug Report (Updated).pdf" class="file-link">DMS Summarization Pipeline Debug Report (Updated)</a></div>
         <div class="desc">Debug report for the DMS Summarization Pipeline; details discrepaninues and fixes in summarization process.</div>
@@ -353,21 +341,21 @@ SCRIPTS_DIR = Path(__file__).parent.parent
       <section class="category" data-category="Old-Workflows">
         <h2>Old-Workflows</h2>
         <ul class="files">
-            <li class="file" data-path="./DMS_REFACTOR_PLAN.md" data-link="./DMS_REFACTOR_PLAN.md">
+            <li class="file" data-path="./DMS_REFACTOR_PLAN.md" data-link="./DMS_REFACTOR_PLAN.md" data-mtime="2025-11-20T11:29:53.727926">
       <div class="meta">
         <div class="title"><a href="#./DMS_REFACTOR_PLAN.md" class="file-link">DMS_REFACTOR_PLAN</a></div>
         <div class="desc">This document outlines the refactor plan for separating data from HTML in a documentation system and replacing manual string manipulation with JSON-based workflows.</div>
         <div class="tags small-muted">MD · Old-Workflows</div>
         <div class="mtime">📅 2025-11-20 11:29:53</div>
       </div>
-            </li>            <li class="file" data-path="./DMS_WORKFLOW.md" data-link="./DMS_WORKFLOW.md">
+            </li>            <li class="file" data-path="./DMS_WORKFLOW.md" data-link="./DMS_WORKFLOW.md" data-mtime="2025-11-20T12:00:16.316664">
       <div class="meta">
         <div class="title"><a href="#./DMS_WORKFLOW.md" class="file-link">DMS_WORKFLOW</a></div>
         <div class="desc">DMS Workflow document details steps for using an AI-based Document Management System (DMS), focusing on user interaction with file addition/removal and automated processes like scanning, OCR conversion, summarization.</div>
         <div class="tags small-muted">MD · Old-Workflows</div>
         <div class="mtime">📅 2025-11-20 12:00:16</div>
       </div>
-            </li>            <li class="file" data-path="./Fix Three Critical Bugs in DMS Pipeline.pdf" data-link="./Fix Three Critical Bugs in DMS Pipeline.pdf">
+            </li>            <li class="file" data-path="./Fix Three Critical Bugs in DMS Pipeline.pdf" data-link="./Fix Three Critical Bugs in DMS Pipeline.pdf" data-mtime="2025-11-19T21:06:41.171019">
       <div class="meta">
         <div class="title"><a href="#./Fix Three Critical Bugs in DMS Pipeline.pdf" class="file-link">Fix Three Critical Bugs in DMS Pipeline</a></div>
         <div class="desc">This document details the resolution of three critical bugs in the DMS pipeline, aimed at enhancing software reliability and efficiency.</div>
@@ -381,14 +369,14 @@ SCRIPTS_DIR = Path(__file__).parent.parent
       <section class="category" data-category="GIT">
         <h2>GIT</h2>
         <ul class="files">
-            <li class="file" data-path="./Git Command Line Workflow Cheatsheet.pdf" data-link="./Git Command Line Workflow Cheatsheet.pdf">
+            <li class="file" data-path="./Git Command Line Workflow Cheatsheet.pdf" data-link="./Git Command Line Workflow Cheatsheet.pdf" data-mtime="2025-11-02T18:04:31.421817">
       <div class="meta">
         <div class="title"><a href="#./Git Command Line Workflow Cheatsheet.pdf" class="file-link">Git Command Line Workflow Cheatsheet</a></div>
         <div class="desc">This document serves as a cheat sheet for using Git command line tools effectively.</div>
         <div class="tags small-muted">PDF · GIT</div>
         <div class="mtime">📅 2025-11-02 18:04:31</div>
       </div>
-            </li>            <li class="file" data-path="./gh.help.txt" data-link="./gh.help.txt">
+            </li>            <li class="file" data-path="./gh.help.txt" data-link="./gh.help.txt" data-mtime="2025-11-03T19:34:49.754102">
       <div class="meta">
         <div class="title"><a href="#./gh.help.txt" class="file-link">gh.help</a></div>
         <div class="desc">This document provides instructions for using the GitHub CLI (gh) toolset in setting up repositories, managing pull requests and issues, utilizing CI/CD workflows with GitHub Actions.</div>
@@ -418,11 +406,14 @@ SCRIPTS_DIR = Path(__file__).parent.parent
 
   <script>
     const searchInput = document.getElementById('searchInput');
+    const sortBtn = document.getElementById('sortBtn');
     const resultCount = document.getElementById('resultCount');
     const viewerTitle = document.getElementById('viewerTitle');
     const mdViewer = document.getElementById('mdViewer');
     const rawViewer = document.getElementById('rawViewer');
     const pdfViewer = document.getElementById('pdfViewer');
+    
+    let sortByDate = false;
 
     function extOf(path) {
       const ext = path.split('.').pop()?.toLowerCase() || '';
@@ -531,23 +522,42 @@ SCRIPTS_DIR = Path(__file__).parent.parent
     function filterFiles(q){
       q = (q||'').toLowerCase().trim();
       const files = document.querySelectorAll('li.file');
-      let visible = 0;
+      let visible = [];
       files.forEach(li=>{
         const title = li.querySelector('.title').innerText.toLowerCase();
         const desc = li.querySelector('.desc').innerText.toLowerCase();
         const tags = li.querySelector('.tags').innerText.toLowerCase();
         if(!q || title.includes(q) || desc.includes(q) || tags.includes(q)){
           li.style.display = '';
-          visible++;
+          visible.push({el: li, mtime: li.dataset.mtime || ''});
         } else {
           li.style.display = 'none';
         }
       });
-      resultCount.textContent = visible ? `${visible} shown` : 'no results';
+      
+      if(sortByDate){
+        visible.sort((a,b)=>{
+          if(!a.mtime || !b.mtime) return 0;
+          return new Date(b.mtime) - new Date(a.mtime);
+        });
+        
+        visible.forEach(item=>{
+          item.el.parentElement.appendChild(item.el);
+        });
+      }
+      
+      resultCount.textContent = visible.length ? `${visible.length} shown` : 'no results';
     }
 
     searchInput.addEventListener('input', (e)=>{
       filterFiles(e.target.value);
+    });
+
+    sortBtn.addEventListener('click', ()=>{
+      sortByDate = !sortByDate;
+      sortBtn.classList.toggle('active', sortByDate);
+      sortBtn.textContent = sortByDate ? '📅 Oldest' : '📅 Newest';
+      filterFiles(searchInput.value);
     });
 
     window.addEventListener('load', ()=>{
