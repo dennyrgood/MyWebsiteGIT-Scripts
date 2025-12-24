@@ -89,31 +89,28 @@ def show_menu():
     # Simplified structure: (command, description)
     # Descriptions are pre-abbreviated to fit.
     column1 = [
-        ("\033[1mWorkflow\033[0m", " "),
+        ("\033[1mWorkflow\033[0m", ""),
         ("  \033[94m1\033[0m / scan", "New/changed files"),
         ("  \033[94m2\033[0m / image-to-text", "Convert images to text"),
         ("  \033[94m3\033[0m / summarize", "Gen AI summaries"),
         ("  \033[94m4\033[0m / review", "Interactive review"),
         ("  \033[94m5\033[0m / apply", "Apply approved changes"),
-        ("  \033[94m \033[0m ", " "),
-        ("\033[1mDiagnostic\033[0m", " "),
+        ("", ""),
+        ("\033[1mDiagnostic\033[0m", ""),
         ("  \033[94m6\033[0m / c", "Check system"),
         ("  \033[94m7\033[0m / l", "View logs"),
-        ("  \033[94m \033[0m ", " "),
-        ("  \033[94m \033[0m ", " "),
-        ("  \033[94m \033[0m ", " "),
     ]
     
     column2 = [
-        ("\033[1mManagement\033[0m", " "),
+        ("\033[1mManagement\033[0m", ""),
         ("  \033[94mo\033[0m / ocr", "OCR images/PDFs"),
-        ("  \033[94mx\033[0m / cleanup", "Cleanup files"),
+        ("  \033[94mx\033[0m / cleanup", "Cleanup missing files"),
         ("  \033[94md\033[0m / delete", "Del entries"),
         ("  \033[94mg\033[0m / categories", "Manage cats"),
-        ("  status", "Show current"),
-        ("  render", "index.html"),
-        ("  init", "Init new DMS"),
-        (" ", " "),
+        ("  status", "Show current state"),
+        ("  render", "Regen index.html"),
+        ("  init", "Initialize new DMS"),
+        ("", ""),
         ("\033[1mGeneral\033[0m", ""),
         ("  \033[94mh\033[0m", "Help / shortcuts"),
         ("  \033[94mmenu\033[0m", "Show this menu"),
@@ -144,7 +141,7 @@ def show_menu():
                     right_output = f"{cmd.ljust(18)} {desc}"
 
         # Print the formatted row
-        print(f"{left_output.ljust(54)}   {right_output}")
+        print(f"{left_output.ljust(54)} │ {right_output}")
 
     print("─" * 80)
 

@@ -1,18 +1,17 @@
 {
-  "timestamp": "2025-12-04T19:52:32.574161",
+  "timestamp": "2025-12-24T21:59:04.475726",
   "summaries": [
     {
       "file": {
-        "path": "./Here are the most commonly used find parameters on macOS.docx",
-        "hash": "sha256:7fe0c9dcd3639de37a2385038665b44f722f673b830c969c43197f7298261fa9",
-        "size": 20209,
-        "readable_version": "./md_outputs/Here are the most commonly used find parameters on macOS.md"
+        "path": "./index_iphone.html",
+        "hash": "sha256:ebd9aad714d7fc5e8fdf2c1f1113e07506a15b333b3cde7dcee160195233e349",
+        "size": 11709
       },
-      "summary": "This document provides a concise list of commonly used 'find' command parameters and actions for macOS and Unix systems, aimed at practical daily use scenarios.",
-      "category": "QuickRefs",
+      "summary": "This HTML document serves as an index page for mobile project documentation, featuring a styled sidebar with file listings and navigation.",
+      "category": "Guides",
       "is_new_category": false,
-      "title": "Here are the most commonly used find parameters on macOS",
-      "timestamp": "2025-12-04T19:52:32.574106"
+      "title": "index_iphone",
+      "timestamp": "2025-12-24T21:59:04.475682"
     }
   ]
 }

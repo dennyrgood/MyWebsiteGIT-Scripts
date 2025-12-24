@@ -120,6 +120,16 @@ def apply_changes(state_path: Path, pending_path: Path, scripts_dir: Path) -> in
         capture_output=False
     )
     
+    # Now render index_iphone.html from the new state
+    print(f"\n==> Regenerating index_iphone.html from state...\n")
+    
+    render_script = scripts_dir / "dms_util" / "dms_render_iphone.py"
+    result = subprocess.run(
+        [sys.executable, str(render_script), 
+         "--doc", str(state_path.parent)],
+        capture_output=False
+    )
+    
     if result.returncode != 0:
         print("ERROR: Failed to render index.html", file=sys.stderr)
         return 1

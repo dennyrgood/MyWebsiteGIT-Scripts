@@ -2,7 +2,7 @@
   "metadata": {
     "created": "2025-11-20T16:31:34.392771",
     "last_scan": null,
-    "last_apply": "2025-12-04T20:08:14.015021"
+    "last_apply": "2025-12-24T21:59:16.319721"
   },
   "categories": [
     "Guides",
@@ -160,6 +160,15 @@
       "last_processed": "2025-12-04T20:08:14.014970",
       "file_mtime": "2025-11-18T11:27:00.221920",
       "readable_version": "./md_outputs/Here are the most commonly used find parameters on macOS.md"
+    },
+    "./index_iphone.html": {
+      "hash": "sha256:ebd9aad714d7fc5e8fdf2c1f1113e07506a15b333b3cde7dcee160195233e349",
+      "category": "Guides",
+      "summary": "This HTML document serves as an index page for mobile project documentation, featuring a styled sidebar with file listings and navigation.",
+      "summary_approved": true,
+      "title": "index_iphone",
+      "last_processed": "2025-12-24T21:59:16.319685",
+      "file_mtime": "2025-12-24T21:55:42.320955"
     }
   }
 }
