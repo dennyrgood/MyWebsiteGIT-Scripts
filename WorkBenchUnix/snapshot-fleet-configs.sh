@@ -4,7 +4,7 @@
 # Manual-run only — review `git diff` and commit yourself after running.
 
 set -e
-DEST=~/repos/fleet-configs/WorkBenchUnix/wbu-config-snapshot
+DEST=~/repos/fleet-configs/WorkBenchUnix
 
 cp -p /etc/fstab "$DEST/fstab.txt"
 cp -p ~/immich-app/docker-compose.yml "$DEST/docker-compose.yml"
