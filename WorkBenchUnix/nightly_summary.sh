@@ -34,7 +34,7 @@ done
 
 # --- Build TLDR (last line of each log) ---
 # 2026-07-03 06:00 UTC — added TLDR block
-TLDR="=== TLDR ===\n"
+TLDR="============================= TLDR ===============================\n"
 for LOG in "${LOGS[@]}"; do
     if [ -f "$LOG" ]; then
         TLDR+="  $(basename "$LOG"): $(tail -1 "$LOG")\n"
@@ -42,7 +42,7 @@ for LOG in "${LOGS[@]}"; do
         TLDR+="  $(basename "$LOG"): (file not found)\n"
     fi
 done
-TLDR+="\n"
+TLDR+="===================================================================\n\n"
 BODY="${TLDR}${BODY}"
 # --- Determine OK / NOT OK ---
 if echo -e "$BODY" | grep -v "^===" | grep -v "role already exists\|database already exists\|possible errors during restore" | grep -qiE "WARNING|ERROR|rsync error|[^0] genuinely missing"; then
