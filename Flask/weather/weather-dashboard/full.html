@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- 2024-11-08-19:34:00 -->
+<head>
+    <!-- Moon Phase Website: Shows current moon phase icon and days until next full moon -->
+
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moon Phase</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #121212;
+            color: #ffffff;                                                                     
+            margin: 0;
+            padding: 20px;
+        }               
+        .moon-icon {
+            font-size: 150px;
+            margin-bottom: 20px;
+        }
+        .days-until {
+            font-size: 24px;
+        }
+    </style>
+</head>
+
+
+<body>
+    <div class="moon-icon" id="moonIcon">🌕</div>
+    <div class="days-until" id="daysUntil">Days until next full moon: 14</div>
+
+
+
+<script>
+    // Improved moon phase and next full moon calculation
+    function getMoonPhase() {
+        const now = new Date();
+        const synodicMonth = 29.53058867; // Average length of a synodic month in days
+        const knownFullMoon = new Date('2025-12-04T04:02:00Z');
+        let nextFullMoon;
+        if (now < knownFullMoon) {
+            nextFullMoon = knownFullMoon;
+        } else {
+            // Calculate cycles since known full moon
+            let daysSinceKnownFullMoon = (now - knownFullMoon) / (1000 * 60 * 60 * 24);
+            let cycles = Math.ceil(daysSinceKnownFullMoon / synodicMonth);
+            nextFullMoon = new Date(knownFullMoon.getTime() + cycles * synodicMonth * 24 * 60 * 60 * 1000);
+        }
+        let daysUntilNextFullMoon = Math.ceil((nextFullMoon - now) / (1000 * 60 * 60 * 24));
+
+        // Calculate current phase using last full moon
+        let lastFullMoon;
+        if (now < knownFullMoon) {
+            lastFullMoon = new Date(knownFullMoon.getTime() - synodicMonth * 24 * 60 * 60 * 1000);
+        } else {
+            let daysSinceKnownFullMoon = (now - knownFullMoon) / (1000 * 60 * 60 * 24);
+            let cycles = Math.floor(daysSinceKnownFullMoon / synodicMonth);
+            lastFullMoon = new Date(knownFullMoon.getTime() + cycles * synodicMonth * 24 * 60 * 60 * 1000);
+        }
+        let phaseAge = (now - lastFullMoon) / (1000 * 60 * 60 * 24);
+        let phaseIcon;
+        if (phaseAge < 1.84566) {
+            phaseIcon = '🌑'; // New Moon
+        } else if (phaseAge < 5.53699) {
+            phaseIcon = '🌒'; // Waxing Crescent
+        } else if (phaseAge < 9.22831) {
+            phaseIcon = '🌓'; // First Quarter
+        } else if (phaseAge < 12.91963) {
+            phaseIcon = '🌔'; // Waxing Gibbous
+        } else if (phaseAge < 16.61096) {
+            phaseIcon = '🌕'; // Full Moon
+        } else if (phaseAge < 20.30228) {
+            phaseIcon = '🌖'; // Waning Gibbous
+        } else if (phaseAge < 23.99361) {
+            phaseIcon = '🌗'; // Last Quarter
+        } else if (phaseAge < 27.68493) {
+            phaseIcon = '🌘'; // Waning Crescent
+        } else {
+            phaseIcon = '🌑'; // New Moon
+        }
+
+        return { phaseIcon, daysUntilNextFullMoon, nextFullMoon };
+    }
+
+    function updateMoonInfo() {
+    const { phaseIcon, daysUntilNextFullMoon, nextFullMoon } = getMoonPhase();
+    document.getElementById('moonIcon').textContent = phaseIcon;
+    document.getElementById('daysUntil').textContent = `${daysUntilNextFullMoon} days until next full moon: (on ${nextFullMoon.toLocaleDateString()})`;
+    }
+
+    updateMoonInfo();
+
+</script>
+
+</body>
+</html>

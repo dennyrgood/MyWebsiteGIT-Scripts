@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            -webkit-box-sizing: border-box;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            min-height: 100vh;
+            padding: 8px;
+            overflow: hidden;
+        }
+        
+        body.theme-amber {
+            background: -webkit-linear-gradient(315deg, #fef3c7 0%, #fde68a 100%);
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            color: #1c1917;
+        }
+        
+        body.theme-blue {
+            background: -webkit-linear-gradient(315deg, #dbeafe 0%, #bfdbfe 100%);
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            color: #1e3a8a;
+        }
+        
+        body.theme-gray {
+            background: -webkit-linear-gradient(315deg, #f3f4f6 0%, #e5e7eb 100%);
+            background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+            color: #111827;
+        }
+        
+        body.theme-cream {
+            background: -webkit-linear-gradient(315deg, #fefce8 0%, #fef9c3 100%);
+            background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%);
+            color: #292524;
+        }
+        
+        body.theme-green {
+            background: #0d1b0d;
+            color: #33ff33;
+            font-family: 'Courier New', monospace;
+        }
+        
+        body.theme-blackgreen {
+            background: -webkit-linear-gradient(315deg, #86efac 0%, #4ade80 100%);
+            background: linear-gradient(135deg, #86efac 0%, #4ade80 100%);
+            color: #000000;
+        }
+        
+        body.theme-amberblack {
+            background: #000000;
+            color: #fbbf24;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 100%;
+        }
+        
+        .time {
+            font-size: 2em;
+            font-weight: 300;
+            text-align: center;
+            margin: 0;
+        }
+        
+        .date {
+            font-size: 0.85em;
+            text-align: center;
+            opacity: 0.9;
+            margin: 0 0 8px 0;
+        }
+        
+        .weather-row {
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        
+        .weather-card {
+            float: left;
+            width: 48.5%;
+            margin-right: 1.5%;
+        }
+        
+        .weather-card:last-of-type {
+            margin-right: 0;
+        }
+        
+        .card {
+            -webkit-border-radius: 15px;
+            border-radius: 15px;
+            padding: 12px;
+            margin-bottom: 8px;
+        }
+        
+        body.theme-amber .card {
+            background: rgba(255, 255, 255, 0.8);
+            color: #1c1917;
+            -webkit-box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+        }
+        
+        body.theme-blue .card {
+            background: rgba(255, 255, 255, 0.9);
+            color: #1e3a8a;
+            -webkit-box-shadow: 0 4px 16px rgba(30, 58, 138, 0.1);
+            box-shadow: 0 4px 16px rgba(30, 58, 138, 0.1);
+        }
+        
+        body.theme-gray .card {
+            background: #ffffff;
+            color: #111827;
+            -webkit-box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+        }
+        
+        body.theme-cream .card {
+            background: rgba(255, 255, 255, 0.7);
+            color: #292524;
+            border: 1px solid rgba(41, 37, 36, 0.1);
+            -webkit-box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+        
+        body.theme-green .card {
+            background: rgba(0, 20, 0, 0.6);
+            color: #33ff33;
+            border: 2px solid #33ff33;
+            -webkit-box-shadow: 0 0 20px rgba(51, 255, 51, 0.3), inset 0 0 20px rgba(51, 255, 51, 0.1);
+            box-shadow: 0 0 20px rgba(51, 255, 51, 0.3), inset 0 0 20px rgba(51, 255, 51, 0.1);
+            text-shadow: 0 0 5px rgba(51, 255, 51, 0.7);
+        }
+        
+        body.theme-blackgreen .card {
+            background: rgba(220, 252, 231, 0.9);
+            color: #000000;
+            border: 2px solid #166534;
+            -webkit-box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        }
+        
+        body.theme-amberblack .card {
+            background: rgba(20, 20, 20, 0.95);
+            color: #fbbf24;
+            border: 2px solid #f59e0b;
+            -webkit-box-shadow: 0 0 20px rgba(251, 191, 36, 0.2);
+            box-shadow: 0 0 20px rgba(251, 191, 36, 0.2);
+        }
+        
+        body.theme-green .card-title {
+            text-shadow: 0 0 8px rgba(51, 255, 51, 0.8);
+        }
+        
+        .card-title {
+            font-size: 1.1em;
+            margin-bottom: 6px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+        
+        .weather-main {
+            overflow: hidden;
+            margin-bottom: 8px;
+            position: relative;
+            min-height: 200px;
+        }
+        
+        .main-left {
+            float: left;
+            width: 50%;
+        }
+        
+        .main-right {
+            position: absolute;
+            top: 0;
+            right: 0;
+        }
+
+        
+        .temperature {
+            font-size: 9.5em;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .temperature-secondary {
+            font-size: 3.5em;
+            font-weight: 700;
+            opacity: 0.7;
+            line-height: 1;
+        }
+
+        .temperature .temp-unit {
+            font-size: 0.4em;
+            vertical-align: top;
+            display: inline-block;
+            line-height: 1;
+            font-weight: 400;
+            margin-left: 2px;
+        }
+
+        .feels-like {
+            font-size: 2.1em;
+            font-weight: 600;
+            opacity: 0.85;
+            margin-top: 8px;
+        }
+
+        .temperature-secondary .temp-unit {
+            font-size: 0.6em;
+            vertical-align: top;
+            display: inline-block;
+            line-height: 1;
+            font-weight: 400;
+            margin-left: 2px;
+    }
+
+        .feels-like .temp-unit {
+            font-size: 0.6em;
+            vertical-align: top;
+            display: inline-block;
+            line-height: 1;
+            font-weight: 400;
+            margin-left: 2px;
+        }
+
+        .forecast-high .temp-unit,
+        .forecast-low .temp-unit {
+            font-size: 0.7em;
+            vertical-align: top;
+            display: inline-block;
+            line-height: 1;
+            font-weight: 400;
+            margin-left: 2px;
+        }
+
+        .detail-left .temp-unit,
+        .detail-right .temp-unit {
+            font-size: 0.7em;
+            vertical-align: top;
+            display: inline-block;
+            line-height: 1;
+            font-weight: 400;
+            margin-left: 2px;
+        }
+        
+        /*
+        .weather-icon {
+            font-size: 40px;
+            -webkit-transform: scale(5);
+            transform: scale(5);
+            display: inline-block;
+            line-height: 1;
+            margin: 100px 100px 0 0;
+        }
+        */
+        
+        /* try to make work with both old ipad and newer browers, see next block
+
+        // this one works fine for the ipad2!!!
+        
+        .weather-icon {
+            font-size: 40px;
+            -webkit-transform: scale(7);
+            transform: scale(7);
+            display: inline-block;
+            line-height: 1;
+            margin: 20px 50px 0 0;  // Adjust these values to position 
+        }
+
+*/
+        
+/* * CORE STYLES - Only apply absolute positioning and large icon sizing 
+ * for modern/desktop screens (wider than the iPad 2).
+ */
+@media only screen and (min-width: 1025px) {
+    /* The selected code: Pushes the container to the top-right corner. */
+    .main-right {
+        /* Ensure this container is positioned relative to its parent */
+        position: absolute;
+        top: 0;
+        right: 0;
+    }
+
+    .weather-icon {
+        /* For modern browsers (Desktop/Newer Tablets), 100px is the final size */
+        font-size: 100px;
+        display: inline-block;
+        line-height: 1;
+        margin: 0;
+    }
+}
+
+
+/*
+ * iPAD 2 HACK (Targeting 1024x768 and smaller/shorter)
+ * * This block is now completely independent and uses only the old, working styles, 
+ * * relying on the iPad 2's default layout flow since .main-right positioning 
+ * * is NOT applied at this resolution.
+ */
+        
+@media only screen and (max-width: 1024px) and (max-height: 768px) {
+    .weather-icon {
+        /* --- START: Original Working iPad 2 Styles (Cleaned) --- */
+        font-size: 40px;
+        
+        -webkit-transform: scale(7);
+        transform: scale(7);
+        
+        /* Using the original simple margins that worked. (Top, Right, Bottom, Left) */
+        margin: 20px 50px 0 0;
+        
+        display: inline-block;
+        line-height: 1;
+        /* --- END: Original Working iPad 2 Styles --- */
+    }
+}
+     
+        .sun-precept-info { 
+            font-size: 1.8em;
+            font-weight: 600;
+            line-height: 1.6;
+            overflow: hidden;
+            margin-top: 8px;
+            width: 100%;
+            padding: 0 2px; /* Small padding for visual separation from card edge */
+            display: -webkit-box; /* For old iOS */
+            display: flex;
+            -webkit-box-pack: justify;
+            justify-content: space-between;
+            clear: both; /* Ensure it moves below .weather-main floats */
+        }
+
+        .sun-precept-info > span {
+            /* Force equal spacing, especially important for old browsers */
+            -webkit-box-flex: 1;
+            flex-grow: 1;
+            text-align: center;
+        }
+
+        .sun-precept-info > span:first-child {
+             text-align: left;
+        }
+        
+        .sun-precept-info > span:last-child {
+             text-align: right;
+        }
+        
+        .current-details {
+            clear: both;
+            overflow: hidden;
+            font-size: 1.15em;
+            font-weight: 600;
+            line-height: 1.6;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            padding-top: 8px; /* Added padding to separate from sun-precept-info */
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        }
+        
+        body.theme-green .current-details {
+            border-bottom-color: rgba(51, 255, 51, 0.3);
+            border-top-color: rgba(51, 255, 51, 0.3);
+        }
+        
+        body.theme-amberblack .current-details {
+            border-bottom-color: rgba(251, 191, 36, 0.3);
+            border-top-color: rgba(251, 191, 36, 0.3);
+        }
+        
+        .forecast-days {
+            overflow: hidden;
+        }
+        
+        .forecast-day {
+            float: left;
+            width: 33.333%;
+            padding: 4px;
+        }
+        
+        .forecast-day-inner {
+            overflow: hidden;
+        }
+        
+        .forecast-day-name {
+            font-size: 1.05em;
+            font-weight: 700;
+            margin-bottom: 4px;
+            text-align: center;
+        }
+        
+        .forecast-icon-col {
+            float: left;
+            width: 45%;
+            text-align: center;
+        }
+        
+        .forecast-icon {
+            font-size: 3.5em;
+            line-height: 1;
+        }
+        
+        .forecast-info-col {
+            float: right;
+            width: 55%;
+            text-align: left;
+            padding-left: 4px;
+        }
+        
+        .forecast-temps {
+            font-size: 1.2em;
+            font-weight: 700;
+            line-height: 1.4;
+        }
+        
+        .forecast-high {
+            font-weight: 700;
+        }
+        
+        .forecast-low {
+            opacity: 0.8;
+            font-weight: 600;
+        }
+        
+        .forecast-rain {
+            font-size: 0.9em;
+            font-weight: 600;
+            opacity: 0.8;
+            margin-top: 2px;
+        }
+        
+        .currency-card {
+            padding: 10px;
+            clear: both;
+        }
+        
+        .loading {
+            text-align: center;
+            opacity: 0.7;
+            font-size: 0.9em;
+            word-break: break-all;
+        }
+
+        .debug-url-display { /* Subtle display for long-term use */
+            text-align: left;
+            font-size: 0.6em;
+            opacity: 0.2;
+            word-break: break-all;
+            margin-bottom: 4px;
+        }
+        
+        .error {
+            color: #fca5a5;
+            text-align: center;
+            font-size: 0.8em;
+        }
+
+        /* --- NEW SIMPLE FOOTER STYLES --- */
+        .footer-version {
+            font-size: 0.75em;
+            text-align: center;
+            opacity: 0.5;
+            margin-top: 16px;
+            padding-bottom: 8px;
+            clear: both; /* Ensures it drops below the floated weather cards */
+        }
+        /* --- END NEW SIMPLE FOOTER STYLES --- */
+        
+    </style>
+</head>
+<body>
+    <div class="container" id="container">
+        <div>
+            <div class="time" id="time">--:--</div>
+            <div class="date" id="date">Loading...</div>
+        </div>
+        
+        <div id="content-area" class="weather-row">
+            <div class="card weather-card">
+                <div class="card-title">Amsterdam</div>
+                <div id="weather-amsterdam" class="loading">Loading...</div>
+            </div>
+            
+            <div class="card weather-card">
+                <div class="card-title">Maspalomas</div>
+                <div id="weather-maspalomas" class="loading">Loading...</div>
+            </div>
+            
+            <div class="card currency-card">
+                <div id="currency-content" class="loading">Loading rate...</div>
+            </div>
+        </div>
+    </div>
+
+<div id="version-display" class="footer-version"></div>
+
+    <script>
+        // var PROXY_URL = 'https://weather-worker.dennyrgood.workers.dev';
+        var PROXY_URL = 'https://weatherproxy.ldmathes.cc/';
+
+        // === GLOBAL VERSION CONTROL ===
+        var APP_VERSION = "v. 2025.10.31 (23:55)";
+        // =================================
+
+
+        // Display version in footer (runs even on old browsers)
+        window.onload = function() {
+        var el = document.getElementById("version-display");
+        if (el) el.innerHTML = APP_VERSION;
+            
+    };
+
+// This single change removes the `workers.dev` dependency completely.
+        
+        function getUrlParameter(name) {
+            var results = new RegExp('[?&]' + name + '=([^&#]*)').exec(window.location.href);
+            if (results == null) {
+                return null;
+            }
+            return decodeURIComponent(results[1]) || null;
+        }
+        
+        var proxyParam = getUrlParameter('proxy');
+        if (proxyParam) {
+            PROXY_URL = proxyParam;
+        }
+        
+        var theme = getUrlParameter('theme') || 'blue';
+        document.body.className = 'theme-' + theme;
+        
+        function padZero(num) {
+            return num < 10 ? '0' + num : '' + num;
+        }
+        
+        function updateTime() {
+            var now = new Date();
+            var hours = padZero(now.getHours());
+            var minutes = padZero(now.getMinutes());
+            var timeStr = hours + ':' + minutes;
+            
+            var days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            var months = ['January', 'February', 'March', 'April', 'May', 'June', 
+                          'July', 'August', 'September', 'October', 'November', 'December'];
+            
+            var dateStr = days[now.getDay()] + ', ' + months[now.getMonth()] + ' ' + now.getDate();
+            
+            document.getElementById('time').textContent = timeStr;
+            document.getElementById('date').textContent = dateStr;
+        }
+        
+        function getWeatherIcon(code) {
+            if (code === 0) return '☀️';
+            else if (code <= 3) return '☁️';
+            else if (code <= 67) return '🌧️';
+            else if (code <= 77) return '❄️';
+            else if (code <= 99) return '⛈️';
+            return '☀️';
+        }
+        
+        function getDayName(dateStr) {
+            var date = new Date(dateStr);
+            var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            return days[date.getDay()];
+        }
+       
+    function fetchWeatherForLocation(elementId, lat, lon) {
+        // 1. Define the original Open-Meteo API call (must be HTTP according to their suggestion)
+        var apiUrl = 'http://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + 
+                     '&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m' +
+                     '&daily=sunrise,sunset,temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code' +
+                     '&temperature_unit=celsius&wind_speed_unit=mph&timezone=auto&forecast_days=4';
+        
+        // 2. Wrap the API call inside the 'url' parameter and send it to the Flask Tunnel.
+        var url = PROXY_URL + '?url=' + encodeURIComponent(apiUrl);
+
+        // --- START DEBUG LINES (Temporary 15s display) ---
+        var debugContainer = document.getElementById(elementId);
+        var timeoutId; 
+
+        // Show loading and the URL immediately
+        debugContainer.innerHTML = '<div class="debug-url-display">URL: ' + url + '</div>' + 'Loading...';
+        console.log("Weather Proxy URL (" + elementId + "):", url);
+
+        // Schedule removal of the URL display after 15 seconds
+        timeoutId = setTimeout(function() {
+            // Only clear the display if the card is still showing the 'Loading...' state.
+            // This prevents clearing the URL if an error has already occurred.
+            if (debugContainer.innerHTML.includes(url) && debugContainer.innerHTML.includes('Loading...')) {
+                debugContainer.innerHTML = 'Loading...';
+            }
+        }, 15000); // 15 seconds
+        // --- END DEBUG LINES ---
+        
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.timeout = 20000;
+        
+        xhr.onload = function() {
+            clearTimeout(timeoutId); // *** Always clear timeout on response ***
+
+            if (xhr.status === 200) {
+                try {
+                    var data = JSON.parse(xhr.responseText);
+                    
+                    if (data.error || data.reason) {
+                        var errorMsg = data.reason || (typeof data.error === 'string' ? data.error : 'Unknown error');
+                        // Error path: re-add URL for persistent debug and display error message
+                        document.getElementById(elementId).innerHTML = '<div class="debug-url-display">URL: ' + url + '</div>' + '<div class="error">API Error: ' + errorMsg + '</div>';
+                        return;
+                    }
+                    
+                    var tempC = Math.round(data.current.temperature_2m);
+                    var tempF = Math.round(tempC * 9/5 + 32);
+                    var feelsLikeC = Math.round(data.current.apparent_temperature);
+                    var feelsLikeF = Math.round(feelsLikeC * 9/5 + 32);
+                    var humidity = data.current.relative_humidity_2m;
+                    var windSpeed = Math.round(data.current.wind_speed_10m);
+                    
+                    var todayHighC = Math.round(data.daily.temperature_2m_max[0]);
+                    var todayHighF = Math.round(todayHighC * 9/5 + 32);
+                    var todayLowC = Math.round(data.daily.temperature_2m_min[0]);
+                    var todayLowF = Math.round(todayLowC * 9/5 + 32);
+                    
+                    var rainChance = data.daily.precipitation_probability_max[0] || 0;
+                    
+                    var sunrise = new Date(data.daily.sunrise[0]);
+                    var sunset = new Date(data.daily.sunset[0]);
+                    var riseTime = padZero(sunrise.getHours()) + ':' + padZero(sunrise.getMinutes());
+                    var setTime = padZero(sunset.getHours()) + ':' + padZero(sunset.getMinutes());
+                    
+                    var weatherCode = data.current.weather_code;
+                    var icon = getWeatherIcon(weatherCode);
+                    
+                    // Start HTML construction (excluding the debug URL which is handled by timeout/overwrite)
+
+                    /* before small c and f's
+                    
+                    var html = 
+                        '<div class="weather-main">' +
+                        '<div class="main-left">' +
+                        // --- F temperature and unit update ---
+                        '<div class="temperature">' + tempF + '<span class="temp-unit">°F</span></div>' +
+                        '<div style="font-size: 4.75em; font-weight: 700; opacity: 0.7; line-height: 1;">' + tempC + '°C</div>' +
+                        '<div class="feels-like">Feels ' + feelsLikeF + '°F</div>' +
+                        '</div>' +
+                        '<div class="main-right">' +
+                        '<div class="weather-icon">' + icon + '</div>' +
+                        '</div>' +
+                        '</div>';
+                    */
+
+                    var html = 
+                        '<div class="weather-main">' +
+                        '<div class="main-left">' +
+                        '<div class="temperature">' + tempF + '<span class="temp-unit">°F</span></div>' +
+                        '<div class="temperature-secondary">' + tempC + '<span class="temp-unit">°C</span></div>' +
+                        '<div class="feels-like">Feels ' + feelsLikeF + '<span class="temp-unit">°F</span></div>' +
+                        '</div>' +
+                        '<div class="main-right">' +
+                        '<div class="weather-icon">' + icon + '</div>' +
+                        '</div>' +
+                        '</div>'; 
+    
+                    // --- Unified Info Line (MOVED OUTSIDE .main-left to span full width) ---
+                    html += '<div class="sun-precept-info">' +
+                        '<span>☀️ ' + riseTime + '</span>' +
+                        '<span>💧 ' + rainChance + '%</span>' +
+                        '<span>🌙 ' + setTime + '</span>' +
+                        '</div>';
+                    // ----------------------------
+
+                    /* pre small c and f's
+                    
+                    html += '<div class="current-details">' +
+                        '<div class="detail-left"><strong>Low/High:</strong> ' + todayLowF + '°F / ' + todayHighF + '°F</div>' +
+                        '<div class="detail-right"><strong>Humidity/Wind:</strong> ' + humidity + '% / ' + windSpeed + '</div>' +
+                        '</div>';
+                    */
+                    
+                    html += '<div class="current-details">' +
+                        '<div class="detail-left"><strong>Low/High:</strong> ' + todayLowF + '<span class="temp-unit">°F</span> / ' + todayHighF + '<span class="temp-unit">°F</span></div>' +
+                        '<div class="detail-right"><strong>Humidity/Wind:</strong> ' + humidity + '% / ' + windSpeed + ' mph</div>' +
+                        '</div>';
+                    
+                    html += '<div class="forecast-days">';
+                    
+                    for (var i = 1; i <= 3; i++) {
+                        var dayName = getDayName(data.daily.time[i]);
+                        var highC = Math.round(data.daily.temperature_2m_max[i]);
+                        var highF = Math.round(highC * 9/5 + 32);
+                        var lowC = Math.round(data.daily.temperature_2m_min[i]);
+                        var lowF = Math.round(lowC * 9/5 + 32);
+                        var dayIcon = getWeatherIcon(data.daily.weather_code[i]);
+                        var dayRain = data.daily.precipitation_probability_max[i] || 0;
+                        /*
+                        html += '<div class="forecast-day">' +
+                            '<div class="forecast-day-name">' + dayName + '</div>' +
+                            '<div class="forecast-day-inner">' +
+                            '<div class="forecast-icon-col">' +
+                            '<div class="forecast-icon">' + dayIcon + '</div>' +
+                            '</div>' +
+                            '<div class="forecast-info-col">' +
+                            '<div class="forecast-temps">' +
+                            '<div class="forecast-high">' + highF + '°F</div>' +
+                            '<div class="forecast-low">' + lowF + '°F</div>' +
+                            '</div>' +
+                            '<div class="forecast-rain">💧 ' + dayRain + '%</div>' +
+                            '</div>' +
+                            '</div>' +
+                            '</div>';
+                            */
+
+                        html += '<div class="forecast-day">' +
+                            '<div class="forecast-day-name">' + dayName + '</div>' +
+                            '<div class="forecast-day-inner">' +
+                            '<div class="forecast-icon-col">' +
+                            '<div class="forecast-icon">' + dayIcon + '</div>' +
+                            '</div>' +
+                            '<div class="forecast-info-col">' +
+                            '<div class="forecast-temps">' +
+                            '<div class="forecast-high">' + highF + '<span class="temp-unit">°F</span></div>' +
+                            '<div class="forecast-low">' + lowF + '<span class="temp-unit">°F</span></div>' +
+                            '</div>' +
+                            '<div class="forecast-rain">💧 ' + dayRain + '%</div>' +
+                            '</div>' +
+                            '</div>' +
+                            '</div>';
+                    }
+                    
+                    html += '</div>';
+                    
+                    document.getElementById(elementId).innerHTML = html;
+                    
+                } catch (e) {
+                    // Parse error path: re-add URL for persistent debug
+                    document.getElementById(elementId).innerHTML = '<div class="debug-url-display">URL: ' + url + '</div>' + '<div class="error">Parse error: ' + e.message + '</div>';
+                }
+            } else {
+                // HTTP Error path: re-add URL for persistent debug
+                document.getElementById(elementId).innerHTML = '<div class="debug-url-display">URL: ' + url + '</div>' + '<div class="error">HTTP Error ' + xhr.status + '</div>';
+            }
+        };
+        
+        xhr.onerror = function() {
+            clearTimeout(timeoutId); // Clear timeout on network error
+            document.getElementById(elementId).innerHTML = '<div class="debug-url-display">URL: ' + url + '</div>' + '<div class="error">Network error</div>';
+        };
+        
+        xhr.ontimeout = function() {
+            clearTimeout(timeoutId); // Clear timeout on timeout
+            document.getElementById(elementId).innerHTML = '<div class="debug-url-display">URL: ' + url + '</div>' + '<div class="error">Request timeout</div>';
+        };
+        
+        xhr.send();
+    }
+        
+        function fetchAllWeather() {
+            fetchWeatherForLocation('weather-amsterdam', 52.3676, 4.9041);
+            fetchWeatherForLocation('weather-maspalomas', 27.7609, -15.5863);
+        }
+        
+ //       function isInActiveWindow() {
+ //           var now = new Date();
+ //           var utcDay = now.getUTCDay();
+ //           var utcHour = now.getUTCHours();
+ //           
+ //           if (utcDay === 5 && utcHour >= 21) return false;
+ //           if (utcDay === 6) return false;
+ //           if (utcDay === 0 && utcHour < 21) return false;
+ //           
+ //           return true;
+ //       }    
+        
+        function isInActiveWindow() {
+            var now = new Date();
+            var utcDay = now.getUTCDay();
+            var utcHour = now.getUTCHours();
+    
+    // 💡 NEW LOGIC: Block out Midnight (00) to 7 AM (07) UTC
+           if (utcHour >= 0 && utcHour <= 7) return false;
+    
+    // Original Logic (Weekend Block-out)
+           if (utcDay === 5 && utcHour >= 21) return false;
+           if (utcDay === 6) return false;
+           if (utcDay === 0 && utcHour < 21) return false;
+    
+           return true;
+         }
+        
+        function fetchCurrency() {
+            var lowThreshold = parseFloat(getUrlParameter('low')) || 1.1;
+            var highThreshold = parseFloat(getUrlParameter('high')) || 1.2;
+            
+            var oxrRate = null, oxrDateTime = null;
+            var ecbRate = null, ecbDate = null;
+            var altRate = null, altDateTime = null;
+            var completed = 0;
+            
+            function checkComplete() {
+                completed++;
+                if (completed >= 3) {
+                    displayCurrency();
+                }
+            }
+            
+            function displayCurrency() {
+                var displayRate = oxrRate || ecbRate || altRate || '0.00000';
+                
+                // Determine which source is being used
+                var source = '';
+                if (oxrRate) source = 'OXR';
+                else if (ecbRate) source = 'ECB';
+                else if (altRate) source = 'Alt';
+                // End Deterimine which source is being used
+                
+                var rateNum = parseFloat(displayRate);
+                
+                var leftIcon = '';
+                var rightIcon = '';
+                if (rateNum < lowThreshold) {
+                    leftIcon = '✅ ';
+                } else if (rateNum > highThreshold) {
+                    rightIcon = ' ❌';
+                }
+                
+                var infoLine = '';
+                var parts = [];
+                if (oxrRate) parts.push('OXR $' + oxrRate + ' (' + oxrDateTime + ')');
+                if (ecbRate) parts.push('ECB $' + ecbRate + ' (' + ecbDate + ')');
+                if (altRate) parts.push('Alt $' + altRate + (altDateTime ? ' (' + altDateTime + ')' : ''));
+                infoLine = parts.join(' • ');
+
+                //Old Display, without source noted
+                
+                //document.getElementById('currency-content').innerHTML = 
+                //    '<div class="card-title">' + leftIcon + 'EUR → USD - $' + displayRate + rightIcon + '</div>' +
+                //    '<div style="font-size: 0.7em; opacity: 0.7; margin-top: 4px; word-wrap: break-word; white-space: normal;">' + infoLine + '</div>';
+                
+                // Display which source used
+                
+                document.getElementById('currency-content').innerHTML = 
+                    '<div class="card-title">' + leftIcon + 'EUR → USD - $' + displayRate + 
+                    (source ? ' (' + source + ')' : '') + rightIcon + '</div>' +
+                    '<div style="font-size: 0.7em; opacity: 0.7; margin-top: 4px; word-wrap: break-word; white-space: normal;">' + infoLine + '</div>';
+                // End Display which source used    
+                
+            }
+            
+            var xhr1 = new XMLHttpRequest();
+            var apiUrl1 = 'https://openexchangerates.org/api/latest.json?app_id=59f0442d524d41608055554519509c57';
+            xhr1.open('GET', PROXY_URL + '?url=' + encodeURIComponent(apiUrl1), true);
+            xhr1.onload = function() {
+                if (xhr1.status === 200) {
+                    try {
+                        var data = JSON.parse(xhr1.responseText);
+                        var usdEurRate = data.rates.EUR;
+                        oxrRate = (1 / usdEurRate).toFixed(5);
+                        
+                        var updateDate = new Date(data.timestamp * 1000);
+                        var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                        var month = months[updateDate.getMonth()];
+                        var day = updateDate.getDate();
+                        var hours = padZero(updateDate.getHours());
+                        var minutes = padZero(updateDate.getMinutes());
+                        oxrDateTime = month + ' ' + day + ', ' + hours + ':' + minutes;
+                    } catch (e) {}
+                }
+                checkComplete();
+            };
+            xhr1.onerror = function() { checkComplete(); };
+            xhr1.send();
+            
+            var xhr2 = new XMLHttpRequest();
+            var apiUrl2 = 'https://api.frankfurter.app/latest?from=EUR&to=USD';
+            xhr2.open('GET', PROXY_URL + '?url=' + encodeURIComponent(apiUrl2), true);
+            xhr2.onload = function() {
+                if (xhr2.status === 200) {
+                    try {
+                        var data = JSON.parse(xhr2.responseText);
+                        ecbRate = data.rates.USD.toFixed(5);
+                        ecbDate = data.date;
+                    } catch (e) {}
+                }
+                checkComplete();
+            };
+            xhr2.onerror = function() { checkComplete(); };
+            xhr2.send();
+            
+            var xhr3 = new XMLHttpRequest();
+            var apiUrl3 = 'https://api.exchangerate-api.com/v4/latest/EUR';
+            xhr3.open('GET', PROXY_URL + '?url=' + encodeURIComponent(apiUrl3), true);
+            xhr3.onload = function() {
+                if (xhr3.status === 200) {
+                    try {
+                        var data = JSON.parse(xhr3.responseText);
+                        altRate = data.rates.USD.toFixed(5);
+                        
+                        if (data.time_last_update_utc) {
+                            var updateDate = new Date(data.time_last_update_utc);
+                            if (!isNaN(updateDate.getTime())) {
+                                var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                                var month = months[updateDate.getMonth()];
+                                var day = updateDate.getDate();
+                                var hours = padZero(updateDate.getHours());
+                                var minutes = padZero(updateDate.getMinutes());
+                                altDateTime = month + ' ' + day + ', ' + hours + ':' + minutes;
+                            }
+                        }
+                    } catch (e) {}
+                }
+                checkComplete();
+            };
+            xhr3.onerror = function() { checkComplete(); };
+            xhr3.send();
+        }
+        
+        updateTime();
+        setInterval(updateTime, 1000);
+        
+        fetchAllWeather();
+        fetchCurrency();
+        
+        setInterval(fetchAllWeather, 600000);
+        setInterval(function() {
+            if (isInActiveWindow()) {
+                fetchCurrency();
+            }
+        }, 3600000);
+    </script>
+</body>
+</html>

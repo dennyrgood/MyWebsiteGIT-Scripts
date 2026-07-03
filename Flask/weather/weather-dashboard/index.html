@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Customizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom Styles for better visual appeal */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .card {
+            background-color: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+            max-width: 600px;
+            width: 100%;
+            padding: 32px;
+        }
+        .form-section {
+            margin-bottom: 24px;
+            padding: 16px;
+            border-radius: 0.5rem;
+            border: 1px solid #e5e7eb;
+        }
+        .input-group label {
+            font-weight: 500;
+            display: block;
+            margin-bottom: 4px;
+        }
+        .input-group input[type="number"],
+        .input-group input[type="text"],
+        .input-group select {
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            width: 100%;
+            transition: border-color 0.2s;
+        }
+        .input-group input[type="number"]:focus,
+        .input-group input[type="text"]:focus,
+        .input-group select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+        select {
+            background-color: white;
+            cursor: pointer;
+        }
+        .option-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1 class="text-2xl font-bold text-gray-800 mb-6">Dashboard Customizer</h1>
+        <form id="config-form">
+
+            <div class="form-section">
+                <h2 class="text-lg font-semibold text-gray-700 mb-4">1. Select Layout</h2>
+                <div id="layout-options" class="option-grid">
+                    </div>
+            </div>
+
+            <div class="form-section">
+                <h2 class="text-lg font-semibold text-gray-700 mb-4">2. Select Theme</h2>
+                <div id="theme-options" class="option-grid">
+                    </div>
+            </div>
+
+            <div class="form-section">
+                <h2 class="text-lg font-semibold text-gray-700 mb-4">3. City 1 Configuration</h2>
+                <div class="grid grid-cols-1 gap-4">
+                    <div class="input-group">
+                        <label for="city1_preset">Select City</label>
+                        <select id="city1_preset" name="city1_preset" class="w-full p-2 border border-gray-300 rounded-md">
+                            <option value="amsterdam">Amsterdam, Netherlands</option>
+                            <option value="sanbartolome">San Bartolomé de Tirajana, Spain</option>
+                            <option value="shippensburg">Shippensburg, PA</option>
+                            <option value="marina">Marina, CA</option>
+                            <option value="newyork">New York, NY</option>
+                            <option value="losangeles">Los Angeles, CA</option>
+                            <option value="sanfrancisco">San Francisco, CA</option>
+                            <option value="chicago">Chicago, IL</option>
+                            <option value="philly">Philadelphia, PA</option>
+                            <option value="miami">Miami, FL</option>
+                            <option value="charlotte">Charlotte, NC</option>
+                            <option value="honolulu">Honolulu, HI</option>
+                            <option value="neworleans">New Orleans, LA</option>
+                            <option value="london">London, UK</option>
+                            <option value="paris">Paris, France</option>
+                            <option value="berlin">Berlin, Germany</option>
+                            <option value="madrid">Madrid, Spain</option>
+                            <option value="barcelona">Barcelona, Spain</option>
+                            <option value="tokyo">Tokyo, Japan</option>
+                            <option value="sydney">Sydney, Australia</option>
+                            <option value="dubai">Dubai, UAE</option>
+                            <option value="custom">Custom...</option>
+                        </select>
+                    </div>
+                    <div id="city1_custom_fields" style="display: none;">
+                        <div class="input-group mb-4">
+                            <label for="city1_name">City Name</label>
+                            <input type="text" id="city1_name" name="city1_name" value="" placeholder="Enter city name">
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="input-group">
+                                <label for="city1_lat">Latitude</label>
+                                <input type="number" id="city1_lat" name="city1_lat" value="" step="0.0001" min="-90" max="90" placeholder="0.0000">
+                            </div>
+                            <div class="input-group">
+                                <label for="city1_lon">Longitude</label>
+                                <input type="number" id="city1_lon" name="city1_lon" value="" step="0.0001" min="-180" max="180" placeholder="0.0000">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <h2 class="text-lg font-semibold text-gray-700 mb-4">4. City 2 Configuration</h2>
+                <div class="grid grid-cols-1 gap-4">
+                    <div class="input-group">
+                        <label for="city2_preset">Select City</label>
+                        <select id="city2_preset" name="city2_preset" class="w-full p-2 border border-gray-300 rounded-md">
+                            <option value="amsterdam">Amsterdam, Netherlands</option>
+                            <option value="sanbartolome" selected>San Bartolomé de Tirajana, Spain</option>
+                            <option value="shippensburg">Shippensburg, PA</option>
+                            <option value="marina">Marina, CA</option>
+                            <option value="newyork">New York, NY</option>
+                            <option value="losangeles">Los Angeles, CA</option>
+                            <option value="sanfrancisco">San Francisco, CA</option>
+                            <option value="chicago">Chicago, IL</option>
+                            <option value="philly">Philadelphia, PA</option>
+                            <option value="miami">Miami, FL</option>
+                            <option value="charlotte">Charlotte, NC</option>
+                            <option value="honolulu">Honolulu, HI</option>
+                            <option value="neworleans">New Orleans, LA</option>
+                            <option value="london">London, UK</option>
+                            <option value="paris">Paris, France</option>
+                            <option value="berlin">Berlin, Germany</option>
+                            <option value="madrid">Madrid, Spain</option>
+                            <option value="barcelona">Barcelona, Spain</option>
+                            <option value="tokyo">Tokyo, Japan</option>
+                            <option value="sydney">Sydney, Australia</option>
+                            <option value="dubai">Dubai, UAE</option>
+                            <option value="custom">Custom...</option>
+                        </select>
+                    </div>
+                    <div id="city2_custom_fields" style="display: none;">
+                        <div class="input-group mb-4">
+                            <label for="city2_name">City Name</label>
+                            <input type="text" id="city2_name" name="city2_name" value="" placeholder="Enter city name">
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="input-group">
+                                <label for="city2_lat">Latitude</label>
+                                <input type="number" id="city2_lat" name="city2_lat" value="" step="0.0001" min="-90" max="90" placeholder="0.0000">
+                            </div>
+                            <div class="input-group">
+                                <label for="city2_lon">Longitude</label>
+                                <input type="number" id="city2_lon" name="city2_lon" value="" step="0.0001" min="-180" max="180" placeholder="0.0000">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <h2 class="text-lg font-semibold text-gray-700 mb-4">5. Temperature Unit</h2>
+                <div id="temp-unit-options" class="option-grid">
+                    </div>
+            </div>
+
+            <div class="form-section">
+                <h2 class="text-lg font-semibold text-gray-700 mb-4">6. Currency Thresholds</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="input-group">
+                        <label for="low">Low Threshold (Favorable Rate: `low`)</label>
+                        <input type="number" id="low" name="low" value="1.10" step="0.01" min="0.5" required>
+                        <p class="text-sm text-gray-500 mt-1">Green checkmark below this value (Default: 1.10)</p>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label for="high">High Threshold (Unfavorable Rate: `high`)</label>
+                        <input type="number" id="high" name="high" value="1.20" step="0.01" min="0.5" required>
+                        <p class="text-sm text-gray-500 mt-1">Red 'X' above this value (Default: 1.20)</p>
+                    </div>
+                </div>
+            </div>
+            
+            <button type="submit" class="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700 transition duration-150">Generate URL & Redirect</button>
+            <p id="url-output" class="text-sm text-gray-600 mt-4 break-all"></p>
+        </form>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // All 'const' and 'let' replaced with 'var'
+            var form = document.getElementById('config-form');
+            var urlOutput = document.getElementById('url-output');
+
+            // --- Option Definitions ---
+            var layoutContainer = document.getElementById('layout-options');
+            var themeContainer = document.getElementById('theme-options');
+
+            var layoutOptions = [
+                { label: 'iPhone SE (Shared)', value: 'index_SE_shared.html' },
+                { label: 'iPhone SE (Legacy)', value: 'index_SE.html' },
+                { label: 'iPad2 (Shared)', value: 'index_old_ipad_shared.html' },
+                { label: 'iPad2 (Legacy)', value: 'index_old_ipad.html' },
+                { label: 'Galaxy Tablet', value: 'index_galaxy_shared.html' }
+            ];
+
+            var themeOptions = [
+                { label: 'Amber (Default)', value: 'amber', swatch: '#fde68a' },
+                { label: 'Blue', value: 'blue', swatch: '#bfdbfe' },
+                { label: 'Gray', value: 'gray', swatch: '#e5e7eb' },
+                { label: 'Cream', value: 'cream', swatch: '#fef9c3' },
+                { label: 'Green Terminal', value: 'green', swatch: '#33ff33', swatchBg: '#0d1b0d' },
+                { label: 'Black on Green', value: 'blackgreen', swatch: '#4ade80' },
+                { label: 'Amber Terminal', value: 'amberblack', swatch: '#fbbf24', swatchBg: '#000000' },
+                { label: 'Sunset 🌅', value: 'sunset', swatch: '#fb923c' },
+                { label: 'Ocean 🌊', value: 'ocean', swatch: '#38bdf8' },
+                { label: 'Forest 🌲', value: 'forest', swatch: '#86efac' },
+                { label: 'Lavender 💜', value: 'lavender', swatch: '#c4b5fd' },
+                { label: 'Rose 🌸', value: 'rose', swatch: '#fda4af' },
+                { label: 'Dark Mode 🌙', value: 'dark', swatch: '#1f2937', swatchBg: '#111827' },
+                { label: 'Arctic ❄️', value: 'arctic', swatch: '#e0f2fe' },
+                { label: 'Sepia 📜', value: 'sepia', swatch: '#d6bcab' }
+            ];
+
+            var tempUnitOptions = [
+                { label: 'Fahrenheit (°F)', value: 'F' },
+                { label: 'Celsius (°C)', value: 'C' }
+            ];
+
+            // City presets (ES5 compatible)
+            var cityPresets = {
+                // Current presets
+                amsterdam: { name: 'Amsterdam, Netherlands', lat: 52.3676, lon: 4.9041 },
+                sanbartolome: { name: 'San Bartolomé de Tirajana, Spain', lat: 27.7625, lon: -15.5781 },
+                shippensburg: { name: 'Shippensburg, PA', lat: 40.0507, lon: -77.5200 },
+                marina: { name: 'Marina, CA', lat: 36.6844, lon: -121.8022 },
+                
+                // US Cities
+                newyork: { name: 'New York, NY', lat: 40.7128, lon: -74.0060 },
+                losangeles: { name: 'Los Angeles, CA', lat: 34.0522, lon: -118.2437 },
+                sanfrancisco: { name: 'San Francisco, CA', lat: 37.7749, lon: -122.4194 },
+                chicago: { name: 'Chicago, IL', lat: 41.8781, lon: -87.6298 },
+                miami: { name: 'Miami, FL', lat: 25.7617, lon: -80.1918 },
+                charlotte: { name: 'Charlotte, NC', lat: 35.2271, lon: -80.8431 },
+                honolulu: { name: 'Honolulu, HI', lat: 21.31, lon: -157.86 },
+                philly: { name: 'Philadelphia, PA', lat: 39.9526, lon: -75.1652 },
+                neworleans: { name: 'New Orleans, LA', lat: 29.95, lon: -90.08 },
+                
+                // European Cities
+                london: { name: 'London, UK', lat: 51.5074, lon: -0.1278 },
+                paris: { name: 'Paris, France', lat: 48.8566, lon: 2.3522 },
+                berlin: { name: 'Berlin, Germany', lat: 52.5200, lon: 13.4050 },
+                madrid: { name: 'Madrid, Spain', lat: 40.42, lon: -3.70 },
+                barcelona: { name: 'Barcelona, Spain', lat: 41.39, lon: 2.17 },
+                
+                // International Cities
+                tokyo: { name: 'Tokyo, Japan', lat: 35.6762, lon: 139.6503 },
+                sydney: { name: 'Sydney, Australia', lat: -33.8688, lon: 151.2093 },
+                dubai: { name: 'Dubai, UAE', lat: 25.20, lon: 55.27 }
+            };
+
+            // --- Helper Function to Render Options ---
+            // Arrow function replaced with traditional function syntax
+            var renderOptions = function (container, options, name, defaultValue) {
+                container.innerHTML = ''; // Clear existing options
+                // Arrow function replaced with traditional function syntax
+                options.forEach(function (option) {
+                    // Template literal replaced with string concatenation
+                    var inputId = name + '-' + option.value.replace(/[^a-zA-Z0-9]/g, '_');
+
+                    // Create color swatch HTML if swatch property exists
+                    var swatchHtml = '';
+                    if (option.swatch) {
+                        var swatchBg = option.swatchBg || option.swatch;
+                        swatchHtml = '<span style="display: inline-block; width: 16px; height: 16px; border-radius: 3px; background-color: ' + swatchBg + '; border: 1px solid #d1d5db; margin-right: 4px; vertical-align: middle;"></span>';
+                    }
+
+                    // Template literal replaced with string concatenation
+                    var optionHtml = 
+                        '<div class="flex items-center space-x-2 p-2 rounded-lg transition-colors duration-150 cursor-pointer hover:bg-gray-100">' +
+                            '<input type="radio" id="' + inputId + '" name="' + name + '" value="' + option.value + '" class="form-radio h-4 w-4 text-indigo-600 transition duration-150 ease-in-out" ' + (option.value === defaultValue ? 'checked' : '') + ' required>' +
+                            '<label for="' + inputId + '" class="text-sm font-medium text-gray-700">' + swatchHtml + option.label + '</label>' +
+                        '</div>';
+
+                    container.innerHTML += optionHtml;
+                });
+            };
+
+            // Render the options
+            renderOptions(layoutContainer, layoutOptions, 'layout', 'index_SE_shared.html');
+            renderOptions(themeContainer, themeOptions, 'theme', 'amber');
+            renderOptions(document.getElementById('temp-unit-options'), tempUnitOptions, 'temp_unit', 'F');
+
+            // ----------------------------------------------------------------
+            // City Preset Handlers (ES5 compatible)
+            // ----------------------------------------------------------------
+            var handleCityPresetChange = function(cityNumber) {
+                var presetSelect = document.getElementById('city' + cityNumber + '_preset');
+                var customFields = document.getElementById('city' + cityNumber + '_custom_fields');
+                var nameInput = document.getElementById('city' + cityNumber + '_name');
+                var latInput = document.getElementById('city' + cityNumber + '_lat');
+                var lonInput = document.getElementById('city' + cityNumber + '_lon');
+                
+                var selectedValue = presetSelect.value;
+                
+                if (selectedValue === 'custom') {
+                    customFields.style.display = 'block';
+                } else {
+                    customFields.style.display = 'none';
+                    var preset = cityPresets[selectedValue];
+                    if (preset) {
+                        nameInput.value = preset.name;
+                        latInput.value = preset.lat;
+                        lonInput.value = preset.lon;
+                    }
+                }
+            };
+            
+            // Initialize city dropdowns
+            document.getElementById('city1_preset').addEventListener('change', function() {
+                handleCityPresetChange(1);
+                generateUrlAndDisplay();
+            });
+            document.getElementById('city2_preset').addEventListener('change', function() {
+                handleCityPresetChange(2);
+                generateUrlAndDisplay();
+            });
+            
+            // Set initial values (don't call generateUrl yet, it's not defined)
+            handleCityPresetChange(1);
+            handleCityPresetChange(2);
+
+            // ----------------------------------------------------------------
+            // Helper function to get selected radio button value (ES5 compatible)
+            // ----------------------------------------------------------------
+            var getRadioValue = function (name) {
+                var radios = document.getElementsByName(name);
+                for (var i = 0; i < radios.length; i++) {
+                    if (radios[i].checked) {
+                        return radios[i].value;
+                    }
+                }
+                return null;
+            };
+
+            // ----------------------------------------------------------------
+            // Function to generate and display the URL
+            // Arrow function replaced with traditional function syntax
+            // ----------------------------------------------------------------
+            var generateUrlAndDisplay = function () {
+                var params = [];
+                var layoutFile = 'index_SE_shared.html'; // Default value
+
+                // 1. Layout (use the selected layout file as the base for the URL)
+                layoutFile = getRadioValue('layout') || layoutFile;
+                // Template literal replaced with string concatenation
+                params.push('layout=' + layoutFile);
+
+                // 2. Theme (always included)
+                // Template literal replaced with string concatenation
+                var theme = getRadioValue('theme') || 'amber';
+                params.push('theme=' + theme);
+
+                // 3. City 1 parameters (always included)
+                var city1Name = document.getElementById('city1_name').value;
+                var city1Lat = document.getElementById('city1_lat').value;
+                var city1Lon = document.getElementById('city1_lon').value;
+                if (city1Name) params.push('city1_name=' + encodeURIComponent(city1Name));
+                if (city1Lat) params.push('city1_lat=' + city1Lat);
+                if (city1Lon) params.push('city1_lon=' + city1Lon);
+
+                // 4. City 2 parameters (always included)
+                var city2Name = document.getElementById('city2_name').value;
+                var city2Lat = document.getElementById('city2_lat').value;
+                var city2Lon = document.getElementById('city2_lon').value;
+                if (city2Name) params.push('city2_name=' + encodeURIComponent(city2Name));
+                if (city2Lat) params.push('city2_lat=' + city2Lat);
+                if (city2Lon) params.push('city2_lon=' + city2Lon);
+
+                // 5. Temperature Unit (only include if different from default 'F')
+                var tempUnit = getRadioValue('temp_unit') || 'F';
+                if (tempUnit !== 'F') {
+                    params.push('temp_unit=' + tempUnit);
+                }
+
+                // 6. Low Threshold (only include if different from default 1.1)
+                var lowInput = document.getElementById('low');
+                var low = parseFloat(lowInput.value).toFixed(2);
+                if (low !== '1.10') {
+                    // Template literal replaced with string concatenation
+                    params.push('low=' + low);
+                }
+
+                // 7. High Threshold (only include if different from default 1.2)
+                var highInput = document.getElementById('high');
+                var high = parseFloat(highInput.value).toFixed(2);
+                if (high !== '1.20') {
+                    // Template literal replaced with string concatenation
+                    params.push('high=' + high);
+                }
+
+                // Remove the layout parameter from the query string since it's the base file
+                // Arrow function and startsWith replaced with traditional function and indexOf
+                var queryStringParams = params.filter(function (p) {
+                    return p.indexOf('layout=') !== 0; // Check if the string starts with 'layout='
+                });
+                var queryString = queryStringParams.join('&');
+                
+                // Template literal replaced with string concatenation
+                var finalUrl = layoutFile + '?' + queryString;
+
+                // Update the output element
+                // Template literal replaced with string concatenation
+                urlOutput.textContent = 'Generated URL: ' + finalUrl;
+                return finalUrl;
+            };
+
+            // ----------------------------------------------------------------
+            // Event listeners for live updates
+            // ----------------------------------------------------------------
+            // Call the function once to show the initial, default URL
+            generateUrlAndDisplay();
+            
+            // Listen for changes on the form (radio buttons, number inputs)
+            form.addEventListener('change', generateUrlAndDisplay);
+            // Listen for input events on number fields for real-time typing updates
+            form.addEventListener('input', generateUrlAndDisplay);
+
+
+            // ----------------------------------------------------------------
+            // Form Submission Handler
+            // Arrow function replaced with traditional function syntax
+            // ----------------------------------------------------------------
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                
+                // Get the final URL from the function and redirect
+                var finalUrl = generateUrlAndDisplay();
+                window.location.href = finalUrl;
+            });
+        });
+    </script>
+</body>
+</html>
