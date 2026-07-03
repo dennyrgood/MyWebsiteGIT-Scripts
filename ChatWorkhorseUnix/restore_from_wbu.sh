@@ -79,5 +79,5 @@ fi
 # 6. Bring the full stack back up.
 echo "Bringing up full stack..."
 docker compose up -d
-rsync -aq --delete /home/dhm/.cache/cwhu-warm-sync/ "$WBU_USER@$WBU_HOST:/home/dhm/.cache/cwhu-warm-sync/"
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Warm-sync complete."
+rsync -aq --delete /home/dhm/.cache/cwhu-warm-sync/ "$WBU_USER@$WBU_HOST:/home/dhm/.cache/cwhu-warm-sync/"
