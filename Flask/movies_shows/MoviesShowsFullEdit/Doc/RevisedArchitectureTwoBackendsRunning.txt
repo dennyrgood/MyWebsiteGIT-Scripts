@@ -1,0 +1,109 @@
+Revised Architecture: Two Backends Running
+Backend Setup:
+
+Port 5000: excel_backend.py (existing, for quick-add form)
+
+Endpoint: /api/submit
+Tunnel: api.ldmathes.cc
+
+
+Port 5001: excel_backend_full_edit.py (new, for full CRUD editor)
+
+Endpoints: /api/data, /api/add, /api/update, /api/delete
+Tunnel: api-edit.ldmathes.cc (new subdomain)
+
+
+
+Frontend:
+
+excel-web-interface/ → calls api.ldmathes.cc (port 5000)
+MoviesShowsFullEdit/ → calls api-edit.ldmathes.cc (port 5001)
+
+
+
+Step 1: Setup Second Backend (Port 5001)
+1.1: Save New Backend File
+
+app.run(host='0.0.0.0', port=5001, debug=False)
+
+python excel_backend_full_edit.py
+```
+
+Should see:
+```
+Listening on 0.0.0.0:5001
+
+
+Step 2: Setup Second Cloudflare Tunnel Route
+2.1: Update Cloudflare Tunnel Config
+Edit: C:\Users\[YOUR-USERNAME]\.cloudflared\config.yml
+Change to:
+
+tunnel: [TUNNEL-ID]
+credentials-file: C:\Users\[YOUR-USERNAME]\.cloudflared\[TUNNEL-ID].json
+
+ingress:
+  - hostname: api.ldmathes.cc
+    service: http://localhost:5000
+  - hostname: api-edit.ldmathes.cc
+    service: http://localhost:5001
+  - service: http_status:404
+
+2.2: Add DNS Route for New Subdomain
+
+cloudflared tunnel route dns excel-backend api-edit.ldmathes.cc
+
+# Stop current tunnel (Ctrl+C or stop Task Scheduler task)
+Stop-ScheduledTask -TaskName "Cloudflared Tunnel"
+
+# Restart tunnel (it will read new config)
+Start-ScheduledTask -TaskName "Cloudflared Tunnel"
+
+# Or run manually to test:
+cloudflared tunnel run excel-backend
+
+Step 3: Add Second Task Scheduler Task
+Create a second task to auto-start the new backend:
+
+Open Task Scheduler
+Create Basic Task
+Name: Flask Full Edit Backend
+Trigger: "At startup"
+Action: "Start a program"
+
+Program/script: D:\Misc\Python313\python.exe
+Arguments: D:\OneDrive\MS\excel_backend_full_edit.py
+Start in: D:\OneDrive\MS\
+
+
+Right-click task → Properties:
+
+✅ "Run whether user is logged in or not"
+✅ "Run with highest privileges"
+✅ "If task fails, restart every 1 minute"
+
+
+
+Now both backends will auto-start on reboot.
+
+
+Step 5: Test Everything
+Test Port 5000 (Existing Quick-Add)
+
+Backend: https://api.ldmathes.cc/api/health
+Form: https://dennyrgood.github.io/excel-web-interface/
+
+Test Port 5001 (New Full Editor)
+
+Backend: https://api-edit.ldmathes.cc/api/health
+Backend data: https://api-edit.ldmathes.cc/api/data
+Form: https://dennyrgood.github.io/MoviesShowsFullEdit/
+
+Test Hub
+
+https://dennyrgood.github.io/ → Links to both
+
+
+Summary: Two Independent Systems
+SystemPortTunnel URLFrontendEndpointsQuick-Add5000api.ldmathes.cc/excel-web-interface//api/submitFull Editor5001api-edit.ldmathes.cc/MoviesShowsFullEdit//api/data, /api/add, /api/update, /api/delete
+Both are completely independent—no conflicts, both can run 24/7.

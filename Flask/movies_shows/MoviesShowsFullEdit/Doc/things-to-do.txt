@@ -1,0 +1,29 @@
+in full edit program change the error message (during add and delete functions):
+
+✗ Error: [Errno 13] Permission denied: 'D:/OneDrive/MS/MoviesShows.xlsx'
+
+to
+
+✗ Error: [Errno 13] Permission denied: 'D:/OneDrive/MS/MoviesShows.xlsx' -- is your file open somewhere else?
+
+in full edit program add a note:  "Reminder, this process will strip out any images from all tabs of the spreadsheet"
+
+
+
+on the landing page: 
+
+make the link for the USDZ Objects be a 'card' like Movies and Shows/Quick Add/More coming .... it's description is USDZ Objects for use with the Apple Vision Pro
+
+
+
+change the bi-line on the landing page from:
+
+Manage your spreadsheets from anywhere
+
+to 
+
+Managing files online from anywhere
+
+
+On the landing page: 
+remove separate (second)  card for quick add/multi project

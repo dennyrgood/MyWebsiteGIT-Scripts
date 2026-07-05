@@ -1,0 +1,4 @@
+PS D:\OneDrive\MS> .\cloudflared.exe tunnel weather-flask-proxy
+Use `cloudflared tunnel run` to start tunnel 2d43262a-8fb5-4994-a261-5e6bd9729574
+
+
