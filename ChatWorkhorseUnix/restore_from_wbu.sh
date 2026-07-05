@@ -71,7 +71,7 @@ echo "Bringing up Postgres only, to restore into it..."
 docker compose up -d database
 until docker exec immich_postgres pg_isready -U postgres; do sleep 2; done
 echo "Restoring dump..."
-cat "$DUMP_STAGING_FILE" | docker exec -i immich_postgres psql -U postgres > /tmp/warm-sync-restore.log 2>&1
+cat "$DUMP_STAGING_FILE" | docker exec -i immich_postgres psql -U postgres > /tmp/warm-sync-restore.log 2>&1 || true
 if grep -qi error /tmp/warm-sync-restore.log; then
     echo "WARNING: possible errors during restore — check /tmp/warm-sync-restore.log on CWHU."
     echo "(Note: 'role already exists' / 'database already exists' lines are expected and harmless.)"
