@@ -32,19 +32,20 @@ Per git history in both this repo and the sibling frontend repos:
 - `SRC/` — git helper shell functions (`git_helper_scripts.sh`) with a companion guide (`git_helper_scripts.sh`, `git_helpers_guide.md`); the top-level `git-tools`, `git-undo` scripts are the user-facing entry points.
 - `MyEverything/` — has its own `build/`/`dist/` output (via `Setup_py2app.py` at repo root, a py2app packaging script), i.e. a packaged Mac app, not a script.
 
-## dms_util / `dms` Doc-index tool — cwd-based, not git-aware
+## dms_util / `dms` Doc-index tool — only checks one level up for `.git`
 
-`dms` (and the underlying `dms_util/dms_render.py`, `dms_scan.py`, etc.) manages a `Doc/` folder's `index.html` via `.dms_state.json`. Its own docstring says it "must be run from the ROOT of a repository," but the implementation is purely **cwd-relative** (`--doc` defaults to `Doc`, `--index` to `Doc/index.html`) — it never checks `git rev-parse --show-toplevel` or otherwise verifies it's actually at a repo root. It just looks for `./Doc` under wherever you invoke it.
+`dms` (and the underlying `dms_util/dms_render.py`, `dms_scan.py`, etc.) manages a `Doc/` folder's `index.html` via `.dms_state.json`/`.dms_scan.json`. Its docstring says it "must be run from the ROOT of a repository," and `dms:283` enforces a version of that: `has_git = (cwd / ".git").exists() or (cwd.parent / ".git").exists()` — it accepts being run either at a repo root, or one level down inside `Doc/` itself, but goes no further than that. It does not walk upward to find a repo root the way `git rev-parse --show-toplevel` would.
 
 This matters because three `Doc/` directories that `dms` previously managed as separate repo roots are no longer repo roots — they were folded into `dennyrgood.github.io` as subdirectories during the 2026-07-06 consolidation (see `dennyrgood.github.io`'s own CLAUDE.md):
 
-- `dennyrgood.github.io/weather/Doc` (was `weather-dashboard/Doc`)
-- `dennyrgood.github.io/excel_edit/Doc` (was `movies-shows-editor/Doc`)
-- `dennyrgood.github.io/avp/gallery/Doc` (was `usdz-avp/Doc`)
+- `dennyrgood.github.io/weather/Doc` (was `weather-dashboard/Doc`) — still works: `weather/`'s parent is `dennyrgood.github.io`, which has `.git`.
+- `dennyrgood.github.io/excel_edit/Doc` (was `movies-shows-editor/Doc`) — still works, same reason.
+- `dennyrgood.github.io/avp/gallery/Doc` (was `usdz-avp/Doc`) — **broken**: `avp/gallery`'s parent is `avp/`, which has no `.git` (it's two levels below the repo root). Running `dms` there errors with "DMS must be run from a git repository," even from inside `Doc/` itself.
 
-Running `dms` from `dennyrgood.github.io`'s own root only touches its own top-level `Doc/` — it will silently miss those three nested ones. To update any of them, `cd` into that specific subdirectory first (e.g. `dennyrgood.github.io/avp/gallery`) and run `dms` from there, same as any other "repo root."
-
-In practice this is low-priority: new documentation has mostly moved to Google Docs, so these `Doc/` directories are rarely added to anymore — this is mainly a note for if `dms` is ever run again and someone expects a single invocation to catch everything.
+Practical handling (confirmed 2026-07-06):
+- `dennyrgood.github.io/Doc`, `standing-up-llm/Doc`, `google-photos/Doc`, `scripts/Doc` are true repo roots — `dms scan`/`dms auto` works normally there. As of this date each had a handful of new files not yet indexed; run `dms auto` in each when you want them caught up (low urgency, since new docs mostly go to Google Docs now).
+- `dennyrgood.github.io/weather/Doc` and `.../excel_edit/Doc` also work fine as-is (one level below a repo root).
+- `dennyrgood.github.io/avp/gallery/Doc` cannot be scanned/rendered by `dms` in its current location. It already has a manually-verified-current `index.html` (confirmed 2026-07-06, no new files added since the consolidation), so no action is needed unless new docs are ever dropped in there — if that happens, either run `dms` against a temporary copy one level shallower and copy the regenerated `index.html` back, or fix `dms:283` to walk upward through all ancestors instead of checking only one level.
 
 ## Commands
 
