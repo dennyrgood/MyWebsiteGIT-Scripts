@@ -1,6 +1,6 @@
 { 
   "ollama_model": "qwen2.5:14b",
-  "ollama_host": "https://chatworkhorse:11434",
+  "ollama_host": "http://chatworkhorse:11434",
   "summary_max_words": 50,
   "temperature": 0.3,
   "enable_vision": false,
