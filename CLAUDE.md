@@ -32,6 +32,20 @@ Per git history in both this repo and the sibling frontend repos:
 - `SRC/` — git helper shell functions (`git_helper_scripts.sh`) with a companion guide (`git_helper_scripts.sh`, `git_helpers_guide.md`); the top-level `git-tools`, `git-undo` scripts are the user-facing entry points.
 - `MyEverything/` — has its own `build/`/`dist/` output (via `Setup_py2app.py` at repo root, a py2app packaging script), i.e. a packaged Mac app, not a script.
 
+## dms_util / `dms` Doc-index tool — cwd-based, not git-aware
+
+`dms` (and the underlying `dms_util/dms_render.py`, `dms_scan.py`, etc.) manages a `Doc/` folder's `index.html` via `.dms_state.json`. Its own docstring says it "must be run from the ROOT of a repository," but the implementation is purely **cwd-relative** (`--doc` defaults to `Doc`, `--index` to `Doc/index.html`) — it never checks `git rev-parse --show-toplevel` or otherwise verifies it's actually at a repo root. It just looks for `./Doc` under wherever you invoke it.
+
+This matters because three `Doc/` directories that `dms` previously managed as separate repo roots are no longer repo roots — they were folded into `dennyrgood.github.io` as subdirectories during the 2026-07-06 consolidation (see `dennyrgood.github.io`'s own CLAUDE.md):
+
+- `dennyrgood.github.io/weather/Doc` (was `weather-dashboard/Doc`)
+- `dennyrgood.github.io/excel_edit/Doc` (was `movies-shows-editor/Doc`)
+- `dennyrgood.github.io/avp/gallery/Doc` (was `usdz-avp/Doc`)
+
+Running `dms` from `dennyrgood.github.io`'s own root only touches its own top-level `Doc/` — it will silently miss those three nested ones. To update any of them, `cd` into that specific subdirectory first (e.g. `dennyrgood.github.io/avp/gallery`) and run `dms` from there, same as any other "repo root."
+
+In practice this is low-priority: new documentation has mostly moved to Google Docs, so these `Doc/` directories are rarely added to anymore — this is mainly a note for if `dms` is ever run again and someone expects a single invocation to catch everything.
+
 ## Commands
 
 No lint/test/build commands exist anywhere in this repo — there is no test suite. The only "commands" are running the individual scripts/tools directly, e.g.:
