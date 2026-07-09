@@ -19,7 +19,7 @@ except ImportError:
 app = Flask(__name__)
 
 STATUS_FILE = os.path.join(config.STATUS_DIR, "server_status_all.json")
-WEB_DIR     = os.path.join(config.ONEDRIVE_PATH, "_sync_monitor", "Web")
+WEB_DIR     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Web")
 
 
 def get_file_age(filepath):

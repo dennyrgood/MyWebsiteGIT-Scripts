@@ -86,8 +86,8 @@ def cmd_process_images(args, scripts_dir: Path, config: dict):
 def cmd_summarize(args, scripts_dir: Path, config: dict):
     """Generate AI summaries via Ollama"""
     print("==> Generating AI summaries...")
-    dry_run = ["--dry-run"] if args.dry_run else []
-    model = ["--model", args.model] if args.model else []
+    dry_run = ["--dry-run"] if getattr(args, "dry_run", False) else []
+    model = ["--model", args.model] if getattr(args, "model", None) else []
     return run_dms_script("dms_util/dms_summarize.py", 
                          ["--doc", "Doc"] + dry_run + model, 
                          scripts_dir)
