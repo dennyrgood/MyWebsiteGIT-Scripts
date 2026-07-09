@@ -1,0 +1,503 @@
+<title>FLEET_OPS — Architecture At A Glance</title>
+<style>
+  @font-face {
+    font-family: 'JetBrains Mono';
+    src: local('JetBrains Mono'), local('Menlo'), local('Consolas');
+  }
+
+  :root {
+    --bg:        #12151a;
+    --surface:   #1a1f27;
+    --surface-2: #212734;
+    --line:      #2a3140;
+    --text:      #d7dde6;
+    --text-dim:  #7d8797;
+    --text-faint:#4d5666;
+
+    --amber:     #e0a458;
+    --amber-dim: rgba(224,164,88,0.12);
+    --cyan:      #5aa9c9;
+    --cyan-dim:  rgba(90,169,201,0.12);
+    --mint:      #6fbf9e;
+    --mint-dim:  rgba(111,191,158,0.12);
+    --coral:     #d9776b;
+    --coral-dim: rgba(217,119,107,0.12);
+  }
+
+  :root[data-theme="light"] {
+    --bg:        #f3f1eb;
+    --surface:   #ffffff;
+    --surface-2: #ece8de;
+    --line:      #dbd5c6;
+    --text:      #2a2620;
+    --text-dim:  #6b6355;
+    --text-faint:#a39a87;
+
+    --amber:     #9c6a24;
+    --amber-dim: rgba(156,106,36,0.10);
+    --cyan:      #2c6e8a;
+    --cyan-dim:  rgba(44,110,138,0.10);
+    --mint:      #2f7c5e;
+    --mint-dim:  rgba(47,124,94,0.10);
+    --coral:     #a8443a;
+    --coral-dim: rgba(168,68,58,0.10);
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg:        #f3f1eb;
+      --surface:   #ffffff;
+      --surface-2: #ece8de;
+      --line:      #dbd5c6;
+      --text:      #2a2620;
+      --text-dim:  #6b6355;
+      --text-faint:#a39a87;
+
+      --amber:     #9c6a24;
+      --amber-dim: rgba(156,106,36,0.10);
+      --cyan:      #2c6e8a;
+      --cyan-dim:  rgba(44,110,138,0.10);
+      --mint:      #2f7c5e;
+      --mint-dim:  rgba(47,124,94,0.10);
+      --coral:     #a8443a;
+      --coral-dim: rgba(168,68,58,0.10);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  body { padding: clamp(20px, 4vw, 48px); }
+
+  .wrap { max-width: 1160px; margin: 0 auto; }
+
+  .mono {
+    font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Masthead ─────────────────────────────────────── */
+  .masthead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+  }
+  h1 {
+    font-size: clamp(22px, 3vw, 30px);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h1 .dim { color: var(--text-dim); font-weight: 500; }
+  .masthead-meta {
+    font-size: 12px;
+    color: var(--text-dim);
+    letter-spacing: 0.03em;
+    text-align: right;
+  }
+
+  /* ── Flow row: three columns + connecting rail ──────── */
+  .flow {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 820px) {
+    .flow { grid-template-columns: 1fr; }
+  }
+
+  .col {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .col-host {
+    border-top: 3px solid var(--mint);
+  }
+  .col-shared {
+    border-top: 3px solid var(--cyan);
+    background: linear-gradient(180deg, var(--cyan-dim), transparent 40%), var(--surface);
+  }
+
+  .col-label {
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+  .col-title {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+  .col-title .path {
+    display: block;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  .entry {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 9px 10px;
+    border-radius: 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+  }
+  .entry-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .entry-name .tag {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 7px;
+    vertical-align: middle;
+  }
+  .tag-scheduled { background: var(--mint-dim); color: var(--mint); }
+  .tag-shared    { background: var(--cyan-dim); color: var(--cyan); }
+  .tag-public    { background: var(--amber-dim); color: var(--amber); }
+
+  .entry-desc {
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.4;
+  }
+  .entry-desc .mono { color: var(--text-dim); }
+
+  /* ── Connector arrows between columns (desktop only) ── */
+  .rail {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  /* ── Shared filenames strip ──────────────────────────── */
+  .filenames {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 2px;
+  }
+  .fn {
+    font-size: 10.5px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--text-dim);
+  }
+  .fn b { color: var(--text); font-weight: 600; }
+
+  /* ── Foundation strip: the repo Web/ ─────────────────── */
+  .foundation {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--amber);
+    border-radius: 10px;
+    padding: 16px 18px 18px;
+    margin-bottom: 20px;
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .foundation-icon {
+    font-size: 22px;
+    line-height: 1;
+    color: var(--amber);
+    padding-top: 2px;
+  }
+  .foundation-body { flex: 1; min-width: 260px; }
+  .foundation-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .foundation-title .mono { font-weight: 600; color: var(--amber); }
+  .foundation-desc {
+    font-size: 12.5px;
+    color: var(--text-dim);
+    line-height: 1.55;
+    max-width: 62ch;
+  }
+  .foundation-arrows {
+    display: flex;
+    gap: 14px;
+    font-size: 11px;
+    color: var(--text-dim);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .foundation-arrows span b { color: var(--text); }
+
+  /* ── Timeline of the fix ─────────────────────────────── */
+  .fixline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .fixline-title {
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    padding: 12px 18px 0;
+  }
+  .fixrow {
+    display: grid;
+    grid-template-columns: 88px 1fr 2fr;
+    gap: 14px;
+    padding: 11px 18px;
+    border-top: 1px solid var(--line);
+    align-items: baseline;
+  }
+  .fixrow:first-of-type { border-top: none; margin-top: 10px; }
+  @media (max-width: 720px) {
+    .fixrow { grid-template-columns: 1fr; gap: 4px; }
+  }
+  .fix-status {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .fix-status.was { color: var(--coral); }
+  .fix-status.now { color: var(--mint); }
+  .fix-what {
+    font-size: 12.5px;
+    color: var(--text);
+  }
+  .fix-what .mono { font-size: 11.5px; }
+  .fix-why {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    line-height: 1.4;
+  }
+
+  footer {
+    margin-top: 24px;
+    font-size: 10.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.04em;
+    text-align: center;
+  }
+
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <div class="masthead">
+    <h1>FLEET_OPS <span class="dim">— monitoring architecture, at a glance</span></h1>
+    <div class="masthead-meta mono">2 checker/API hosts ⇄ 7 satellite hosts<br>via OneDrive <span class="mono">_sync_monitor/</span></div>
+  </div>
+
+  <div class="flow">
+
+    <div class="col col-host">
+      <div>
+        <div class="col-label">Host A</div>
+        <div class="col-title">AmsterdamDesktop
+          <span class="path mono">D:\repos\scripts\Status\</span>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-name">run_hidden_amsDT.vbs <span class="tag tag-scheduled">Task Sched.</span></div>
+        <div class="entry-desc">Silently launches <span class="mono">onedrive_heartbeat_writer_server.ps1</span></div>
+      </div>
+      <div class="entry">
+        <div class="entry-name">checker.py <span class="tag tag-scheduled">Task Sched.</span></div>
+        <div class="entry-desc">Entry point → hands off to <span class="mono">engine.run_forever()</span></div>
+      </div>
+      <div class="entry">
+        <div class="entry-name">engine.py</div>
+        <div class="entry-desc">Polls entire fleet, writes <span class="mono">c:/fleet_monitor/amsterdamdesktop/server_status_all.json</span> <b>(local only)</b></div>
+      </div>
+      <div class="entry">
+        <div class="entry-name">fleet_api.py <span class="tag tag-scheduled">Task Sched.</span> <span class="tag tag-public">Public</span></div>
+        <div class="entry-desc">Flask :5010 → <span class="mono">fleet.ldmathes.cc</span> <b>(primary)</b></div>
+      </div>
+    </div>
+
+    <div class="col col-shared">
+      <div>
+        <div class="col-label">Shared channel</div>
+        <div class="col-title">OneDrive
+          <span class="path mono">_sync_monitor/</span>
+        </div>
+      </div>
+      <div class="entry">
+        <div class="entry-name">onedrive_heartbeat_writer_server.ps1 <span class="tag tag-shared">Both hosts write</span></div>
+        <div class="entry-desc">Each host writes its own host-suffixed files every 30s — no collisions</div>
+        <div class="filenames">
+          <span class="fn"><b>heartbeat_</b>{host}.txt</span>
+          <span class="fn"><b>machine_info_</b>{host}.json</span>
+          <span class="fn"><b>metrics_history_</b>{host}.json</span>
+        </div>
+      </div>
+      <div class="entry">
+        <div class="entry-name">Cross-heartbeat check</div>
+        <div class="entry-desc">Amsterdam's <span class="mono">config.py</span> watches <b>chatworkhorse</b>'s file; ChatWorkhorse's watches <b>amsterdamdesktop</b>'s — via <span class="mono">check_type: onedrive_heartbeat</span></div>
+      </div>
+    </div>
+
+    <div class="col col-host">
+      <div>
+        <div class="col-label">Host B</div>
+        <div class="col-title">ChatWorkhorse
+          <span class="path mono">C:\repos\scripts\Status\</span>
+        </div>
+      </div>
+      <div class="entry">
+        <div class="entry-name">run_hidden.vbs <span class="tag tag-scheduled">Task Sched.</span></div>
+        <div class="entry-desc">Silently launches <span class="mono">onedrive_heartbeat_writer_server.ps1</span></div>
+      </div>
+      <div class="entry">
+        <div class="entry-name">checker.py <span class="tag tag-scheduled">Task Sched.</span></div>
+        <div class="entry-desc">Entry point → hands off to <span class="mono">engine.run_forever()</span></div>
+      </div>
+      <div class="entry">
+        <div class="entry-name">engine.py</div>
+        <div class="entry-desc">Polls entire fleet, writes <span class="mono">c:/fleet_monitor/chatworkhorse/server_status_all.json</span> <b>(local only)</b></div>
+      </div>
+      <div class="entry">
+        <div class="entry-name">fleet_api.py <span class="tag tag-scheduled">Task Sched.</span> <span class="tag tag-public">Public</span></div>
+        <div class="entry-desc">Flask :5010 → <span class="mono">fleet-bkp.ldmathes.cc</span> <b>(backup, via ?bkp)</b></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="foundation">
+    <div class="foundation-icon">⌥</div>
+    <div class="foundation-body">
+      <div class="foundation-title">Dashboard source — <span class="mono">Status/Web/</span></div>
+      <div class="foundation-desc">
+        The dashboard (<span class="mono">ST/tiles.html</span> + assets) lives in the git repo, not OneDrive. <span class="mono">fleet_api.py</span> resolves it relative to its own file location — same code, no drive-letter branching, always the same commit on both hosts after a pull.
+      </div>
+    </div>
+    <div class="foundation-arrows">
+      <span>served by <b>both</b> fleet_api.py instances</span>
+      <span>·</span>
+      <span>tiles.html fetches <b>/api/status</b> + <b>/api/history/&lt;host&gt;</b></span>
+      <span>·</span>
+      <span>history reads straight from <b>_sync_monitor/metrics_history_*.json</b></span>
+    </div>
+  </div>
+
+  <div class="flow" style="grid-template-columns: 1fr 1fr 1fr;">
+
+    <div class="col col-host" style="border-top-color: var(--amber);">
+      <div>
+        <div class="col-label">Satellite · Windows</div>
+        <div class="col-title">imagebeast · travelbeast<br>remotews · surface3-gc</div>
+      </div>
+      <div class="entry">
+        <div class="entry-name">{Owner}_run_hidden.vbs <span class="tag tag-scheduled">Task Sched.</span></div>
+        <div class="entry-desc">Per-machine renamed copies (e.g. <span class="mono">Bekah_run_hidden.vbs</span> for remotews, <span class="mono">GC_run_hidden.vbs</span> for surface3-gc) launching their own copy of <span class="mono">onedrive_heartbeat_writer_server.ps1</span> — deployed straight into OneDrive, not pulled from this repo.</div>
+      </div>
+      <div class="entry">
+        <div class="entry-desc">Data-only: no <span class="mono">checker.py</span>/<span class="mono">fleet_api.py</span> — write flat to <span class="mono">_sync_monitor\</span> root, same as host A/B.</div>
+      </div>
+    </div>
+
+    <div class="col col-host" style="border-top-color: var(--amber);">
+      <div>
+        <div class="col-label">Satellite · macOS</div>
+        <div class="col-title">mathes-mac-mini<br>denniss-macbook-air(s)</div>
+      </div>
+      <div class="entry">
+        <div class="entry-name">pgrep / nohup launcher</div>
+        <div class="entry-desc mono" style="font-size:10.5px; line-height:1.5;">if ! pgrep -f "onedrive_heartbeat_writer_mac.py" &gt; /dev/null; then<br>&nbsp;&nbsp;nohup python3 ~/repos/scripts/Status/onedrive_heartbeat_writer_mac.py &gt; /dev/null 2&gt;&amp;1 &amp;<br>fi</div>
+      </div>
+      <div class="entry">
+        <div class="entry-desc">Guard checks the process isn't already running before backgrounding it. Writes into its own <span class="mono">_sync_monitor\{host}\</span> subfolder.</div>
+      </div>
+    </div>
+
+    <div class="col col-host" style="border-top-color: var(--amber);">
+      <div>
+        <div class="col-label">Satellite · Ubuntu</div>
+        <div class="col-title">workbenchunix (wbu)<br>chatworkhorseunix (cwhu)</div>
+      </div>
+      <div class="entry">
+        <div class="entry-name">cron <span class="tag tag-scheduled">*/2 * * * *</span></div>
+        <div class="entry-desc mono" style="font-size:10.5px; line-height:1.5;">*/2 * * * * /home/dhm/repos/scripts/Status/run_heartbeat.sh workbenchunix<br>&nbsp;&nbsp;&gt;&gt; /home/dhm/fleet_monitor/workbenchunix/cron.log 2&gt;&amp;1</div>
+      </div>
+      <div class="entry">
+        <div class="entry-desc">Runs <span class="mono">run_heartbeat.sh</span> → <span class="mono">heartbeat_writer_linux.py</span> every 2 min; the resulting <span class="mono">cron.log</span> (~1MB) accumulates in the host's <span class="mono">_sync_monitor\</span> subfolder.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="fixline" style="margin-top: 20px;">
+    <div class="fixline-title">JSON files, by host — <span class="mono" style="text-transform:none; letter-spacing:0;">as of 07/10 dir /PS listing</span></div>
+
+    <div class="fixrow" style="grid-template-columns: 180px 1fr 2fr;">
+      <div class="fix-status now">Local · per-host</div>
+      <div class="fix-what mono">c:\fleet_monitor\{host}\<br>server_status_all.json</div>
+      <div class="fix-why">This host's full fleet-poll snapshot — what <span class="mono">/api/status</span> serves. Not shared; each host only ever reads its own.</div>
+    </div>
+    <div class="fixrow" style="grid-template-columns: 180px 1fr 2fr;">
+      <div class="fix-status now">Local · per-target</div>
+      <div class="fix-what mono">c:\fleet_monitor\{host}\<br>server_status_{target}.json</div>
+      <div class="fix-why">One file per <span class="mono">FLEET</span> entry (e.g. <span class="mono">server_status_imagebeast.json</span>) — the same poll broken out per target machine. Confirmed present under <span class="mono">chatworkhorse\</span>; presumably mirrored under <span class="mono">amsterdamdesktop\</span>.</div>
+    </div>
+    <div class="fixrow" style="grid-template-columns: 180px 1fr 2fr;">
+      <div class="fix-status now">Shared · flat root</div>
+      <div class="fix-what mono">_sync_monitor\machine_info_{host}.json<br>_sync_monitor\metrics_history_{host}.json</div>
+      <div class="fix-why">Windows-writer convention (flat, no subfolder). Six hosts write here: <b>amsterdamdesktop, chatworkhorse, imagebeast, remotews, surface3-gc, travelbeast</b>.</div>
+    </div>
+    <div class="fixrow" style="grid-template-columns: 180px 1fr 2fr;">
+      <div class="fix-status now">Shared · per-host dir</div>
+      <div class="fix-what mono">_sync_monitor\{host}\machine_info_{host}.json<br>_sync_monitor\{host}\metrics_history_{host}.json<br>_sync_monitor\{host}\heartbeat_{host}.txt</div>
+      <div class="fix-why">Mac/Linux satellite-writer convention (own subfolder). Five hosts: <b>chatworkhorseunix, workbenchunix, denniss-2nd-macbook-air, denniss-macbook-air, mathes-mac-mini</b>. The two Ubuntu hosts (Immich boxes) also drop a <span class="mono">cron.log</span> here (~1MB, cron-scheduled writer instead of a pgrep/nohup guard).</div>
+    </div>
+    <div class="fixrow" style="grid-template-columns: 180px 1fr 2fr; background: var(--coral-dim);">
+      <div class="fix-status was">⚠ Anomaly</div>
+      <div class="fix-what mono">metrics_history_denniss-macbook-air-AmsterdamDesktop.json<br>&nbsp;&nbsp;&nbsp;...-AmsterdamDesktop-2.json / -3.json<br>metrics_history_surface3-gc-AmsterdamDesktop.json</div>
+      <div class="fix-why"><b>OneDrive sync-conflict copies</b> — OneDrive appends <span class="mono">-{computername}</span> (incrementing on repeat) when two clients edit the same file while offline from each other. Accumulating since 06/17 for <span class="mono">denniss-macbook-air</span> (now 3 stale copies) — means something on <b>AmsterdamDesktop</b> is also trying to write these two Mac/tablet hosts' history files, colliding with their real writers. Worth tracing what's writing history for hosts other than Amsterdam's own — likely a stale config or leftover test path.</div>
+    </div>
+
+  </div>
+
+  <footer>FLEET_OPS — Status/ · scripts repo</footer>
+
+</div>
