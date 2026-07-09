@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FLEET_OPS // TILES</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:        #070b12;
+      --bg2:       #0d1420;
+      --bg3:       #111c2e;
+      --border:    rgba(255,255,255,0.07);
+      --border2:   rgba(255,255,255,0.12);
+      --green:     #00e887;
+      --green-dim: rgba(0,232,135,0.15);
+      --yellow:    #f2a93b;
+      --yellow-dim:rgba(242,169,59,0.15);
+      --red:       #ff3b5c;
+      --red-dim:   rgba(255,59,92,0.15);
+      --blue:      #4a9eff;
+      --blue-dim:  rgba(74,158,255,0.12);
+      --text:      #c8d8e8;
+      --text-dim:  #4a6070;
+      --text-bright:#ffffff;
+      --mono:      'JetBrains Mono', monospace;
+      --sans:      'Inter', sans-serif;
+      --header-h:  56px;
+      --panel-w:   420px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── HEADER ─────────────────────────────────────── */
+    #header {
+      height: var(--header-h);
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      gap: 24px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    #title {
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-bright);
+      letter-spacing: 2px;
+      white-space: nowrap;
+    }
+    #title span { color: var(--green); }
+
+    .header-stats {
+      display: flex;
+      gap: 20px;
+      flex: 1;
+      justify-content: center;
+    }
+
+    .stat-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+    .stat-value {
+      font-family: var(--mono);
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--green);
+      line-height: 1;
+    }
+    .stat-value.warn { color: var(--yellow); }
+    .stat-value.down { color: var(--red); }
+    .stat-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .header-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 2px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-dim);
+      white-space: nowrap;
+    }
+    .header-right .src { color: var(--blue); }
+    #sync-age { color: var(--yellow); }
+    #sync-age.fresh { color: var(--green); }
+
+    /* ── MAIN GRID ──────────────────────────────────── */
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      padding: 16px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    /* ── TILE ───────────────────────────────────────── */
+    .tile {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+    }
+    .tile:hover {
+      border-color: var(--border2);
+      background: var(--bg3);
+    }
+    .tile.status-down  { border-color: rgba(255,59,92,0.4); }
+    .tile.status-warn  { border-color: rgba(242,169,59,0.4); }
+
+    /* status bar at top of tile */
+    .tile-bar {
+      height: 3px;
+      width: 100%;
+      background: var(--green);
+      flex-shrink: 0;
+    }
+    .tile.status-down  .tile-bar { background: var(--red); }
+    .tile.status-warn  .tile-bar { background: var(--yellow); }
+
+    /* tile header row */
+    .tile-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px 6px;
+      flex-shrink: 0;
+    }
+    .tile-name {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-bright);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .tile-ping {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+    .tile-status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      flex-shrink: 0;
+      margin-left: 6px;
+    }
+    .tile-status-dot.down { background: var(--red); }
+    .tile-status-dot.warn { background: var(--yellow); }
+
+    .tile-role {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 0 12px 6px;
+      flex-shrink: 0;
+    }
+
+    /* P service metrics area */
+    .tile-primary {
+      padding: 0 12px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .p-service {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .p-service-name {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .p-service-metric {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .p-service-metric .val { color: var(--text-bright); font-weight: 700; }
+    .p-service-metric .ok  { color: var(--green); }
+    .p-service-metric .warn{ color: var(--yellow); }
+    .p-service-metric .err { color: var(--red); }
+
+    /* VRAM bar */
+    .vram-bar-wrap {
+      height: 4px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 2px;
+    }
+    .vram-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      background: var(--green);
+      transition: width 0.4s ease;
+    }
+    .vram-bar-fill.warn { background: var(--yellow); }
+    .vram-bar-fill.crit { background: var(--red); }
+
+    /* S service dots row */
+    .tile-secondary {
+      padding: 6px 12px 10px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      flex-shrink: 0;
+      border-top: 1px solid var(--border);
+    }
+    .s-dot-wrap {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .s-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+    .s-dot.down { background: var(--red); }
+    .s-dot.warn { background: var(--yellow); }
+    .s-dot.unknown { background: var(--text-dim); }
+    .s-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: 0.5px;
+    }
+
+    /* ── DETAIL PANEL ───────────────────────────────── */
+    #detail-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: var(--panel-w);
+      height: 100vh;
+      background: var(--bg2);
+      border-left: 1px solid var(--border2);
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.25s ease;
+      overflow: hidden;
+    }
+    #detail-panel.open { transform: translateX(0); }
+
+    #detail-header {
+      padding: 20px 20px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    #detail-title {
+      font-family: var(--mono);
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-bright);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    #detail-role {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--blue);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin-top: 4px;
+    }
+    #detail-close {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 4px 10px;
+      cursor: pointer;
+      border-radius: 3px;
+      transition: color 0.15s, border-color 0.15s;
+      flex-shrink: 0;
+    }
+    #detail-close:hover { color: var(--text-bright); border-color: var(--border2); }
+
+    #detail-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+    }
+    #detail-body::-webkit-scrollbar { width: 3px; }
+    #detail-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+
+    /* host stats row */
+    .d-stat-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .d-stat {
+      flex: 1;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 8px 10px;
+    }
+    .d-stat-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .d-stat-val {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--text-bright);
+      font-weight: 700;
+    }
+    .d-stat-val.up   { color: var(--green); }
+    .d-stat-val.down { color: var(--red); }
+
+    /* service cards in detail */
+    .d-section-title {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin: 14px 0 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .d-svc-card {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+    }
+    .d-svc-card.up   { border-left: 2px solid var(--green); }
+    .d-svc-card.down { border-left: 2px solid var(--red); }
+    .d-svc-card.unknown { border-left: 2px solid var(--text-dim); }
+
+    .d-svc-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .d-svc-name {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-bright);
+      letter-spacing: 0.5px;
+    }
+    .d-svc-badge {
+      font-family: var(--mono);
+      font-size: 9px;
+      padding: 1px 6px;
+      border-radius: 2px;
+      letter-spacing: 1px;
+    }
+    .d-svc-badge.P { background: rgba(74,158,255,0.15); color: var(--blue); border: 1px solid rgba(74,158,255,0.3); }
+    .d-svc-badge.S { background: rgba(255,255,255,0.05); color: var(--text-dim); border: 1px solid var(--border); }
+
+    .d-svc-row {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text);
+      margin-bottom: 3px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .d-svc-row .lbl { color: var(--text-dim); flex-shrink: 0; }
+    .d-svc-row .val { color: var(--text-bright); text-align: right; word-break: break-all; }
+    .d-svc-row .val.up   { color: var(--green); }
+    .d-svc-row .val.down { color: var(--red); }
+
+    .d-vram-wrap {
+      height: 3px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 2px;
+      overflow: hidden;
+      margin: 4px 0 2px;
+    }
+    .d-vram-fill {
+      height: 100%;
+      border-radius: 2px;
+      background: var(--green);
+    }
+    .d-vram-fill.warn { background: var(--yellow); }
+    .d-vram-fill.crit { background: var(--red); }
+
+    /* raw JSON */
+    .d-raw-toggle {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 8px 0 4px;
+      display: block;
+      letter-spacing: 1px;
+      border: none;
+      background: none;
+      text-align: left;
+      width: 100%;
+    }
+    .d-raw-toggle:hover { color: var(--text); }
+    .d-raw-pre {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: #4a6070;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 10px;
+      overflow-x: auto;
+      white-space: pre;
+      display: none;
+      margin-top: 4px;
+      line-height: 1.6;
+    }
+    .d-raw-pre.open { display: block; }
+
+    /* overlay */
+    #overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 199;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s;
+    }
+    #overlay.open { opacity: 1; pointer-events: all; }
+
+    /* footer */
+    #footer {
+      text-align: center;
+      padding: 12px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-dim);
+      border-top: 1px solid var(--border);
+      margin-top: 4px;
+    }
+    #footer a {
+      color: var(--blue);
+      text-decoration: none;
+      border: 1px solid rgba(74,158,255,0.3);
+      padding: 2px 10px;
+      border-radius: 3px;
+      margin-left: 12px;
+    }
+    #footer a:hover { background: var(--blue-dim); }
+
+    /* loading state */
+    #loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 300px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-dim);
+      letter-spacing: 2px;
+    }
+
+    /* error state */
+    #error-msg {
+      display: none;
+      text-align: center;
+      padding: 40px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--red);
+      letter-spacing: 1px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <div id="header">
+    <div id="title">FLEET_OPS <span>//</span> TILES</div>
+    <div class="header-stats">
+      <div class="stat-group">
+        <div class="stat-value" id="h-hosts">–/–</div>
+        <div class="stat-label">HOSTS</div>
+      </div>
+      <div class="stat-group">
+        <div class="stat-value" id="h-svc">–/–</div>
+        <div class="stat-label">SVC</div>
+      </div>
+      <div class="stat-group">
+        <div class="stat-value" id="h-pub">–/–</div>
+        <div class="stat-label">PUB</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <span>SRC: <span class="src" id="h-src">–</span></span>
+      <span>T: <span id="h-time">–</span> / <span id="sync-age">–</span></span>
+    </div>
+  </div>
+
+  <!-- GRID -->
+  <div id="grid">
+    <div id="loading">INITIALIZING...</div>
+  </div>
+
+  <div id="error-msg"></div>
+
+  <!-- FOOTER -->
+  <div id="footer">
+    FLEET_OPS // TILES
+    <a id="altFeedLink" href="#">BACKUP FEED</a>
+  </div>
+
+  <!-- OVERLAY -->
+  <div id="overlay"></div>
+
+  <!-- DETAIL PANEL -->
+  <div id="detail-panel">
+    <div id="detail-header">
+      <div>
+        <div id="detail-title">–</div>
+        <div id="detail-role">–</div>
+      </div>
+      <button id="detail-close">CLOSE</button>
+    </div>
+    <div id="detail-body"></div>
+  </div>
+
+  <script>
+    // ── API / ROUTING ────────────────────────────────
+    const WARN_MS = 3500;  // latency threshold for yellow ping indicator
+    const params = new URLSearchParams(window.location.search);
+    const isBkp = params.has('bkp');
+    const API_URL = isBkp
+      ? 'https://fleet-bkp.ldmathes.cc/api/status'
+      : 'https://fleet.ldmathes.cc/api/status';
+
+    document.getElementById('altFeedLink').href = isBkp
+      ? 'https://fleet.ldmathes.cc/tiles/index.html'
+      : 'https://fleet-bkp.ldmathes.cc/tiles/index.html?bkp';
+
+    // ── STATE ────────────────────────────────────────
+    let lastData = null;
+    let lastTimestamp = null;
+    let ageTimer = null;
+
+    // ── PARSERS ──────────────────────────────────────
+    function parseVRAM(detail) {
+      if (!detail) return null;
+      const m = detail.match(/VRAM:\s*([\d.]+)GB\s*\/\s*([\d.]+)GB/);
+      if (!m) return null;
+      return { used: parseFloat(m[1]), total: parseFloat(m[2]) };
+    }
+
+    function parseGPU(detail) {
+      if (!detail) return null;
+      const m = detail.match(/GPU:\s*cuda:\d+\s+(.+?)\s*(?::|·|\u00b7|$)/);
+      return m ? m[1].trim() : null;
+    }
+
+    function parseQueue(detail) {
+      if (!detail) return null;
+      const m = detail.match(/Queue:\s*(.+?)(?:\s*·|\s*$)/);
+      return m ? m[1].trim() : null;
+    }
+
+    function parseOllama(detail) {
+      if (!detail) return null;
+      const m = detail.match(/(\d+)\s+models?\s+available\s*[·\u00b7]\s*(.+)/);
+      if (!m) return null;
+      return { count: parseInt(m[1]), active: m[2].trim() };
+    }
+
+    function parsePlex(detail) {
+      if (!detail) return null;
+      const streams = detail.match(/(\d+)\s+active\s+streams?/i);
+      const remote  = detail.match(/Remote:\s*(\w+)/i);
+      const libs    = detail.match(/(\d+)\s+libraries?/i);
+      // extract playing titles — appear after the last bullet/dash separator
+      // format: "... • 2 active streams — Title1, Title2"  or similar
+      const playingMatch = detail.match(/streams?\s*[-–—]\s*(.+)$/i);
+      const playing = playingMatch ? playingMatch[1].trim() : null;
+      return {
+        streams: streams ? parseInt(streams[1]) : 0,
+        remote:  remote  ? remote[1] : null,
+        libs:    libs    ? parseInt(libs[1]) : null,
+        playing: playing,
+      };
+    }
+
+    function parseSyncthing(detail) {
+      if (!detail) return null;
+      const folders = detail.match(/(\d+)\s+folders?/i);
+      const state   = detail.match(/^(\w+)/);
+      return {
+        state:   state   ? state[1] : null,
+        folders: folders ? parseInt(folders[1]) : null,
+      };
+    }
+
+    function parseHeartbeat(detail) {
+      if (!detail) return null;
+      const m = detail.match(/(\d+)\s+sec\s+old/);
+      return m ? parseInt(m[1]) : null;
+    }
+
+    // ── STATUS HELPERS ───────────────────────────────
+    function hostStatus(machine) {
+      const hostDown = machine.host?.status !== 'up';
+      if (hostDown) return 'down';
+      const anyDown = (machine.services || []).some(s =>
+        s.priority === 'P' && s.tailscale_check?.status !== 'up'
+      );
+      if (anyDown) return 'down';
+      return 'up';
+    }
+
+    function svcStatus(svc) {
+      return svc.tailscale_check?.status || 'unknown';
+    }
+
+    // ── TILE RENDERING ───────────────────────────────
+    function renderPrimaryMetric(svc) {
+      const status = svcStatus(svc);
+      const ct = svc.check_type || '';
+      const detail = svc.tailscale_check?.detail || '';
+      let html = '';
+
+      if (svc.name === 'ComfyUI' || ct === 'comfyui') {
+        const vram  = parseVRAM(detail);
+        const queue = parseQueue(detail);
+        const gpu   = parseGPU(detail);
+        if (vram) {
+          const pct      = Math.round(vram.used / vram.total * 100);
+          const barClass = pct > 85 ? 'crit' : pct > 60 ? 'warn' : '';
+          html += `<div class="p-service-metric">
+            <span class="val">${vram.used}/${vram.total}GB</span>
+            <span style="color:var(--text-dim)"> VRAM</span>
+          </div>
+          <div class="vram-bar-wrap"><div class="vram-bar-fill ${barClass}" style="width:${pct}%"></div></div>`;
+        }
+        if (queue) {
+          const isIdle = queue.toLowerCase() === 'idle';
+          const qClass = isIdle ? 'ok' : 'warn';
+          // try to extract queue depth number
+          const qDepth = detail.match(/Queue:\s*(\d+)/i);
+          html += `<div class="p-service-metric">
+            <span class="${qClass}">${queue.toUpperCase()}</span>
+            ${!isIdle && qDepth ? `<span style="color:var(--text-dim)"> · ${qDepth[1]} pending</span>` : ''}
+          </div>`;
+        }
+
+      } else if (svc.name === 'Ollama' || ct === 'ollama') {
+        const ol = parseOllama(detail);
+        if (ol) {
+          const isActive = ol.active !== 'none active';
+          const activeClass = isActive ? 'warn' : 'ok';
+          html += `<div class="p-service-metric">
+            <span class="val">${ol.count}</span>
+            <span style="color:var(--text-dim)"> models</span>
+          </div>
+          <div class="p-service-metric"><span class="${activeClass}">${isActive ? '▶ ' + ol.active : ol.active}</span></div>`;
+        }
+
+      } else if (svc.name === 'Plex' || ct === 'plex') {
+        const pl = parsePlex(detail);
+        if (pl) {
+          const serverName = detail.match(/^([^\s]+)/);
+          const streamClass = pl.streams > 0 ? 'warn' : 'ok';
+          if (serverName) {
+            html += `<div class="p-service-metric"><span style="color:var(--text-dim)">${serverName[1]}</span></div>`;
+          }
+          html += `<div class="p-service-metric">
+            <span class="${streamClass} val">${pl.streams}</span>
+            <span style="color:var(--text-dim)"> streams</span>
+            ${pl.remote ? `<span style="color:var(--text-dim)"> · </span><span class="ok">${pl.remote}</span>` : ''}
+          </div>`;
+          if (pl.libs !== null) {
+            html += `<div class="p-service-metric"><span style="color:var(--text-dim)">${pl.libs} libraries</span></div>`;
+          }
+          if (pl.streams > 0 && pl.playing && svc.priority === 'P') {
+            html += `<div class="p-service-metric" style="font-size:10px">
+              <span class="warn">▶ </span><span style="color:var(--text-bright)">${pl.playing}</span>
+            </div>`;
+          }
+        }
+
+      } else if (ct === 'syncthing' || svc.name === 'Syncthing') {
+        const st = parseSyncthing(detail);
+        // parse transfer rates from detail e.g. "↑ 0 B/s ↓ 0 B/s"
+        const rates = detail.match(/↑\s*(.+?)\s*↓\s*(.+?)(?:\s*$)/);
+        const up   = rates ? rates[1].trim() : null;
+        const down = rates ? rates[2].trim() : null;
+        const hasActivity = up && !(up === '0 B/s');
+        if (st) {
+          html += `<div class="p-service-metric">
+            <span class="${status === 'up' ? 'ok' : 'err'}">${st.state || status.toUpperCase()}</span>
+            ${st.folders != null ? `<span style="color:var(--text-dim)"> · ${st.folders} folders</span>` : ''}
+          </div>`;
+        }
+        if (up && down) {
+          html += `<div class="p-service-metric">
+            <span class="${hasActivity ? 'warn' : ''}" style="color:var(--text-dim)">↑ </span><span class="${hasActivity ? 'warn val' : ''}">${up}</span>
+            <span style="color:var(--text-dim)"> ↓ ${down}</span>
+          </div>`;
+        }
+
+      } else if (ct === 'openwebui') {
+        const ms = svc.tailscale_check?.response_time_ms;
+        html += `<div class="p-service-metric">
+          <span class="${status === 'up' ? 'ok' : 'err'}">${status.toUpperCase()}</span>
+          ${ms ? `<span style="color:var(--text-dim)"> · ${ms}ms</span>` : ''}
+        </div>`;
+
+      } else if (ct === 'flask') {
+        const ms = svc.tailscale_check?.response_time_ms;
+        html += `<div class="p-service-metric">
+          <span class="${status === 'up' ? 'ok' : 'err'}">${detail || status.toUpperCase()}</span>
+          ${ms ? `<span style="color:var(--text-dim)"> · ${ms}ms</span>` : ''}
+        </div>`;
+
+      } else {
+        html += `<div class="p-service-metric">
+          <span class="${status === 'up' ? 'ok' : 'err'}">${status.toUpperCase()}</span>
+        </div>`;
+      }
+
+      return html;
+    }
+
+    function renderTile(machine) {
+      const status = hostStatus(machine);
+      const ping   = machine.host?.response_time_ms;
+      const pSvcs  = (machine.services || []).filter(s => s.priority === 'P');
+      const sSvcs  = (machine.services || []).filter(s => s.priority === 'S');
+
+      // build P services html
+      let primaryHtml = '';
+      for (const svc of pSvcs) {
+        const ss = svcStatus(svc);
+        primaryHtml += `
+          <div class="p-service">
+            <div class="p-service-name">${svc.name}</div>
+            ${renderPrimaryMetric(svc)}
+          </div>`;
+      }
+      if (!primaryHtml) {
+        primaryHtml = `<div class="p-service-metric" style="color:var(--text-dim)">NO PRIMARY SERVICES</div>`;
+      }
+
+      // build S dots html — include heartbeat age indicator
+      let secondaryHtml = '';
+      for (const svc of sSvcs) {
+        const ss = svcStatus(svc);
+        const ct = svc.check_type || '';
+        if (svc.name.toLowerCase().includes('heartbeat')) {
+          const age = parseHeartbeat(svc.tailscale_check?.detail || '');
+          const ageClass = age != null && age > 120 ? 'warn' : (age != null && age > 300 ? 'down' : '');
+          const ageText  = age != null ? ` ${age}s` : '';
+          secondaryHtml += `
+            <div class="s-dot-wrap" title="${svc.name}: ${ss} ${ageText}">
+              <div class="s-dot ${ageClass || ss}"></div>
+              <span class="s-label" style="${ageClass === 'warn' ? 'color:var(--yellow)' : ''}">${svc.name}${ageText}</span>
+            </div>`;
+        } else {
+          secondaryHtml += `
+            <div class="s-dot-wrap" title="${svc.name}: ${ss}">
+              <div class="s-dot ${ss}"></div>
+              <span class="s-label">${svc.name}</span>
+            </div>`;
+        }
+      }
+
+      // find heartbeat age for header indicator (any priority)
+      const heartbeatSvcs = (machine.services || []).filter(s => s.name.toLowerCase().includes('heartbeat'));
+      const staleHeartbeat = heartbeatSvcs.some(s => {
+        const age = parseHeartbeat(s.tailscale_check?.detail || '');
+        return age != null && age > 120;
+      });
+
+      const tile = document.createElement('div');
+      tile.className = `tile status-${status}`;
+      tile.dataset.name = machine.machine.display_name;
+      tile.innerHTML = `
+        <div class="tile-bar"></div>
+        <div class="tile-head">
+          <span class="tile-name">${machine.machine.display_name}</span>
+          <span style="display:flex;align-items:center;gap:6px">
+            ${staleHeartbeat ? `<span style="font-family:var(--mono);font-size:9px;color:var(--yellow);letter-spacing:1px" title="Heartbeat stale">HB</span>` : ''}
+            <span class="tile-ping" style="${ping != null && ping > WARN_MS ? 'color:var(--yellow)' : ''}">${ping != null ? ping + 'ms' : '–'}</span>
+            <span class="tile-status-dot ${status === 'up' ? '' : status}"></span>
+          </span>
+        </div>
+        <div class="tile-role">${machine.machine.primary_role || ''}</div>
+        <div class="tile-primary">${primaryHtml}</div>
+        ${secondaryHtml ? `<div class="tile-secondary">${secondaryHtml}</div>` : ''}
+      `;
+
+      tile.addEventListener('click', () => openDetail(machine));
+      return tile;
+    }
+
+    // ── DETAIL PANEL ─────────────────────────────────
+    function openDetail(machine) {
+      const panel = document.getElementById('detail-panel');
+      const body  = document.getElementById('detail-body');
+      document.getElementById('detail-title').textContent = machine.machine.display_name.toUpperCase();
+      document.getElementById('detail-role').textContent  = machine.machine.primary_role || '';
+
+      const status = machine.host?.status || 'unknown';
+      const ping   = machine.host?.response_time_ms;
+      const ip     = machine.machine.tailscale_ip;
+      const dur    = machine.poll?.poll_duration_ms;
+
+      let html = `
+        <div class="d-stat-row">
+          <div class="d-stat">
+            <div class="d-stat-label">STATUS</div>
+            <div class="d-stat-val ${status}">${status.toUpperCase()}</div>
+          </div>
+          <div class="d-stat">
+            <div class="d-stat-label">LATENCY</div>
+            <div class="d-stat-val">${ping != null ? ping + 'ms' : '–'}</div>
+          </div>
+          <div class="d-stat">
+            <div class="d-stat-label">IP</div>
+            <div class="d-stat-val" style="font-size:10px">${ip || '–'}</div>
+          </div>
+        </div>`;
+
+      if (machine.host?.detail) {
+        html += `<div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-bottom:12px">${machine.host.detail}</div>`;
+      }
+
+      // P services
+      const pSvcs = (machine.services || []).filter(s => s.priority === 'P');
+      const sSvcs = (machine.services || []).filter(s => s.priority === 'S');
+
+      if (pSvcs.length) {
+        html += `<div class="d-section-title">PRIMARY SERVICES</div>`;
+        html += pSvcs.map(s => renderDetailService(s)).join('');
+      }
+      if (sSvcs.length) {
+        html += `<div class="d-section-title">SECONDARY SERVICES</div>`;
+        html += sSvcs.map(s => renderDetailService(s)).join('');
+      }
+
+      // raw JSON
+      html += `
+        <div class="d-section-title" style="margin-top:16px">RAW DATA</div>
+        <button class="d-raw-toggle" onclick="this.nextElementSibling.classList.toggle('open');this.textContent=this.nextElementSibling.classList.contains('open')?'▲ HIDE JSON':'▼ SHOW JSON'">▼ SHOW JSON</button>
+        <pre class="d-raw-pre">${JSON.stringify(machine, null, 2)}</pre>
+      `;
+
+      body.innerHTML = html;
+      panel.classList.add('open');
+      document.getElementById('overlay').classList.add('open');
+    }
+
+    function renderDetailService(svc) {
+      const ss      = svcStatus(svc);
+      const detail  = svc.tailscale_check?.detail || '';
+      const ms      = svc.tailscale_check?.response_time_ms;
+      const ct      = svc.check_type || '';
+
+      let rows = '';
+
+      // status + latency
+      rows += `<div class="d-svc-row">
+        <span class="lbl">STATUS</span>
+        <span class="val ${ss}">${ss.toUpperCase()}</span>
+      </div>`;
+      if (ms != null) {
+        rows += `<div class="d-svc-row">
+          <span class="lbl">TS LATENCY</span>
+          <span class="val">${ms}ms</span>
+        </div>`;
+      }
+
+      // type-specific pretty rows
+      if (ct === 'comfyui' || svc.name === 'ComfyUI') {
+        const vram  = parseVRAM(detail);
+        const gpu   = parseGPU(detail);
+        const queue = parseQueue(detail);
+        if (gpu)  rows += `<div class="d-svc-row"><span class="lbl">GPU</span><span class="val">${gpu}</span></div>`;
+        if (vram) {
+          const pct = Math.round(vram.used / vram.total * 100);
+          const bc  = pct > 85 ? 'crit' : pct > 60 ? 'warn' : '';
+          rows += `<div class="d-svc-row"><span class="lbl">VRAM</span><span class="val">${vram.used}GB / ${vram.total}GB (${pct}%)</span></div>`;
+          rows += `<div class="d-vram-wrap"><div class="d-vram-fill ${bc}" style="width:${pct}%"></div></div>`;
+        }
+        if (queue) rows += `<div class="d-svc-row"><span class="lbl">QUEUE</span><span class="val">${queue}</span></div>`;
+
+      } else if (ct === 'ollama' || svc.name === 'Ollama') {
+        const ol = parseOllama(detail);
+        if (ol) {
+          rows += `<div class="d-svc-row"><span class="lbl">MODELS</span><span class="val">${ol.count} available</span></div>`;
+          rows += `<div class="d-svc-row"><span class="lbl">ACTIVE</span><span class="val">${ol.active}</span></div>`;
+        }
+
+      } else if (ct === 'plex' || svc.name === 'Plex') {
+        const pl = parsePlex(detail);
+        if (pl) {
+          rows += `<div class="d-svc-row"><span class="lbl">STREAMS</span><span class="val">${pl.streams} active</span></div>`;
+          if (pl.remote) rows += `<div class="d-svc-row"><span class="lbl">REMOTE</span><span class="val">${pl.remote}</span></div>`;
+          if (pl.libs)   rows += `<div class="d-svc-row"><span class="lbl">LIBRARIES</span><span class="val">${pl.libs}</span></div>`;
+          // full detail for version etc
+          rows += `<div class="d-svc-row" style="flex-direction:column;gap:2px"><span class="lbl">DETAIL</span><span class="val" style="font-size:9px;text-align:left">${detail}</span></div>`;
+        }
+
+      } else if (ct === 'syncthing') {
+        const st = parseSyncthing(detail);
+        if (st) {
+          rows += `<div class="d-svc-row"><span class="lbl">STATE</span><span class="val">${st.state}</span></div>`;
+          if (st.folders) rows += `<div class="d-svc-row"><span class="lbl">FOLDERS</span><span class="val">${st.folders}</span></div>`;
+        }
+        rows += `<div class="d-svc-row" style="flex-direction:column;gap:2px"><span class="lbl">DETAIL</span><span class="val" style="font-size:9px;text-align:left">${detail}</span></div>`;
+
+      } else if (ct === 'onedrive_heartbeat' || svc.name.toLowerCase().includes('heartbeat')) {
+        const age = parseHeartbeat(detail);
+        if (age != null) {
+          const ageClass = age > 120 ? 'down' : age > 60 ? 'warn' : 'up';
+          rows += `<div class="d-svc-row"><span class="lbl">AGE</span><span class="val ${ageClass}">${age}s</span></div>`;
+        }
+        rows += `<div class="d-svc-row"><span class="lbl">DETAIL</span><span class="val">${detail}</span></div>`;
+
+      } else if (detail) {
+        rows += `<div class="d-svc-row"><span class="lbl">DETAIL</span><span class="val">${detail}</span></div>`;
+      }
+
+      // public check
+      if (svc.public_check) {
+        const pc = svc.public_check;
+        rows += `<div class="d-svc-row">
+          <span class="lbl">PUBLIC</span>
+          <span class="val ${pc.status}">${pc.status.toUpperCase()} · ${pc.http_code} · ${pc.response_time_ms}ms</span>
+        </div>`;
+        rows += `<div class="d-svc-row"><span class="lbl">URL</span><span class="val" style="font-size:9px">${pc.url}</span></div>`;
+      }
+
+      return `
+        <div class="d-svc-card ${ss}">
+          <div class="d-svc-head">
+            <span class="d-svc-name">${svc.name}</span>
+            <span class="d-svc-badge ${svc.priority}">${svc.priority}</span>
+          </div>
+          ${rows}
+        </div>`;
+    }
+
+    function closeDetail() {
+      document.getElementById('detail-panel').classList.remove('open');
+      document.getElementById('overlay').classList.remove('open');
+    }
+
+    document.getElementById('detail-close').addEventListener('click', closeDetail);
+    document.getElementById('overlay').addEventListener('click', closeDetail);
+
+    // ── HEADER UPDATE ────────────────────────────────
+    function updateHeader(data) {
+      const s = data.summary;
+      const setVal = (id, up, total) => {
+        const el = document.getElementById(id);
+        el.textContent = `${up}/${total}`;
+        el.className = 'stat-value' + (up < total ? (up === 0 ? ' down' : ' warn') : '');
+      };
+      setVal('h-hosts', s.machines_up,          s.machines_total);
+      setVal('h-svc',   s.services_up,           s.services_total);
+      setVal('h-pub',   s.public_endpoints_up,   s.public_endpoints_total);
+
+      document.getElementById('h-src').textContent  = data.meta.checker_host.toUpperCase();
+      lastTimestamp = new Date(data.meta.timestamp_utc);
+      document.getElementById('h-time').textContent = lastTimestamp.toLocaleTimeString();
+    }
+
+    function startAgeTimer() {
+      if (ageTimer) clearInterval(ageTimer);
+      ageTimer = setInterval(() => {
+        if (!lastTimestamp) return;
+        const age = Math.floor((Date.now() - lastTimestamp) / 1000);
+        const el  = document.getElementById('sync-age');
+        el.textContent = age + 's ago';
+        el.className   = age < 60 ? 'fresh' : '';
+      }, 1000);
+    }
+
+    // ── MAIN RENDER ──────────────────────────────────
+    function render(data) {
+      updateHeader(data);
+      const grid = document.getElementById('grid');
+      grid.innerHTML = '';
+
+      const machines = [...(data.machines || [])].sort((a, b) =>
+        a.machine.display_name.localeCompare(b.machine.display_name)
+      );
+
+      for (const machine of machines) {
+        grid.appendChild(renderTile(machine));
+      }
+    }
+
+    // ── FETCH ────────────────────────────────────────
+    async function refresh() {
+      try {
+        const res = await fetch(API_URL);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        lastData = data;
+        const loading = document.getElementById('loading');
+        if (loading) loading.style.display = 'none';
+        const errorMsg = document.getElementById('error-msg');
+        if (errorMsg) errorMsg.style.display = 'none';
+        render(data);
+      } catch (err) {
+        const loading = document.getElementById('loading');
+        if (loading) loading.style.display = 'none';
+        const em = document.getElementById('error-msg');
+        if (em) { em.style.display = 'block'; em.textContent = `FETCH ERROR: ${err.message}`; }
+        console.error(err);
+      }
+    }
+
+    // ── INIT ─────────────────────────────────────────
+    refresh();
+    startAgeTimer();
+    setInterval(refresh, 30000);
+  </script>
+</body>
+</html>

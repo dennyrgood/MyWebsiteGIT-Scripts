@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>FLEET_OPS - Dual Panel View</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<!-- D3.js library for network visualization -->
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+:root {
+  --bg:       #080b0f;
+  --bg2:      #0d1117;
+  --bg3:      #111620;
+  --bg4:      #161d28;
+  --border:   #1c2333;
+  --border2:  #243042;
+  --text:     #c9d1d9;
+  --text2:    #6e7f96;
+  --text3:    #3d4f63;
+  --green:    #39d353;
+  --green-dim:#1a3d22;
+  --red:      #f85149;
+  --red-dim:  #3d1a1a;
+  --blue:     #58a6ff;
+  --blue-dim: #1a2d4a;
+  --amber:    #e3b341;
+  --amber-dim:#3d2e0f;
+  --font: 'Share Tech Mono', monospace;
+  --font-head: 'Orbitron', monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1.5;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+/* ── SCANLINE OVERLAY ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 999;
+}
+/* ── MAIN LAYOUT ── */
+.main-container {
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+/* ── LEFT PANEL ── */
+.left-panel {
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.left-panel-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.topbar-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.topbar-title {
+  font-family: var(--font-head);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.topbar-title .cursor {
+  display: inline-block;
+  width: 10px;
+  height: 18px;
+  background: var(--green);
+  animation: blink 1s step-end infinite;
+  vertical-align: middle;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+.topbar-sub {
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+}
+#dataAge { color: var(--text2); }
+#dataAge.fresh { color: var(--green); }
+#dataAge.aging { color: var(--amber); }
+#dataAge.stale { color: var(--red); }
+.topbar-stats {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.stat-box {
+  border: 1px solid var(--border2);
+  background: var(--bg3);
+  padding: 6px 14px;
+  text-align: center;
+  min-width: 60px;
+}
+.stat-box .stat-label {
+  font-size: 9px;
+  color: var(--text3);
+  letter-spacing: 0.1em;
+  display: block;
+  margin-bottom: 2px;
+}
+.stat-box .stat-value {
+  font-family: var(--font-head);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.05em;
+}
+.stat-box .stat-value.ok { color: var(--green); }
+.stat-box .stat-value.warn { color: var(--amber); }
+.stat-box .stat-value.err { color: var(--red); }
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--green);
+  padding: 5px 12px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--green);
+  background: rgba(57,211,83,0.05);
+}
+.status-badge.warn { border-color: var(--amber); color: var(--amber); background: rgba(227,179,65,0.05); }
+.status-badge.err  { border-color: var(--red);   color: var(--red);   background: rgba(248,81,73,0.05); }
+.status-badge .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s infinite;
+}
+.status-badge.warn .dot,
+.status-badge.err .dot { animation: none; }
+@keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
+/* ── BANNERS ── */
+.banner {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid;
+}
+.banner.stale { display:flex; background:rgba(227,179,65,0.08); border-color:rgba(227,179,65,0.3); color:var(--amber); }
+.banner.error  { display:flex; background:rgba(248,81,73,0.08);  border-color:rgba(248,81,73,0.3);  color:var(--red); }
+/* ── MACHINE CARDS ── */
+.card {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+.card:hover { background: var(--bg3); }
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.card-name {
+  font-family: var(--font-head);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.card-role {
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+}
+.card-header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.host-ms {
+  font-size: 11px;
+  color: var(--text2);
+}
+.host-dot-inline {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.host-dot-inline.up   { background: var(--green); box-shadow: 0 0 6px rgba(57,211,83,0.5); }
+.host-dot-inline.down { background: var(--red);   box-shadow: 0 0 6px rgba(248,81,73,0.5); }
+.host-dot-inline.unknown { background: var(--text3); }
+.card-body { flex: 1; }
+.card.collapsed .card-body { display: none; }
+.svc {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+.svc:last-child { border-bottom: none; }
+.svc.svc-down { background: rgba(248,81,73,0.03); }
+.svc-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.svc-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+.svc-dot.up      { background: var(--green); }
+.svc.dot.down    { background: var(--red); }
+.svc.dot.unknown { background: var(--text3); }
+.svc-info { min-width: 0; flex: 1; }
+.svc-name-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.svc-name {
+  font-size: 12px;
+  color: var(--text);
+  letter-spacing: 0.04em;
+}
+.svc-ms { font-size: 9px; color: var(--text3); }
+.card-footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  background: var(--bg);
+}
+.card-footer-ip { font-size: 10px; color: var(--text3); }
+.card-footer-name { font-size: 10px; color: var(--text3); text-align: right; }
+/* ── RIGHT PANEL (NETWORK) ── */
+.right-panel {
+  background: var(--bg2);
+  position: relative;
+}
+.network-header {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 8px 16px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  z-index: 100;
+}
+.network-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.control-btn {
+  padding: 4px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 10px;
+  cursor: pointer;
+}
+.control-btn:hover { border-color: var(--blue); }
+.network-canvas {
+  width: 100%;
+  height: 100%;
+}
+/* ── TOOLTIP ── */
+.tooltip {
+  position: absolute;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  padding: 10px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 1000;
+  min-width: 180px;
+}
+.tooltip.visible { opacity: 1; }
+/* ── LOADING STATE ── */
+.loading-state {
+  padding: 60px;
+  text-align: center;
+  color: var(--text2);
+  letter-spacing: 0.1em;
+}
+.pagefooter {
+  border-top: 1px solid var(--border);
+  padding: 20px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  background: var(--bg);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.pagefooter-wordmark {
+  font-family: var(--font-head);
+  font-size: clamp(28px, 6vw, 52px);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.04);
+  line-height: 1;
+}
+.pagefooter-wordmark span {
+  color: rgba(57,211,83,0.15);
+}
+.pagefooter-meta {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+}
+.pagefooter-meta a {
+  color: var(--blue);
+  text-decoration: none;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.pagefooter-meta span {
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: 0.05em;
+}
+/* ── MEDIA QUERIES ── */
+@media (max-width: 768px) {
+  .main-container {
+    grid-template-columns: 1fr;
+    grid-template-rows: 50vh 1fr;
+  }
+  .left-panel {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+</style>
+</head>
+<body>
+<div class="main-container">
+  <div class="left-panel">
+    <!-- BANNERS -->
+    <div class="banner" id="staleBanner">⚠ DATA STALE — CHECKER MAY BE DOWN</div>
+    <div class="banner" id="errorBanner">✕ API UNREACHABLE</div>
+    
+    <!-- TOPBAR -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="topbar-title">
+          FLEET_OPS <span class="cursor"></span>
+        </div>
+        <div class="topbar-sub">SRC: <span id="topbarSrc">—</span> &nbsp;/&nbsp; T: <span id="topbarTime">—</span> &nbsp;/&nbsp; <span id="dataAge">—</span></div>
+      </div>
+      <div class="topbar-stats">
+        <div class="stat-box">
+          <span class="stat-label">HOSTS</span>
+          <div class="stat-value" id="statHosts">—</div>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">SVC</span>
+          <div class="stat-value" id="statSvc">—</div>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">PUB</span>
+          <div class="stat-value" id="statPub">—</div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="status-badge" id="statusBadge">
+          <span class="dot"></span>
+          <span id="statusText">CONNECTING</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- MACHINE CARDS -->
+    <div id="machineCards">
+      <div class="loading-state">LOADING DATA...</div>
+    </div>
+  </div>
+  
+  <div class="right-panel">
+    <div class="network-header">
+      <div style="font-family:var(--font-head);font-size:14px;font-weight:700;margin-bottom:8px">
+        FLEET NETWORK
+      </div>
+      <div class="network-controls">
+        <button class="control-btn" onclick="toggleForce()">Toggle Physics</button>
+        <button class="control-btn" onclick="zoomIn()">Zoom In</button>
+        <button class="control-btn" onclick="zoomOut()">Zoom Out</button>
+      </div>
+    </div>
+    <svg id="networkCanvas" class="network-canvas"></svg>
+    <div class="tooltip" id="tooltip"></div>
+  </div>
+</div>
+
+<div class="pagefooter">
+  <div class="pagefooter-wordmark">FLEET<span>_</span>STATUS</div>
+  <div class="pagefooter-meta">
+    <a href="#" id="altFeedLink">↗ BACKUP FEED</a>
+    <span id="footerMeta">POLL: 30S</span>
+    <span id="footerChecker">—</span>
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const isBkp = params.has('bkp');
+const API_URL = isBkp
+  ? 'https://fleet-bkp.ldmathes.cc/api/status'
+  : 'https://fleet.ldmathes.cc/api/status';
+
+document.getElementById('altFeedLink').href = isBkp
+  ? 'https://fleet.ldmathes.cc/panel/index.html'
+  : 'https://fleet-bkp.ldmathes.cc/panel/index.html?bkp';
+
+const POLL_MS = 30000;
+const STALE_S = 300;
+let lastData = null;
+let collapsed = {};
+let lastTimestamp = null;
+let networkSimulation = null;
+let svg = null;
+let canvasWidth = 0;
+let canvasHeight = 0;
+
+// ── STATUS & DATA AGE TRACKING ──
+setInterval(() => {
+  const el = document.getElementById('dataAge');
+  if (!el || !lastTimestamp) return;
+  const s = Math.floor((Date.now() - new Date(lastTimestamp).getTime()) / 1000);
+  if (s < 60) {
+    el.textContent = s + 's ago';
+    el.className = s < 45 ? 'fresh' : 'aging';
+  } else if (s < 300) {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    el.textContent = m + 'm ' + sec + 's ago';
+    el.className = 'aging';
+  } else {
+    el.textContent = m + 'm ago — STALE';
+    el.className = 'stale';
+  }
+}, 1000);
+
+// ── HELPER FUNCTIONS ──
+function fmtTime(u) {
+  if (!u) return '—';
+  try { return new Date(u).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+  catch { return u; }
+}
+
+function statusClass(s) {
+  return s === 'up' ? 'up' : s === 'down' ? 'down' : 'unknown';
+}
+
+function statColor(up, total) {
+  if (up === total) return 'ok';
+  if (up < total * 0.7) return 'err';
+  return 'warn';
+}
+
+function cbClass(s) {
+  return s === 'up' ? 'ok' : s === 'down' ? 'err' : 'unk';
+}
+
+function ageS(u) {
+  if (!u) return Infinity;
+  return (Date.now() - new Date(u).getTime()) / 1000;
+}
+
+// ── SERVICE RENDERER ──
+function renderSvc(svc) {
+  const tc = svc.tailscale_check || {};
+  const pc = svc.public_check;
+  const st = tc.status || 'unknown';
+  const detail = tc.detail || '';
+  const isDown = st === 'down';
+  
+  const pubBadge = pc
+    ? `<span class="cbadge ${cbClass(pc.status)}">${pc.status === 'up' ? 'OK' : 'ERR'}&nbsp;PUB</span>`
+    : '';
+  const tsBadge = `<span class="cbadge ${cbClass(st)}">${st === 'up' ? 'OK' : st === 'down' ? 'ERR' : 'UNK'}&nbsp;TS</span>`;
+  
+  const msLine = tc.response_time_ms
+    ? `<div class="svc-ms">${tc.response_time_ms}ms${pc && pc.response_time_ms ? ' / ' + pc.response_time_ms + 'ms pub' : ''}</div>`
+    : '';
+  
+  return `
+    <div class="svc${isDown ? ' svc-down' : ''}">
+      <div class="svc-left">
+        <div class="svc-dot ${statusClass(st)}"></div>
+        <div class="svc-info">
+          <div class="svc-name-row">
+            <span class="svc-name">${svc.name}</span>
+            <span class="pbadge" style="font-size:8px;padding:1px 4px;border:1px solid var(--border2);letter-spacing:0.06em;font-weight:700">${svc.priority||'B'}</span>
+            <span class="port" style="font-size:9px;color:var(--text3)">:${svc.port}</span>
+          </div>
+          ${detail ? `<div class="svc-detail ${isDown ? 'err' : ''}" style="font-size:10px;color:var(--text2);margin-top:1px">${detail}</div>` : ''}
+        </div>
+      </div>
+      <div class="svc-right">
+        <div class="svc-badges">${tsBadge}${pubBadge}</div>
+        ${msLine}
+      </div>
+    </div>`;
+}
+
+// ── CARD RENDERER ──
+function renderCard(m) {
+  const host = m.host || {};
+  const hs = host.status || 'unknown';
+  const name = m.machine.tailscale_name;
+  
+  if (!(name in collapsed)) collapsed[name] = true;
+  
+  const isCollapsed = collapsed[name];
+  const hostMs = host.response_time_ms ? `${host.response_time_ms}ms` : '';
+  const services = (m.services || []).map(renderSvc).join('');
+  const pollTime = m.poll ? fmtTime(m.poll.timestamp_utc) : '—';
+  
+  return `
+    <div class="card${isCollapsed ? ' collapsed' : ''}" data-m="${name}">
+      <div class="card-header" onclick="toggle('${name}')">
+        <div>
+          <div class="card-name">${m.machine.display_name.toUpperCase()}</div>
+          <div class="card-role">${m.machine.primary_role.toUpperCase()}</div>
+        </div>
+        <div class="card-header-right">
+          <div class="host-ms">${hostMs}<span class="host-dot-inline ${statusClass(hs)}"></span></div>
+          <div class="card-role" data-collapse-hint style="font-size:9px;color:var(--text3)">${isCollapsed ? '▾ EXPAND' : '▴ COLLAPSE'}</div>
+        </div>
+      </div>
+      <div class="card-body">${services}</div>
+      <div class="card-footer">
+        <span class="card-footer-ip">${m.machine.tailscale_ip}</span>
+        <span class="card-footer-name">${name} · ${pollTime}</span>
+      </div>
+    </div>`;
+}
+
+// ── CARD TOGGLE ──
+function toggle(name) {
+  collapsed[name] = !collapsed[name];
+  const card = document.querySelector(`[data-m="${name}"]`);
+  if (!card) return;
+  card.classList.toggle('collapsed', collapsed[name]);
+  const hint = card.querySelector('[data-collapse-hint]');
+  if (hint) hint.textContent = collapsed[name] ? '▾ EXPAND' : '▴ COLLAPSE';
+}
+
+// ── UPDATE UI WITH DATA ──
+function render(data) {
+  lastData = data;
+  lastTimestamp = data.meta?.timestamp_utc || null;
+  const sum = data.summary || {};
+  const meta = data.meta || {};
+  
+  // Sub header
+  document.getElementById('topbarSrc').textContent = (meta.checker_host || '—').toUpperCase();
+  document.getElementById('topbarTime').textContent = fmtTime(meta.timestamp_utc);
+  
+  // Stats
+  const hostsEl = document.getElementById('statHosts');
+  const svcEl = document.getElementById('statSvc');
+  const pubEl = document.getElementById('statPub');
+  
+  hostsEl.textContent = `${sum.machines_up || 0}/${sum.machines_total || 0}`;
+  hostsEl.className = `stat-value ${statColor(sum.machines_up || 0, sum.machines_total || 0)}`;
+  
+  svcEl.textContent = `${sum.services_up || 0}/${sum.services_total || 0}`;
+  svcEl.className = `stat-value ${statColor(sum.services_up || 0, sum.services_total || 0)}`;
+  
+  pubEl.textContent = `${sum.public_endpoints_up || 0}/${sum.public_endpoints_total || 0}`;
+  pubEl.className = `stat-value ${statColor(sum.public_endpoints_up || 0, sum.public_endpoints_total || 0)}`;
+  
+  // Status badge
+  const badge = document.getElementById('statusBadge');
+  const statusText = document.getElementById('statusText');
+  const allOk = sum.services_up === sum.services_total && sum.public_endpoints_up === sum.public_endpoints_total;
+  const hasDown = sum.services_down > 0 || sum.public_endpoints_down > 0;
+  const isCritical = sum.services_total > 0 && (sum.services_down / sum.services_total) > 0.5;
+  
+  badge.className = `status-badge${isCritical ? ' err' : hasDown ? ' warn' : ''}`;
+  statusText.textContent = allOk ? 'OPERATIONAL' : `${sum.services_down + sum.public_endpoints_down} DEGRADED`;
+  
+  // Stale/Error banners
+  const age = ageS(meta.timestamp_utc);
+  const staleBanner = document.getElementById('staleBanner');
+  const errorBanner = document.getElementById('errorBanner');
+  
+  staleBanner.className = age > STALE_S ? 'banner stale' : 'banner';
+  errorBanner.className = 'banner';
+  if (age > STALE_S) badge.className = 'status-badge warn';
+  
+  // Cards
+  const cardsContainer = document.getElementById('machineCards');
+  if (data.machines && data.machines.length > 0) {
+    cardsContainer.innerHTML = (data.machines || []).map(renderCard).join('');
+  }
+  
+  // Footer
+  document.getElementById('footerChecker').textContent =
+    `CHECKER: ${(meta.checker_host || '—').toUpperCase()} · CYCLE: ${meta.cycle_duration_ms || '—'}MS`;
+  
+  // Network viz
+  renderNetwork();
+}
+
+// ── NETWORK VISUALIZATION ──
+window.addEventListener('load', initNetworkCanvas);
+
+function initNetworkCanvas() {
+  const panel = document.querySelector('.right-panel');
+  canvasWidth = panel.offsetWidth;
+  canvasHeight = panel.offsetHeight;
+  
+  svg = d3.select('#networkCanvas')
+    .attr('width', '100%')
+    .attr('height', '100%');
+    
+  const zoom = d3.zoom()
+    .scaleExtent([0.1, 3])
+    .on('zoom', zoomed);
+  svg.call(zoom).on('dblclick.zoom', null);
+}
+
+function zoomed(event) {
+  svg.selectAll('*').attr('transform', `translate(${event.transform.x},${event.transform.y}) scale(${event.transform.k})`);
+}
+
+function toggleForce() {
+  if (networkSimulation) {
+    networkSimulation.stop();
+    networkSimulation = null;
+  } else {
+    renderNetwork();
+  }
+}
+
+function zoomIn() {
+  if (svg) svg.transition().call(d3.zoom.zoomBy, 1.5);
+}
+
+function zoomOut() {
+  if (svg) svg.transition().call(d3.zoom.zoomBy, 0.7);
+}
+
+function renderNetwork() {
+  if (!lastData || !lastData.machines) {
+    console.log('No network data available yet');
+    return;
+  }
+  
+  const nodes = lastData.machines.map(machine => {
+    const host = machine.host || {};
+    return {
+      id: machine.machine.tailscale_name,
+      name: machine.machine.display_name,
+      role: machine.machine.primary_role,
+      ip: machine.machine.tailscale_ip,
+      status: host.status || 'unknown',
+      services: (machine.services || []).length,
+      group: machine.machine.primary_role.split(' ')[0] || 'general'
+    };
+  });
+  
+  const links = lastData.machines.map(machine => ({
+    source: machine.machine.tailscale_name,
+    target: 'fleet_center'
+  }));
+  
+  nodes.push({
+    id: 'fleet_center',
+    name: 'FLEET_HUB',
+    role: 'Central Coordinator',
+    status: 'up',
+    services: lastData.summary?.machines_total || 0,
+    group: 'hub'
+  });
+  
+  const color = d3.scaleOrdinal(d3.schemeCategory10).domain(nodes.map(d => d.group));
+  
+  networkSimulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).distance(150).id(d => d.id))
+    .force('charge', d3.forceManyBody().strength(-100))
+    .force('center', d3.forceCenter(canvasWidth / 2, canvasHeight / 2))
+    .force('collide', d3.forceCollide().radius(50))
+    .on('tick', ticked);
+  
+  const link = svg.append('g')
+    .selectAll('line')
+    .data(links)
+    .join('line')
+    .attr('class', 'link')
+    .attr('stroke', '#1c2333')
+    .attr('stroke-width', 1.5);
+  
+  const node = svg.append('g')
+    .selectAll('g')
+    .data(nodes)
+    .join('g')
+    .call(d3.drag()
+      .on('start', dragstarted)
+      .on('drag', dragged)
+      .on('end', dragended))
+    .on('mouseenter', showTooltip)
+    .on('mouseleave', hideTooltip);
+  
+  node.append('circle')
+    .attr('r', 20)
+    .attr('class', d => `node ${d.status === 'up' ? 'up' : 'down'}`)
+    .style('fill', d => color(d.group))
+    .style('stroke', '#c9d1d9')
+    .style('stroke-width', 2);
+  
+  node.append('text')
+    .attr('class', 'node-label')
+    .attr('dy', '0.3em')
+    .text(d => d.name)
+    .style('fill', '#c9d1d9')
+    .style('font-family', 'Orbitron, monospace')
+    .style('font-size', '11px')
+    .style('font-weight', '700');
+  
+  function ticked() {
+    link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+  }
+  
+  function showTooltip(event, d) {
+    const tooltip = document.getElementById('tooltip');
+    tooltip.innerHTML = `
+      <div style="font-family:var(--font-head);font-size:12px;margin-bottom:5px">${d.name}</div>
+      <div style="font-size:10px;color:#3d4f63">Role: ${d.role}</div>
+      <div style="font-size:10px;color:#3d4f63">IP: ${d.ip}</div>
+      <div style="font-size:10px;color:#3d4f63">Services: ${d.services}</div>
+      <div style="font-size:10px;color:${d.status === 'up' ? '#39d353' : '#f85149'}">Status: ${d.status}</div>
+    `;
+    tooltip.classList.add('visible');
+    tooltip.style.left = (event.pageX + 10) + 'px';
+    tooltip.style.top = (event.pageY + 10) + 'px';
+  }
+  
+  function hideTooltip() {
+    const tooltip = document.getElementById('tooltip');
+    tooltip.classList.remove('visible');
+  }
+  
+  function dragstarted(event, d) {
+    if (!event.active) networkSimulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+  }
+  
+  function dragged(event, d) {
+    d.fx = event.x;
+    d.fy = event.y;
+  }
+  
+  function dragended(event, d) {
+    if (!event.active) networkSimulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+  }
+}
+
+// ── API POLLING ──
+async function poll() {
+  try {
+    const res = await fetch(API_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    
+    document.getElementById('errorBanner').className = 'banner';
+    render(data);
+  } catch (e) {
+    console.error('API Error:', e);
+    const badge = document.getElementById('statusBadge');
+    const statusText = document.getElementById('statusText');
+    badge.className = 'status-badge err';
+    statusText.textContent = 'API ERROR';
+    document.getElementById('errorBanner').className = 'banner error';
+    document.getElementById('errorBanner').textContent = `✕ API UNREACHABLE — ${e.message}${lastData ? ' — SHOWING LAST STATE' : ''}`;
+    
+    if (!lastData) {
+      document.getElementById('machineCards').innerHTML =
+        '<div class="loading-state" style="padding:60px;text-align:center;color:var(--text3);letter-spacing:0.1em">WAITING FOR API…</div>';
+    }
+  }
+}
+
+poll();
+setInterval(poll, POLL_MS);
+console.log('FLEET_OPS Dashboard Loaded Successfully');
+</script>
+</body>
+</html>

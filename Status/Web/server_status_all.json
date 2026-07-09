@@ -1,0 +1,491 @@
+{
+  "meta": {
+    "timestamp_utc": "2026-05-27T13:14:49.767664Z",
+    "checker_host": "amsterdamdeskto",
+    "poll_interval_seconds": 30,
+    "fleet_version": "1.0",
+    "cycle_duration_ms": 33464
+  },
+  "summary": {
+    "machines_total": 8,
+    "machines_up": 8,
+    "machines_down": 0,
+    "machines_unknown": 0,
+    "services_total": 23,
+    "services_up": 23,
+    "services_down": 0,
+    "services_unknown": 0,
+    "public_endpoints_total": 9,
+    "public_endpoints_up": 9,
+    "public_endpoints_down": 0
+  },
+  "machines": [
+    {
+      "machine": {
+        "display_name": "ImageBeast",
+        "tailscale_name": "imagebeast",
+        "tailscale_ip": "100.107.247.38",
+        "primary_role": "ComfyUI Primary"
+      },
+      "poll": {
+        "timestamp_utc": "2026-05-27T13:14:49.767664Z",
+        "poll_duration_ms": 2357,
+        "checker_host": "amsterdamdeskto"
+      },
+      "host": {
+        "status": "up",
+        "response_time_ms": 1,
+        "detail": "avg response time: 1ms"
+      },
+      "services": [
+        {
+          "name": "ComfyUI",
+          "port": 8188,
+          "priority": "P",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 74,
+            "detail": "VRAM: 23.7GB / 31.8GB \u00b7 GPU: cuda:0 NVIDIA GeForce RTX 5090 : cudaMallocAsync \u00b7 Queue: idle"
+          },
+          "public_check": {
+            "url": "https://image.ldmathes.cc",
+            "status": "up",
+            "http_code": 200,
+            "response_time_ms": 226,
+            "detail": null
+          }
+        },
+        {
+          "name": "Ollama",
+          "port": 11434,
+          "priority": "S",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 25,
+            "detail": "5 models available \u00b7 none active"
+          },
+          "public_check": null
+        }
+      ]
+    },
+    {
+      "machine": {
+        "display_name": "ChatWorkhorse",
+        "tailscale_name": "chatworkhorse",
+        "tailscale_ip": "100.124.162.73",
+        "primary_role": "Ollama Primary"
+      },
+      "poll": {
+        "timestamp_utc": "2026-05-27T13:14:49.767664Z",
+        "poll_duration_ms": 2708,
+        "checker_host": "amsterdamdeskto"
+      },
+      "host": {
+        "status": "up",
+        "response_time_ms": 1,
+        "detail": "avg response time: 1ms"
+      },
+      "services": [
+        {
+          "name": "Ollama",
+          "port": 11434,
+          "priority": "P",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 34,
+            "detail": "6 models available \u00b7 none active"
+          },
+          "public_check": null
+        },
+        {
+          "name": "OpenWebUI",
+          "port": 8080,
+          "priority": "S",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 26,
+            "detail": "healthy"
+          },
+          "public_check": {
+            "url": "https://talk.ldmathes.cc",
+            "status": "up",
+            "http_code": 200,
+            "response_time_ms": 112,
+            "detail": null
+          }
+        },
+        {
+          "name": "ComfyUI",
+          "port": 8188,
+          "priority": "S",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 39,
+            "detail": "VRAM: 1.0GB / 12.0GB \u00b7 GPU: cuda:0 NVIDIA GeForce RTX 3060 : cudaMallocAsync \u00b7 Queue: idle"
+          },
+          "public_check": {
+            "url": "https://clips.ldmathes.cc",
+            "status": "up",
+            "http_code": 200,
+            "response_time_ms": 209,
+            "detail": null
+          }
+        },
+        {
+          "name": "Fleet API",
+          "port": 5010,
+          "priority": "S",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 27,
+            "detail": "HTTP 200"
+          },
+          "public_check": {
+            "url": "https://fleet-bkp.ldmathes.cc",
+            "status": "up",
+            "http_code": 200,
+            "response_time_ms": 211,
+            "detail": null
+          }
+        },
+        {
+          "name": "Amsterdam Desktop Heartbeat Check",
+          "port": 0,
+          "priority": "S",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 0,
+            "detail": "141 sec old on amsterdamdesktop"
+          },
+          "public_check": null
+        }
+      ]
+    },
+    {
+      "machine": {
+        "display_name": "TravelBeast",
+        "tailscale_name": "travelbeast",
+        "tailscale_ip": "100.73.82.42",
+        "primary_role": "Mobile/Travel"
+      },
+      "poll": {
+        "timestamp_utc": "2026-05-27T13:14:49.767664Z",
+        "poll_duration_ms": 4108,
+        "checker_host": "amsterdamdeskto"
+      },
+      "host": {
+        "status": "up",
+        "response_time_ms": 66,
+        "detail": "avg response time: 66ms"
+      },
+      "services": [
+        {
+          "name": "ComfyUI",
+          "port": 8188,
+          "priority": "P",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 1937,
+            "detail": "VRAM: 1.1GB / 8.0GB \u00b7 GPU: cuda:0 NVIDIA GeForce RTX 5060 Laptop GPU : cudaMallocAsync \u00b7 Queue: idle"
+          },
+          "public_check": null
+        },
+        {
+          "name": "Ollama",
+          "port": 11434,
+          "priority": "P",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 62,
+            "detail": "6 models available \u00b7 none active"
+          },
+          "public_check": null
+        }
+      ]
+    },
+    {
+      "machine": {
+        "display_name": "Amsterdam",
+        "tailscale_name": "amsterdamdesktop",
+        "tailscale_ip": "100.125.37.114",
+        "primary_role": "Flask / OpenWebUI Primary"
+      },
+      "poll": {
+        "timestamp_utc": "2026-05-27T13:14:49.767664Z",
+        "poll_duration_ms": 13056,
+        "checker_host": "amsterdamdeskto"
+      },
+      "host": {
+        "status": "up",
+        "response_time_ms": 0,
+        "detail": "responded"
+      },
+      "services": [
+        {
+          "name": "OpenWebUI",
+          "port": 8080,
+          "priority": "P",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 2064,
+            "detail": "healthy"
+          },
+          "public_check": {
+            "url": "https://chat.ldmathes.cc",
+            "status": "up",
+            "http_code": 200,
+            "response_time_ms": 93,
+            "detail": null
+          }
+        },
+        {
+          "name": "Flask/API",
+          "port": 5000,
+          "priority": "S",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 2046,
+            "detail": "HTTP 404 \u2014 service alive"
+          },
+          "public_check": {
+            "url": "https://api.ldmathes.cc",
+            "status": "up",
+            "http_code": 404,
+            "response_time_ms": 110,
+            "detail": "HTTP 404"
+          }
+        },
+        {
+          "name": "Flask/API-Edit",
+          "port": 5001,
+          "priority": "S",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 2056,
+            "detail": "HTTP 404 \u2014 service alive"
+          },
+          "public_check": {
+            "url": "https://api-edit.ldmathes.cc",
+            "status": "up",
+            "http_code": 404,
+            "response_time_ms": 145,
+            "detail": "HTTP 404"
+          }
+        },
+        {
+          "name": "Flask/Weather",
+          "port": 5005,
+          "priority": "P",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 2056,
+            "detail": "HTTP 400 \u2014 service alive"
+          },
+          "public_check": {
+            "url": "https://weatherproxy.ldmathes.cc",
+            "status": "up",
+            "http_code": 400,
+            "response_time_ms": 99,
+            "detail": "HTTP 400"
+          }
+        },
+        {
+          "name": "Fleet API",
+          "port": 5010,
+          "priority": "P",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 2148,
+            "detail": "HTTP 200"
+          },
+          "public_check": {
+            "url": "https://fleet.ldmathes.cc",
+            "status": "up",
+            "http_code": 200,
+            "response_time_ms": 194,
+            "detail": null
+          }
+        },
+        {
+          "name": "ChatWorkhorse Heartbeat Check",
+          "port": 0,
+          "priority": "S",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 8,
+            "detail": "64 sec old on chatworkhorse"
+          },
+          "public_check": null
+        }
+      ]
+    },
+    {
+      "machine": {
+        "display_name": "MacBook Air Prime",
+        "tailscale_name": "denniss-macbook-air",
+        "tailscale_ip": "100.72.187.19",
+        "primary_role": "Ollama"
+      },
+      "poll": {
+        "timestamp_utc": "2026-05-27T13:14:49.767664Z",
+        "poll_duration_ms": 2137,
+        "checker_host": "amsterdamdeskto"
+      },
+      "host": {
+        "status": "up",
+        "response_time_ms": 15,
+        "detail": "avg response time: 15ms"
+      },
+      "services": [
+        {
+          "name": "Ollama",
+          "port": 11434,
+          "priority": "P",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 57,
+            "detail": "2 models available \u00b7 none active"
+          },
+          "public_check": null
+        }
+      ]
+    },
+    {
+      "machine": {
+        "display_name": "Plex Server GC",
+        "tailscale_name": "surface3-gc",
+        "tailscale_ip": "100.72.84.84",
+        "primary_role": "Plex Server"
+      },
+      "poll": {
+        "timestamp_utc": "2026-05-27T13:14:49.767664Z",
+        "poll_duration_ms": 4006,
+        "checker_host": "amsterdamdeskto"
+      },
+      "host": {
+        "status": "up",
+        "response_time_ms": 74,
+        "detail": "avg response time: 74ms"
+      },
+      "services": [
+        {
+          "name": "Plex",
+          "port": 32400,
+          "priority": "P",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 412,
+            "detail": "GC_Plex_Server v1.42.2.10156-f737b826c \u2022 Remote: ACTIVE \u2022 2 libraries \u2022 No active streams"
+          },
+          "public_check": null
+        },
+        {
+          "name": "Syncthing",
+          "port": 8384,
+          "priority": "S",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 1494,
+            "detail": "Synced \u2022 5 folders \u2022 v2.1.0 \u2022 \u2191 0 B/s \u2193 0 B/s"
+          },
+          "public_check": null
+        }
+      ]
+    },
+    {
+      "machine": {
+        "display_name": "Plex Server AMS",
+        "tailscale_name": "mathes-mac-mini",
+        "tailscale_ip": "100.108.12.39",
+        "primary_role": "Plex Server"
+      },
+      "poll": {
+        "timestamp_utc": "2026-05-27T13:14:49.767664Z",
+        "poll_duration_ms": 2187,
+        "checker_host": "amsterdamdeskto"
+      },
+      "host": {
+        "status": "up",
+        "response_time_ms": 1,
+        "detail": "avg response time: 1ms"
+      },
+      "services": [
+        {
+          "name": "Plex",
+          "port": 32400,
+          "priority": "P",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 21,
+            "detail": "AMS_Plex_Server v1.42.2.10156-f737b826c \u2022 Remote: ACTIVE \u2022 3 libraries \u2022 No active streams"
+          },
+          "public_check": null
+        },
+        {
+          "name": "Syncthing",
+          "port": 8384,
+          "priority": "S",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 131,
+            "detail": "Synced \u2022 5 folders \u2022 v1.30.0 \u2022 \u2191 0 B/s \u2193 0 B/s"
+          },
+          "public_check": null
+        }
+      ]
+    },
+    {
+      "machine": {
+        "display_name": "MacBook Air 2",
+        "tailscale_name": "denniss-2nd-macbook-air",
+        "tailscale_ip": "100.92.24.75",
+        "primary_role": "Plex / Ollama"
+      },
+      "poll": {
+        "timestamp_utc": "2026-05-27T13:14:49.767664Z",
+        "poll_duration_ms": 2905,
+        "checker_host": "amsterdamdeskto"
+      },
+      "host": {
+        "status": "up",
+        "response_time_ms": 28,
+        "detail": "avg response time: 28ms"
+      },
+      "services": [
+        {
+          "name": "Ollama",
+          "port": 11434,
+          "priority": "P",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 152,
+            "detail": "1 model available \u00b7 none active"
+          },
+          "public_check": null
+        },
+        {
+          "name": "Plex",
+          "port": 32400,
+          "priority": "P",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 273,
+            "detail": "Spui_Plex_Server v1.43.0.10492-121068a07 \u2022 Remote: ACTIVE \u2022 2 libraries \u2022 No active streams"
+          },
+          "public_check": null
+        },
+        {
+          "name": "Syncthing",
+          "port": 8384,
+          "priority": "S",
+          "tailscale_check": {
+            "status": "up",
+            "response_time_ms": 411,
+            "detail": "Synced \u2022 2 folders \u2022 v2.0.14 \u2022 \u2191 0 B/s \u2193 0 B/s"
+          },
+          "public_check": null
+        }
+      ]
+    }
+  ]
+}

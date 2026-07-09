@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fleet Ops - Tactical Command v6</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #04060b;
+            --text-main: #a9b7c6;
+            --neon-green: #39ff14;
+            --neon-red: #7a1515;
+            --node-blue: #6b93cf;
+            --grid: rgba(57, 255, 20, 0.03);
+        }
+
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Share Tech Mono', monospace;
+            overflow: hidden;
+        }
+
+        /* Tactical Background */
+        #ui-layer {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+            background-size: 60px 60px; pointer-events: none; z-index: 1;
+        }
+
+        /* Header & Meta */
+        #header { position: absolute; top: 30px; left: 40px; z-index: 10; }
+        #title { font-size: 38px; font-weight: bold; color: #fff; display: flex; align-items: center; letter-spacing: 3px; }
+        #cursor { width: 14px; height: 28px; background: var(--neon-green); margin-left: 12px; animation: blink 1s step-end infinite; }
+        #meta { font-size: 14px; margin-top: 10px; color: #5e6d7a; text-transform: uppercase; }
+        .highlight { color: var(--text-main); }
+        .age { color: #f2a93b; font-weight: bold; }
+
+        @keyframes blink { 50% { opacity: 0; } }
+
+        /* Graph Elements */
+        #graph-container { width: 100vw; height: 100vh; position: relative; z-index: 5; }
+        .link { fill: none; stroke-opacity: 0.8; stroke-linecap: round; transition: stroke 0.3s; stroke-dasharray: none; animation: none; }
+        .link.backbone { stroke-width: 12px; filter: drop-shadow(0 0 5px var(--neon-green)); }
+        .link.backbone.down, .link.backbone.unknown { filter: drop-shadow(0 0 5px var(--neon-red)); }
+        .link.sub { stroke-width: 2px; stroke-opacity: 0.4; }
+        
+        .link.up { stroke: var(--neon-green); }
+        .link.down, .link.unknown { stroke: var(--neon-red); stroke-dasharray: none; animation: none; stroke-width: 4px !important; }
+        .link.backbone.down, .link.backbone.unknown { stroke-width: 12px !important; animation: none; stroke-dasharray: none;}
+        /* Sub-links whose parent host is already down — muted grey, no alarm color */
+        .link.host-down { stroke: #4a5060; stroke-dasharray: 5,5; stroke-width: 2px !important; stroke-opacity: 0.55 !important; }
+        
+        @keyframes dash { to { stroke-dashoffset: -32; } }
+        
+        .node circle { stroke: #000; stroke-width: 2px; }
+        .node text { font-size: 14px; fill: #fff; pointer-events: none; text-shadow: 0 0 8px #000; font-weight: bold; }
+
+        #tooltip {
+            position: absolute; opacity: 0; background: rgba(5, 8, 15, 0.98);
+            border: 1px solid var(--node-blue); padding: 12px 16px; font-size: 12px;
+            z-index: 100; pointer-events: none; border-radius: 4px;
+            transition: opacity 0.15s ease; line-height: 1.7;
+            max-width: 320px; min-width: 220px;
+        }
+        .tt-divider { border: none; border-top: 1px solid #1a2535; margin: 6px 0; }
+        .tt-label { color: #5e6d7a; font-size: 10px; letter-spacing: 1px; }
+        .tt-priority { 
+            display: inline-block; padding: 1px 5px; border-radius: 2px;
+            background: rgba(242,169,59,0.15); color: #f2a93b; 
+            border: 1px solid rgba(242,169,59,0.3); font-size: 10px;
+        }
+
+        /* Debug Logger (Visible if fetch fails) */
+        #debug-log { position: absolute; top: 10px; right: 10px; font-size: 10px; color: #ff2a2a; z-index: 100; max-width: 200px; text-align: right; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer"></div>
+    <div id="debug-log"></div>
+
+    <div id="header">
+        <div id="title">FLEET_OPS <div id="cursor"></div></div>
+        <div id="meta">
+            SOURCE_NODE: <span id="src-host" class="highlight">DETECTING...</span> <br>
+            TIMESTAMP: <span id="data-time" class="highlight">--:--:--</span> // 
+            SYNC: <span id="data-age" class="age">0s ago</span>
+        </div>
+    </div>
+
+    <div id="tooltip"></div>
+    <div id="graph-container"></div>
+
+    <script>
+        // Update this URL to your live endpoint or local JSON file
+        //const API_URL = 'https://fleet.ldmathes.cc/api/status';
+        const params = new URLSearchParams(window.location.search);
+        const API_URL = params.has('bkp')
+            ? 'https://fleet-bkp.ldmathes.cc/api/status'
+            : 'https://fleet.ldmathes.cc/api/status'; 
+        
+        let svg, g, simulation, width, height;
+        let lastTimestamp = null;
+
+        function logDebug(msg) {
+            document.getElementById('debug-log').innerText = msg;
+            if (msg) console.warn(msg);
+        }
+
+        async function refreshFleet() {
+            try {
+                const response = await fetch(API_URL);
+                if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+                const data = await response.json();
+                
+                // 1. Update Header Metadata
+                if (data.meta) {
+                    document.getElementById('src-host').innerText = data.meta.checker_host || "UNKNOWN";
+                    lastTimestamp = new Date(data.meta.timestamp_utc);
+                    document.getElementById('data-time').innerText = lastTimestamp.toLocaleTimeString();
+                }
+
+                // 2. Render
+                drawNetwork(data);
+                logDebug(""); // Clear errors on success
+            } catch (err) {
+                logDebug(`Sync Error: ${err.message}`);
+                // Attempt to draw with whatever data we might have or stay blank
+            }
+        }
+
+        // Live Age Counter
+        setInterval(() => {
+            if (lastTimestamp) {
+                const seconds = Math.floor((new Date() - lastTimestamp) / 1000);
+                document.getElementById('data-age').innerText = `${seconds}s ago`;
+            }
+        }, 1000);
+
+        function drawNetwork(data) {
+            width = window.innerWidth;
+            height = window.innerHeight;
+
+            d3.select("#graph-container").selectAll("*").remove();
+            svg = d3.select("#graph-container").append("svg").attr("width", width).attr("height", height);
+            
+            const zoom = d3.zoom().scaleExtent([0.5, 2]).on("zoom", (e) => g.attr("transform", e.transform));
+            svg.call(zoom);
+            g = svg.append("g");
+
+            const summary = data.summary || {};
+            const nodes = [{ 
+                id: "CORE", label: "FLEET", type: 'root', 
+                x: width/2, y: height/2, fx: width/2, fy: height/2,
+                summary
+            }];
+            const links = [];
+
+            // Track which hosts are down so sub-links can be quieted
+            const hostDownSet = new Set();
+
+            // Process Machines and Services
+            if (data.machines) {
+                data.machines.forEach(m => {
+                    const mID = m.machine.tailscale_name;
+                    if (m.host.status !== 'up') hostDownSet.add(mID);
+                    nodes.push({ 
+                        id: mID, label: m.machine.display_name, status: m.host.status, 
+                        type: 'host', ip: m.machine.tailscale_ip, ping: m.host.response_time_ms,
+                        role: m.machine.primary_role, tsname: mID
+                    });
+                    
+                    // Backbone Link (Hub -> Machine)
+                    links.push({ source: "CORE", target: mID, status: m.host.status, tier: 'backbone' });
+
+                    if (m.services) {
+                        m.services.forEach(s => {
+                            const sID = `${mID}_${s.name}`;
+                            const sStatus = s.tailscale_check ? s.tailscale_check.status : 'unknown';
+                            // If host is down, mute sub-links so only the backbone link alarms
+                            const subLinkStatus = hostDownSet.has(mID) ? 'host-down' : sStatus;
+                            nodes.push({ 
+                                id: sID, label: s.name, status: sStatus, 
+                                type: 'service', detail: s.tailscale_check?.detail,
+                                port: s.port, priority: s.priority,
+                                ts_ms: s.tailscale_check?.response_time_ms,
+                                pub_url: s.public_check?.url,
+                                pub_status: s.public_check?.status,
+                                pub_ms: s.public_check?.response_time_ms
+                            });
+                            links.push({ source: mID, target: sID, status: subLinkStatus, tier: 'sub' });
+                        });
+                    }
+                });
+            }
+
+            simulation = d3.forceSimulation(nodes)
+                //.force("link", d3.forceLink(links).id(d => d.id).distance(d => d.tier === 'backbone' ? 220 : 80))
+                .force("link", d3.forceLink(links).id(d => d.id)
+                    .distance(d => {
+                        if (d.tier === 'backbone') {
+                            const ping = d.target.ping ?? 0;
+                            return Math.min(150 + Math.sqrt(ping) * 30, 550);
+                        }
+                        return 70;
+                    })
+                    .strength(d => d.tier === 'backbone' ? 0.8: 0.3) 
+                )
+                //.force("charge", d3.forceManyBody().strength(-2000))
+                //.force("charge", d3.forceManyBody().strength(d => d.type === 'service' ? 0 : -400))
+                .force("charge", d3.forceManyBody().strength(d => {
+                    if (d.type === 'root') return -600;
+                    if (d.type === 'host') return -400;
+                    return -80;
+                }))
+                //.force("center", d3.forceCenter(width / 2, height / 2))
+                .force("center", d3.forceCenter(width / 2, height / 2).strength(0.3))
+                //.force("collide", d3.forceCollide().radius(100));
+                //.force("collide", d3.forceCollide().radius(d => d.type === 'host' ? 60 : 20))
+                .force("collide", d3.forceCollide().radius(d => {
+                    if (d.type === 'root') return 30;
+                    if (d.type === 'host') return 60;
+                    return 20;
+            }))
+
+            const linkElements = g.append("g").selectAll("path")
+                .data(links).enter().append("path")
+                .attr("class", d => `link ${d.status} ${d.tier}`);
+
+            const nodeElements = g.append("g").selectAll("g")
+                .data(nodes).enter().append("g")
+                .attr("class", "node")
+                .call(d3.drag().on("start", dragStart).on("drag", dragging).on("end", dragEnd));
+
+            //nodeElements.append("circle")
+            //    .attr("r", d => d.type === 'root' ? 15 : (d.type === 'host' ? 12 : 7))
+            //    .attr("fill", d => d.type === 'root' ? '#fff' : (d.status === 'up' ? 'var(--node-blue)' : 'var(--neon-red)'));
+            nodeElements.each(function(d) {
+                if (d.type === 'root') {
+                    d3.select(this).append("rect")
+                        .attr("x", -28).attr("y", -14)
+                        .attr("width", 96).attr("height", 28)
+                        .attr("rx", 6).attr("ry", 6)
+                        .attr("fill", "#fff");
+                } else {
+                    d3.select(this).append("circle")
+                        .attr("r", d.type === 'host' ? 12 : 7)
+                        .attr("fill", d.status === 'up' ? 'var(--node-blue)' : 'var(--neon-red)');
+                }
+            });
+
+
+            // Invisible larger hit target for easier hover (especially small service nodes)
+            nodeElements.append("circle")
+                .attr("r", d => d.type === 'root' ? 22 : (d.type === 'host' ? 22 : 36))
+                .attr("fill", "transparent")
+                .attr("stroke", "none")
+                .on("mouseover", showTooltip).on("mouseout", scheduleHideTooltip);
+
+            // Node label + optional priority tag
+            nodeElements.append("text").attr("dx", 18).attr("dy", 5)
+                .text(d => {
+                    if (d.type === 'service' && d.priority) return `${d.label} [${d.priority}]`;
+                    return d.label;
+                })
+                .attr("fill", d => {
+                    if (d.type === 'service' && d.priority === 'P') return '#fff';
+                    if (d.type === 'service') return '#8a9ab0';
+                    return '#fff';
+                });
+
+            simulation.on("tick", () => {
+                // Bounding Box Constraint (keeps nodes inside viewport)
+                nodes.forEach(d => {
+                    d.x = Math.max(100, Math.min(width - 100, d.x));
+                    d.y = Math.max(150, Math.min(height - 100, d.y));
+                });
+
+                linkElements.attr("d", d => {
+                    const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+                    const dr = Math.sqrt(dx * dx + dy * dy) * 1.5;
+                    return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
+                });
+                nodeElements.attr("transform", d => `translate(${d.x},${d.y})`);
+            });
+        }
+
+        let tooltipHideTimer = null;
+
+        function showTooltip(event, d) {
+            // Cancel any pending hide
+            if (tooltipHideTimer) { clearTimeout(tooltipHideTimer); tooltipHideTimer = null; }
+
+            const tt = d3.select("#tooltip");
+            const statusColor = d.status === 'up' ? 'var(--neon-green)' : (d.status === 'down' ? 'var(--neon-red)' : '#f2a93b');
+            let content = '';
+
+            if (d.type === 'root') {
+                // FLEET summary tooltip
+                const s = d.summary || {};
+                content += `<strong style='font-size:13px;color:#fff'>FLEET</strong>`;
+                content += `<hr class='tt-divider'>`;
+                content += `<span class='tt-label'>HOSTS</span><br>`;
+                content += `&nbsp; TOTAL: <span style='color:var(--text-main)'>${s.machines_total ?? '--'}</span>`;
+                content += ` &nbsp; UP: <span style='color:var(--neon-green)'>${s.machines_up ?? '--'}</span>`;
+                content += ` &nbsp; DOWN: <span style='color:${(s.machines_down||0)>0?"var(--neon-red)":"var(--text-main)"}'>${s.machines_down ?? '--'}</span>`;
+                content += `<hr class='tt-divider'>`;
+                content += `<span class='tt-label'>SERVICES</span><br>`;
+                content += `&nbsp; TOTAL: <span style='color:var(--text-main)'>${s.services_total ?? '--'}</span>`;
+                content += ` &nbsp; UP: <span style='color:var(--neon-green)'>${s.services_up ?? '--'}</span>`;
+                content += ` &nbsp; DOWN: <span style='color:${(s.services_down||0)>0?"var(--neon-red)":"var(--text-main)"}'>${s.services_down ?? '--'}</span>`;
+                content += `<hr class='tt-divider'>`;
+                content += `<span class='tt-label'>PUBLIC ENDPOINTS</span><br>`;
+                content += `&nbsp; TOTAL: <span style='color:var(--text-main)'>${s.public_endpoints_total ?? '--'}</span>`;
+                content += ` &nbsp; UP: <span style='color:var(--neon-green)'>${s.public_endpoints_up ?? '--'}</span>`;
+                content += ` &nbsp; DOWN: <span style='color:${(s.public_endpoints_down||0)>0?"var(--neon-red)":"var(--text-main)"}'>${s.public_endpoints_down ?? '--'}</span>`;
+            } else if (d.type === 'host') {
+                content += `<strong style='font-size:13px;color:#fff'>${d.label}</strong>`;
+                if (d.tsname) content += ` <span style='color:#5e6d7a;font-size:10px'>${d.tsname}</span>`;
+                if (d.role) content += `<br><span style='color:#5e6d7a'>${d.role.toUpperCase()}</span>`;
+                content += `<hr class='tt-divider'>`;
+                content += `STATUS: <span style='color:${statusColor}'>${d.status.toUpperCase()}</span>`;
+                if (d.ip) content += `<br>IP: <span style='color:var(--text-main)'>${d.ip}</span>`;
+                if (d.ping != null) content += `<br>LATENCY: <span style='color:var(--text-main)'>${d.ping}ms</span>`;
+            } else {
+                content += `<strong style='font-size:13px;color:#fff'>${d.label}</strong>`;
+                if (d.priority) content += ` <span class='tt-priority'>${d.priority}</span>`;
+                content += `<hr class='tt-divider'>`;
+                content += `STATUS: <span style='color:${statusColor}'>${d.status.toUpperCase()}</span>`;
+                if (d.port) content += `<br>PORT: <span style='color:var(--text-main)'>:${d.port}</span>`;
+                if (d.ts_ms != null) content += `<br>TS LATENCY: <span style='color:var(--text-main)'>${d.ts_ms}ms</span>`;
+                if (d.detail) content += `<br><span style='color:#777;font-size:11px'>> ${d.detail}</span>`;
+                if (d.pub_url) {
+                    const pubColor = d.pub_status === 'up' ? 'var(--neon-green)' : 'var(--neon-red)';
+                    content += `<hr class='tt-divider'>`;
+                    content += `<span class='tt-label'>PUBLIC</span><br>`;
+                    content += `<span style='color:${pubColor}'>${d.pub_url.replace('https://','')}</span>`;
+                    if (d.pub_ms != null) content += ` <span style='color:#777'>${d.pub_ms}ms</span>`;
+                } else {
+                    content += `<hr class='tt-divider'><span style='color:#5e6d7a;font-size:10px'>TAILSCALE ONLY — NO PUBLIC ENDPOINT</span>`;
+                }
+            }
+
+            tt.html(content).style("opacity", 1);
+
+            // Smart positioning: measure tooltip then clamp to viewport
+            const ttNode = document.getElementById('tooltip');
+            const tw = ttNode.offsetWidth, th = ttNode.offsetHeight;
+            const pad = 16;
+            let left = event.pageX + 20;
+            let top  = event.pageY - 20;
+            if (left + tw + pad > window.innerWidth)  left = event.pageX - tw - 20;
+            if (top  + th + pad > window.innerHeight) top  = event.pageY - th;
+            if (top < pad) top = pad;
+            if (left < pad) left = pad;
+            tt.style("left", left + "px").style("top", top + "px");
+        }
+
+        function scheduleHideTooltip() {
+            tooltipHideTimer = setTimeout(() => {
+                d3.select("#tooltip").style("opacity", 0);
+                tooltipHideTimer = null;
+            }, 300);
+        }
+        function dragStart(event) { if (!event.active) simulation.alphaTarget(0.3).restart(); event.subject.fx = event.subject.x; event.subject.fy = event.subject.y; }
+        function dragging(event) { event.subject.fx = event.x; event.subject.fy = event.y; }
+        function dragEnd(event) { if (!event.active) simulation.alphaTarget(0); event.subject.fx = null; event.subject.fy = null; }
+
+        window.addEventListener('resize', () => { 
+            width = window.innerWidth; height = window.innerHeight; 
+            if (simulation) simulation.force("center", d3.forceCenter(width/2, height/2)).restart(); 
+        });
+
+        // Initialize
+        refreshFleet();
+        setInterval(refreshFleet, 60000); // 60s Refresh
+    </script>
+</body>
+</html>

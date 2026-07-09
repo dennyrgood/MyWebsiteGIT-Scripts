@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FLEET_OPS - Dual Panel View</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<!-- D3.js library for network visualization -->
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+:root {
+  --bg:       #080b0f;
+  --bg2:      #0d1117;
+  --bg3:      #111620;
+  --border:   #1c2333;
+  --text:     #c9d1d9;
+  --green:    #39d353;
+  --red:      #f85149;
+  --blue:     #58a6ff;
+  --amber:    #e3b341;
+  --font: 'Share Tech Mono', monospace;
+  --font-head: 'Orbitron', monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+/* ── MAIN LAYOUT ── */
+.main-container {
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+/* LEFT PANEL - STATUS MONITORING */
+.left-panel {
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.left-panel-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+.topbar-stats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.stat-box {
+  border: 1px solid #243042;
+  background: var(--bg3);
+  padding: 6px 14px;
+  text-align: center;
+  min-width: 60px;
+}
+.stat-box .stat-label {
+  font-size: 9px;
+  color: #3d4f63;
+  display: block;
+  margin-bottom: 2px;
+}
+.stat-box .stat-value {
+  font-family: var(--font-head);
+  font-size: 18px;
+  font-weight: 700;
+}
+.stat-box .stat-value.ok { color: var(--green); }
+.stat-box .stat-value.warn { color: var(--amber); }
+.stat-box .stat-value.err { color: var(--red); }
+/* RIGHT PANEL - NETWORK VISUALIZATION */
+.right-panel {
+  background: var(--bg2);
+  position: relative;
+}
+.network-canvas {
+  width: 100%;
+  height: 100%;
+}
+.network-header {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 8px 16px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  z-index: 100;
+}
+.network-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.control-btn {
+  padding: 4px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 10px;
+  cursor: pointer;
+}
+.control-btn:hover { border-color: var(--blue); }
+.tooltip {
+  position: absolute;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  padding: 10px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 1000;
+}
+.tooltip.visible { opacity: 1; }
+/* Responsive */
+@media (max-width: 768px) {
+  .main-container {
+    grid-template-columns: 1fr;
+    grid-template-rows: 50vh 1fr;
+  }
+  .left-panel {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+/* Loading States */
+.loading-state {
+  padding: 60px;
+  text-align: center;
+  color: #6e7f96;
+  letter-spacing: 0.1em;
+}
+</style>
+</head>
+<body>
+<div class="main-container">
+  <!-- LEFT PANEL - STATUS MONITORING -->
+  <div class="left-panel">
+    <div class="left-panel-header">
+      <h1 style="font-family:var(--font-head);font-size:18px;font-weight:700;margin-bottom:8px">
+        FLEET_OPS
+      </h1>
+      <div style="font-size:10px;color:#3d4f63">
+        SRC: <span id="topbarSrc">—</span> &nbsp;/&nbsp; T: <span id="topbarTime">—</span>
+      </div>
+    </div>
+    <div style="padding:14px;border-bottom:1px solid var(--border);">
+      <div class="topbar-stats">
+        <div class="stat-box">
+          <span class="stat-label">HOSTS</span>
+          <div class="stat-value" id="statHosts">—</div>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">SVC</span>
+          <div class="stat-value" id="statSvc">—</div>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">PUB</span>
+          <div class="stat-value" id="statPub">—</div>
+        </div>
+      </div>
+    </div>
+    <div id="machineCards">
+      <div class="loading-state">LOADING DATA...</div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL - NETWORK VISUALIZATION -->
+  <div class="right-panel">
+    <div class="network-header">
+      <div style="font-family:var(--font-head);font-size:14px;font-weight:700;margin-bottom:8px">
+        FLEET NETWORK
+      </div>
+      <div class="network-controls">
+        <button class="control-btn" onclick="toggleForce()">Toggle Physics</button>
+        <button class="control-btn" onclick="zoomIn()">Zoom In</button>
+        <button class="control-btn" onclick="zoomOut()">Zoom Out</button>
+      </div>
+    </div>
+    <svg id="networkCanvas" class="network-canvas"></svg>
+    <div class="tooltip" id="tooltip"></div>
+  </div>
+</div>
+
+<script>
+// ── API CONFIGURATION ──
+// FIXED: API_URL declared only once
+const params = new URLSearchParams(window.location.search);
+const isBkp = params.has('bkp');
+const API_URL = isBkp
+  ? 'https://fleet-bkp.ldmathes.cc/api/status'
+  : 'https://fleet.ldmathes.cc/api/status';
+
+// ── GLOBAL VARIABLES ──
+const POLL_MS = 30000;
+let lastData = null;
+let networkSimulation = null;
+let svg = null;
+let tooltipVisible = false;
+
+// ── INITIALIZATION ──
+window.addEventListener('load', initNetworkCanvas);
+
+function initNetworkCanvas() {
+  const width = document.querySelector('.right-panel').offsetWidth;
+  const height = document.querySelector('.right-panel').offsetHeight;
+  
+  svg = d3.select('#networkCanvas')
+    .attr('width', '100%')
+    .attr('height', '100%');
+  
+  const zoom = d3.zoom()
+    .scaleExtent([0.1, 3])
+    .on('zoom', zoomed);
+  
+  svg.call(zoom).on('dblclick.zoom', null);
+}
+
+function zoomed(event) {
+  svg.selectAll('*').attr('transform', `translate(${event.transform.x},${event.transform.y}) scale(${event.transform.k})`);
+}
+
+// ── MISSING FUNCTIONS NOW DEFINED ──
+function toggleForce() {
+  if (networkSimulation) {
+    networkSimulation.stop();
+    networkSimulation = null;
+  } else {
+    renderNetwork();
+  }
+}
+
+function zoomIn() {
+  if (svg) {
+    svg.transition().call(d3.zoom.zoomBy, 1.5);
+  }
+}
+
+function zoomOut() {
+  if (svg) {
+    svg.transition().call(d3.zoom.zoomBy, 0.7);
+  }
+}
+
+// ── NETWORK RENDERING ──
+function renderNetwork() {
+  if (!lastData || !lastData.machines) {
+    console.log('No network data available yet');
+    return;
+  }
+
+  const nodes = lastData.machines.map(machine => {
+    const host = machine.host || {};
+    return {
+      id: machine.machine.tailscale_name,
+      name: machine.machine.display_name,
+      role: machine.machine.primary_role,
+      ip: machine.machine.tailscale_ip,
+      status: host.status || 'unknown',
+      services: (machine.services || []).length,
+      group: machine.machine.primary_role.split(' ')[0] || 'general'
+    };
+  });
+
+  const links = lastData.machines.map(machine => ({
+    source: machine.machine.tailscale_name,
+    target: 'fleet_center'
+  }));
+
+  nodes.push({
+    id: 'fleet_center',
+    name: 'FLEET_HUB',
+    role: 'Central Coordinator',
+    status: 'up',
+    services: lastData.summary?.machines_total || 0,
+    group: 'hub'
+  });
+
+  const color = d3.scaleOrdinal(d3.schemeCategory10).domain(nodes.map(d => d.group));
+
+  networkSimulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).distance(150).id(d => d.id))
+    .force('charge', d3.forceManyBody().strength(-100))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collide', d3.forceCollide().radius(50))
+    .on('tick', ticked);
+
+  const link = svg.append('g')
+    .selectAll('line')
+    .data(links)
+    .join('line')
+    .attr('class', 'link')
+    .attr('stroke', '#1c2333')
+    .attr('stroke-width', 1.5);
+
+  const node = svg.append('g')
+    .selectAll('g')
+    .data(nodes)
+    .join('g')
+    .call(d3.drag()
+      .on('start', dragstarted)
+      .on('drag', dragged)
+      .on('end', dragended))
+    .on('mouseenter', showTooltip)
+    .on('mouseleave', hideTooltip);
+
+  node.append('circle')
+    .attr('r', 20)
+    .attr('class', d => `node ${d.status === 'up' ? 'up' : 'down'}`)
+    .style('fill', d => color(d.group))
+    .style('stroke', '#c9d1d9')
+    .style('stroke-width', 2);
+
+  node.append('text')
+    .attr('class', 'node-label')
+    .attr('dy', '0.3em')
+    .text(d => d.name)
+    .style('fill', '#c9d1d9')
+    .style('font-family', 'Orbitron, monospace')
+    .style('font-size', '11px')
+    .style('font-weight', '700');
+
+  function ticked() {
+    link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+  }
+
+  function showTooltip(event, d) {
+    const tooltip = document.getElementById('tooltip');
+    tooltip.innerHTML = `
+      <div style="font-family:var(--font-head);font-size:12px;margin-bottom:5px">${d.name}</div>
+      <div style="font-size:10px;color:#3d4f63">Role: ${d.role}</div>
+      <div style="font-size:10px;color:#3d4f63">IP: ${d.ip}</div>
+      <div style="font-size:10px;color:#3d4f63">Services: ${d.services}</div>
+      <div style="font-size:10px;color:${d.status === 'up' ? '#39d353' : '#f85149'}">Status: ${d.status}</div>
+    `;
+    tooltip.classList.add('visible');
+    tooltip.style.left = (event.pageX + 10) + 'px';
+    tooltip.style.top = (event.pageY + 10) + 'px';
+    tooltipVisible = true;
+  }
+
+  function hideTooltip() {
+    const tooltip = document.getElementById('tooltip');
+    tooltip.classList.remove('visible');
+    tooltipVisible = false;
+  }
+
+  function dragstarted(event, d) {
+    if (!event.active) networkSimulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+  }
+
+  function dragged(event, d) {
+    d.fx = event.x;
+    d.fy = event.y;
+  }
+
+  function dragended(event, d) {
+    if (!event.active) networkSimulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+  }
+}
+
+// ── DATA FORMATTING ──
+function fmtTime(u) {
+  if (!u) return '—';
+  try { return new Date(u).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'}); }
+  catch { return u; }
+}
+
+function statColor(up, total) {
+  if (up === total) return 'ok';
+  if (up < total * 0.7) return 'err';
+  return 'warn';
+}
+
+function renderCard(m) {
+  const host = m.host || {};
+  const hs = host.status || 'unknown';
+  const hostMs = host.response_time_ms ? `${host.response_time_ms}ms` : '';
+  return `
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg2)">
+      <div style="font-family:var(--font-head);font-size:12px;font-weight:700;margin-bottom:4px">
+        ${m.machine.display_name.toUpperCase()}
+      </div>
+      <div style="font-size:10px;color:#3d4f63;margin-bottom:6px">
+        ${m.machine.primary_role.toUpperCase()}
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;font-size:10px;color:#3d4f63">
+        <span style="width:8px;height:8px;border-radius:50%;background:${hs==='up'?var('--green'):var('--red')}"></span>
+        ${hostMs}
+        <span style="margin-left:auto">${m.machine.tailscale_ip}</span>
+      </div>
+    </div>
+  `;
+}
+
+// ── API POLLING ──
+async function poll() {
+  try {
+    const res = await fetch(API_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    lastData = data;
+    document.querySelector('.loading-state').style.display = 'none';
+    document.getElementById('topbarSrc').textContent = data.meta?.checker_host || '—';
+    document.getElementById('topbarTime').textContent = fmtTime(data.meta?.timestamp_utc);
+
+    const sum = data.summary || {};
+    const hostsEl = document.getElementById('statHosts');
+    const svcEl = document.getElementById('statSvc');
+    const pubEl = document.getElementById('statPub');
+
+    hostsEl.textContent = `${sum.machines_up || 0}/${sum.machines_total || 0}`;
+    hostsEl.className = `stat-value ${statColor(sum.machines_up || 0, sum.machines_total || 0)}`;
+
+    svcEl.textContent = `${sum.services_up || 0}/${sum.services_total || 0}`;
+    svcEl.className = `stat-value ${statColor(sum.services_up || 0, sum.services_total || 0)}`;
+
+    pubEl.textContent = `${sum.public_endpoints_up || 0}/${sum.public_endpoints_total || 0}`;
+    pubEl.className = `stat-value ${statColor(sum.public_endpoints_up || 0, sum.public_endpoints_total || 0)}`;
+
+    const cardsContainer = document.getElementById('machineCards');
+    if (data.machines && data.machines.length > 0) {
+      cardsContainer.innerHTML = (data.machines || []).map(renderCard).join('');
+    }
+
+    renderNetwork();
+
+  } catch (e) {
+    console.error('API Error:', e);
+    const hostsEl = document.getElementById('statHosts');
+    const svcEl = document.getElementById('statSvc');
+    const pubEl = document.getElementById('statPub');
+    hostsEl.textContent = 'ERR';
+    svcEl.textContent = 'ERR';
+    pubEl.textContent = 'ERR';
+    hostsEl.className = 'stat-value err';
+    svcEl.className = 'stat-value err';
+    pubEl.className = 'stat-value err';
+  }
+}
+
+// ── START POLLING ──
+poll();
+setInterval(poll, POLL_MS);
+
+console.log('FLEET_OPS Dashboard Loaded Successfully');
+</script>
+</body>
+</html>

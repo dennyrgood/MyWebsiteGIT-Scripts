@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fleet Ops — Map View</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;600;700&family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:          #030508;
+    --bg2:         #070b12;
+    --green:       #00e887;
+    --blue:        #3cb4ff;
+    --amber:       #f5a623;
+    --red:         #ff3d3d;
+    --text:        #8ba0b4;
+    --text-bright: #d4e4f0;
+    --mono:        'JetBrains Mono', monospace;
+    --sans:        'Rajdhani', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* scanline overlay */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* ── HEADER ────────────────────────────────────── */
+  #header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 36px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    flex-shrink: 0; position: relative; z-index: 10;
+  }
+
+  #wordmark { display: flex; align-items: baseline; gap: 12px; }
+  #wordmark h1 { font-family: var(--sans); font-size: 26px; font-weight: 700; letter-spacing: 6px; color: #fff; text-transform: uppercase; }
+  #wordmark .sub { font-family: var(--mono); font-size: 10px; color: var(--green); letter-spacing: 3px; opacity: 0.7; }
+
+  #meta { font-family: var(--mono); font-size: 11px; text-align: right; line-height: 1.8; color: #4a5f72; }
+  #meta .checker { color: var(--blue); }
+  #meta .age { color: var(--amber); }
+  #meta .age.fresh { color: var(--green); }
+
+  #summary-bar { display: flex; gap: 28px; align-items: center; }
+  .sum-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .sum-item .val { font-family: var(--mono); font-size: 20px; font-weight: 700; line-height: 1; }
+  .sum-item .lbl { font-size: 9px; letter-spacing: 2px; color: #3a4f60; text-transform: uppercase; }
+  .sum-item.good .val    { color: var(--green); }
+  .sum-item.warn .val    { color: var(--red); }
+  .sum-item.neutral .val { color: var(--text); }
+  .sum-divider { width: 1px; height: 32px; background: rgba(255,255,255,0.06); }
+
+  /* ── MAIN LAYOUT ───────────────────────────────── */
+  #main {
+    flex: 1; display: flex; overflow: hidden; position: relative;
+  }
+
+  /* ── MAP ───────────────────────────────────────── */
+  #map-wrap {
+    flex: 1; position: relative; overflow: hidden;
+  }
+
+  #map-svg {
+    width: 100%; height: 100%;
+    cursor: grab; display: block;
+  }
+  #map-svg:active { cursor: grabbing; }
+
+  .map-country {
+    fill: #0c1820;
+    stroke: #1a2e40;
+    stroke-width: 0.5;
+    transition: fill 0.15s;
+  }
+  .map-graticule { fill: none; stroke: rgba(255,255,255,0.025); stroke-width: 0.5; }
+  .map-border { fill: none; stroke: rgba(60,180,255,0.07); stroke-width: 0.8; }
+
+  /* cluster nodes */
+  .cluster-g { cursor: pointer; }
+  .cluster-g:hover .cluster-halo { opacity: 1; }
+
+  .cluster-pulse {
+    fill: none; stroke-width: 1; opacity: 0;
+    animation: cpulse 3s ease-out infinite;
+  }
+  .cluster-pulse.up      { stroke: var(--green); }
+  .cluster-pulse.down    { stroke: var(--red); }
+  .cluster-pulse.unknown { stroke: var(--amber); }
+  @keyframes cpulse { 0% { r: 12; opacity: 0.55; } 100% { r: 34; opacity: 0; } }
+
+  .cluster-halo {
+    fill: none; stroke-width: 1.5; opacity: 0.45;
+    transition: opacity 0.2s;
+  }
+  .cluster-halo.up      { stroke: var(--green); }
+  .cluster-halo.down    { stroke: var(--red); }
+  .cluster-halo.unknown { stroke: var(--amber); }
+
+  .cluster-dot { stroke: none; opacity: 0.9; }
+  .cluster-dot.up      { fill: var(--green); }
+  .cluster-dot.down    { fill: var(--red); }
+  .cluster-dot.unknown { fill: var(--amber); }
+
+  .cluster-count {
+    font-family: var(--mono); font-size: 8px; font-weight: 700;
+    fill: #000; dominant-baseline: central; text-anchor: middle;
+    pointer-events: none;
+  }
+  .cluster-name {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 1px;
+    fill: var(--text); pointer-events: none; text-transform: uppercase;
+  }
+  .cluster-sub {
+    font-family: var(--mono); font-size: 8px;
+    fill: #3a5060; pointer-events: none;
+  }
+
+  /* connection arc between clusters */
+  .cluster-arc { fill: none; stroke: rgba(60,180,255,0.06); stroke-width: 1; pointer-events: none; }
+
+  #zoom-reset {
+    position: absolute; top: 16px; left: 16px; z-index: 20;
+    background: rgba(7,11,18,0.85); border: 1px solid rgba(255,255,255,0.08);
+    color: #4a6070; font-family: var(--mono); font-size: 10px;
+    padding: 5px 10px; cursor: pointer; border-radius: 3px; letter-spacing: 1px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  #zoom-reset:hover { color: var(--text-bright); border-color: rgba(255,255,255,0.2); }
+
+  #map-legend {
+    position: absolute; bottom: 20px; left: 24px; z-index: 10;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .leg-row { display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 9px; color: #2a4050; letter-spacing: 1px; }
+  .leg-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .leg-dot.up      { background: var(--green); opacity: 0.7; }
+  .leg-dot.down    { background: var(--red);   opacity: 0.7; }
+  .leg-dot.unknown { background: var(--amber); opacity: 0.7; }
+
+  /* ── DETAIL PANEL ──────────────────────────────── */
+  #detail {
+    width: 280px; min-width: 0; border-left: 1px solid rgba(255,255,255,0.05);
+    background: var(--bg2); display: flex; flex-direction: column;
+    overflow: hidden; flex-shrink: 0; transition: width 0.25s ease;
+    position: relative;
+  }
+  #detail.collapsed { width: 0; border-left: none; }
+
+  #detail-toggle {
+    position: absolute; right: 284px; top: 50%; transform: translateY(-50%);
+    z-index: 20; background: rgba(7,11,18,0.9); border: 1px solid rgba(255,255,255,0.08);
+    color: #4a6070; font-family: var(--mono); font-size: 10px; padding: 6px 5px;
+    cursor: pointer; border-radius: 3px 0 0 3px; line-height: 1; letter-spacing: 1px;
+    transition: right 0.25s ease, color 0.15s;
+  }
+  #detail-toggle:hover { color: var(--text-bright); }
+
+  #detail.empty { align-items: center; justify-content: center; }
+  #detail-placeholder { text-align: center; font-family: var(--mono); font-size: 11px; color: #1e2d3a; line-height: 2; letter-spacing: 2px; text-transform: uppercase; }
+  #detail-inner { padding: 0; overflow-y: auto; overflow-x: hidden; flex: 1; }
+  #detail-inner::-webkit-scrollbar { width: 3px; }
+  #detail-inner::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+
+  /* station header inside detail panel */
+  .station-header {
+    padding: 20px 20px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    flex-shrink: 0;
+  }
+  .station-city { font-family: var(--sans); font-size: 22px; font-weight: 700; color: #fff; letter-spacing: 3px; text-transform: uppercase; }
+  .station-coords { font-family: var(--mono); font-size: 9px; color: #2a4050; letter-spacing: 1px; margin-top: 3px; }
+  .station-stats { display: flex; gap: 10px; margin-top: 12px; }
+  .station-stat { flex: 1; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 7px 10px; }
+  .station-stat .ss-lbl { font-family: var(--mono); font-size: 9px; color: #3a4f60; letter-spacing: 2px; margin-bottom: 3px; }
+  .station-stat .ss-val { font-family: var(--mono); font-size: 13px; color: var(--text-bright); font-weight: 700; }
+  .station-stat .ss-val.up   { color: var(--green); }
+  .station-stat .ss-val.down { color: var(--red); }
+
+  .station-host-list { padding: 14px 20px; }
+  .station-section-title { font-family: var(--mono); font-size: 9px; letter-spacing: 3px; color: #2a3f50; text-transform: uppercase; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+
+  .host-card {
+    background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 4px; padding: 10px 12px; margin-bottom: 8px;
+    cursor: pointer; transition: border-color 0.15s;
+  }
+  .host-card:hover { border-color: rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); }
+  .host-card.up      { border-left: 2px solid var(--green); }
+  .host-card.down    { border-left: 2px solid var(--red); }
+  .host-card.unknown { border-left: 2px solid var(--amber); }
+
+  .host-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+  .host-card-name { font-family: var(--sans); font-size: 14px; font-weight: 600; color: var(--text-bright); letter-spacing: 1px; }
+  .host-card-status { font-family: var(--mono); font-size: 9px; padding: 2px 6px; border-radius: 2px; }
+  .host-card-status.up      { background: rgba(0,232,135,0.1); color: var(--green); }
+  .host-card-status.down    { background: rgba(255,61,61,0.1);  color: var(--red); }
+  .host-card-status.unknown { background: rgba(245,166,35,0.1); color: var(--amber); }
+  .host-card-meta { font-family: var(--mono); font-size: 9px; color: #3a5060; display: flex; gap: 12px; }
+
+  /* host detail view (drill-down) */
+  #host-detail { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+  #host-detail.visible { display: flex; }
+  #host-detail-back {
+    padding: 10px 20px; border-bottom: 1px solid rgba(255,255,255,0.05);
+    font-family: var(--mono); font-size: 10px; color: #3a5060;
+    cursor: pointer; letter-spacing: 1px; flex-shrink: 0;
+    transition: color 0.15s;
+  }
+  #host-detail-back:hover { color: var(--text-bright); }
+  #host-detail-inner { padding: 20px; overflow-y: auto; flex: 1; }
+  #host-detail-inner::-webkit-scrollbar { width: 3px; }
+  #host-detail-inner::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); }
+
+  .detail-host-name { font-family: var(--sans); font-size: 22px; font-weight: 700; color: #fff; letter-spacing: 2px; margin-bottom: 2px; }
+  .detail-host-role { font-family: var(--mono); font-size: 10px; color: var(--blue); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 16px; }
+  .detail-stat-row { display: flex; gap: 12px; margin-bottom: 16px; }
+  .detail-stat { flex: 1; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 8px 10px; }
+  .detail-stat .ds-label { font-family: var(--mono); font-size: 9px; color: #3a4f60; letter-spacing: 2px; margin-bottom: 4px; }
+  .detail-stat .ds-val   { font-family: var(--mono); font-size: 14px; color: var(--text-bright); font-weight: 700; }
+  .detail-stat .ds-val.up   { color: var(--green); }
+  .detail-stat .ds-val.down { color: var(--red); }
+  .detail-section-title { font-family: var(--mono); font-size: 9px; letter-spacing: 3px; color: #2a3f50; text-transform: uppercase; margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+
+  .svc-card { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 4px; padding: 10px 12px; margin-bottom: 8px; transition: border-color 0.15s; }
+  .svc-card:hover { border-color: rgba(255,255,255,0.1); }
+  .svc-card.up      { border-left: 2px solid var(--green); }
+  .svc-card.down    { border-left: 2px solid var(--red); }
+  .svc-card.unknown { border-left: 2px solid var(--amber); }
+  .svc-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .svc-card-name { font-family: var(--sans); font-size: 14px; font-weight: 600; color: var(--text-bright); letter-spacing: 1px; }
+  .svc-card-priority { font-family: var(--mono); font-size: 9px; padding: 2px 6px; border-radius: 2px; background: rgba(255,255,255,0.05); color: var(--amber); letter-spacing: 1px; }
+  .svc-card-priority.P { background: rgba(0,232,135,0.1); color: var(--green); }
+  .svc-detail-text { font-family: var(--mono); font-size: 10px; color: #4a6070; line-height: 1.6; margin-top: 4px; }
+  .svc-meta-row { display: flex; gap: 16px; margin-top: 6px; }
+  .svc-meta-item { font-family: var(--mono); font-size: 9px; color: #2a4050; }
+  .svc-meta-item span { color: var(--text); }
+  .vram-bar-wrap { margin-top: 8px; }
+  .vram-bar-label { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 9px; color: #3a5060; margin-bottom: 4px; }
+  .vram-bar-track { height: 3px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
+  .vram-bar-fill { height: 100%; border-radius: 2px; background: var(--blue); transition: width 0.5s ease; }
+  .vram-bar-fill.high     { background: var(--amber); }
+  .vram-bar-fill.critical { background: var(--red); }
+  .pub-badge { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 9px; padding: 2px 6px; border-radius: 2px; margin-top: 6px; }
+  .pub-badge.up   { background: rgba(0,232,135,0.08); color: var(--green); }
+  .pub-badge.down { background: rgba(255,61,61,0.08);  color: var(--red); }
+  .pub-badge::before { content: '●'; font-size: 7px; }
+
+  #tooltip {
+    position: fixed; background: rgba(5,10,18,0.97); border: 1px solid rgba(60,180,255,0.3);
+    padding: 8px 12px; font-family: var(--mono); font-size: 11px; color: var(--text-bright);
+    border-radius: 3px; pointer-events: none; opacity: 0; transition: opacity 0.1s;
+    z-index: 500; line-height: 1.7; max-width: 220px;
+  }
+
+  /* loading state */
+  #loading {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px;
+    font-family: var(--mono); font-size: 11px; color: #3a5a70; letter-spacing: 3px;
+    text-transform: uppercase; z-index: 50; background: var(--bg);
+    transition: opacity 0.4s;
+  }
+  #loading::before {
+    content: '';
+    width: 24px; height: 24px;
+    border: 2px solid rgba(0,232,135,0.15);
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  #loading.no-spinner::before { display: none; }
+  #loading.hidden { opacity: 0; pointer-events: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div id="wordmark">
+    <h1>Fleet Ops</h1>
+    <span class="sub">Map View</span>
+  </div>
+  <div id="summary-bar"></div>
+  <div id="meta">
+    <div>SOURCE &nbsp;<span class="checker" id="meta-checker">—</span></div>
+    <div>SYNC &nbsp;<span class="age" id="meta-age">—</span></div>
+  </div>
+</div>
+
+<div id="main">
+
+  <div id="map-wrap">
+    <svg id="map-svg"></svg>
+    <button id="zoom-reset" onclick="resetZoom()">⊙ RESET</button>
+    <div id="map-legend">
+      <div class="leg-row"><div class="leg-dot up"></div> all hosts up</div>
+      <div class="leg-row"><div class="leg-dot down"></div> one or more down</div>
+      <div class="leg-row"><div class="leg-dot unknown"></div> status unknown</div>
+      <div class="leg-row" style="margin-top:4px;color:#162530">scroll · drag · dbl-click reset</div>
+    </div>
+    <div id="loading">Loading map data…</div>
+  </div>
+
+  <div id="detail" class="empty">
+    <div id="detail-placeholder">SELECT A<br>LOCATION</div>
+    <div id="detail-inner">
+      <!-- station list view -->
+      <div id="station-view"></div>
+      <!-- host drill-down view -->
+      <div id="host-detail">
+        <div id="host-detail-back" onclick="backToStation()">◀ &nbsp;BACK TO STATION</div>
+        <div id="host-detail-inner"></div>
+      </div>
+    </div>
+    <button id="detail-toggle" title="Toggle panel">◀</button>
+  </div>
+
+</div>
+
+<div id="tooltip"></div>
+
+<script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+<script src="https://unpkg.com/topojson-client@3/dist/topojson-client.min.js"></script>
+<script>
+{% raw %}
+// ── CONFIG ────────────────────────────────────────────────────────
+const API_URL = (() => {
+  const p = new URLSearchParams(window.location.search);
+  return p.has('bkp')
+    ? 'https://fleet-bkp.ldmathes.cc/api/status'
+    : 'https://fleet.ldmathes.cc/api/status';
+})();
+
+// ── LOCATION DATABASE ─────────────────────────────────────────────
+// Keyed to lowercase substrings found in machine.location,
+// machine.primary_role, or machine.display_name
+const LOCATION_DB = {
+  amsterdam:    { coords: [4.9041,  52.3676], label: 'Amsterdam'    },
+  netherlands:  { coords: [4.9041,  52.3676], label: 'Amsterdam'    },
+  philadelphia: { coords: [-75.1652, 39.9526], label: 'Philadelphia' },
+  philly:       { coords: [-75.1652, 39.9526], label: 'Philadelphia' },
+  maspalomas:   { coords: [-15.5860, 27.7606], label: 'Maspalomas'   },
+  canarias:     { coords: [-15.5860, 27.7606], label: 'Maspalomas'   },
+  orlando:      { coords: [-81.3792, 28.5383], label: 'Orlando'      },
+  florida:      { coords: [-81.3792, 28.5383], label: 'Orlando'      },
+  'new york':   { coords: [-74.0060, 40.7128], label: 'New York'     },
+  london:       { coords: [-0.1278,  51.5074], label: 'London'       },
+  frankfurt:    { coords: [8.6821,   50.1109], label: 'Frankfurt'    },
+  paris:        { coords: [2.3522,   48.8566], label: 'Paris'        },
+  singapore:    { coords: [103.8198,  1.3521], label: 'Singapore'    },
+  tokyo:        { coords: [139.6503, 35.6762], label: 'Tokyo'        },
+  sydney:       { coords: [151.2093, -33.8688], label: 'Sydney'      },
+  toronto:      { coords: [-79.3832,  43.6532], label: 'Toronto'     },
+  dallas:       { coords: [-96.7970,  32.7767], label: 'Dallas'      },
+  seattle:      { coords: [-122.3321, 47.6062], label: 'Seattle'     },
+  ashburn:      { coords: [-77.4875,  39.0438], label: 'Ashburn'     },
+  virginia:     { coords: [-77.4875,  39.0438], label: 'Ashburn'     },
+};
+
+// ── MACHINE → LOCATION OVERRIDES ─────────────────────────────────
+// Keyed by tailscale_name (exact). Value must be a key in LOCATION_DB.
+// Add new machines here as your fleet grows, or later drive this from
+// a "geo" field in config.py / the API JSON.
+const MACHINE_LOCATION_OVERRIDES = {
+  // ── Philadelphia cluster ──────────────────────────
+  'imagebeast':               'philadelphia',
+  'chatworkhorse':            'philadelphia',
+  'travelbeast':              'philadelphia',   // home-base when docked; change to 'orlando' etc. if preferred
+  'surface3-gc':              'philadelphia',
+  'denniss-macbook-air':      'philadelphia',
+  'denniss-2nd-macbook-air':  'philadelphia',
+
+  // ── Amsterdam cluster ─────────────────────────────
+  'amsterdamdesktop':         'amsterdam',
+  'mathes-mac-mini':          'amsterdam',
+};
+
+function resolveLocation(machine) {
+  // 1. Exact override by tailscale_name (most reliable)
+  const tsName = (machine.tailscale_name || '').toLowerCase();
+  if (MACHINE_LOCATION_OVERRIDES[tsName]) {
+    const key = MACHINE_LOCATION_OVERRIDES[tsName];
+    if (LOCATION_DB[key]) return LOCATION_DB[key];
+  }
+
+  // 2. Substring match across available text fields (fallback / future fields)
+  const haystack = [
+    machine.location,
+    machine.primary_role,
+    machine.display_name,
+    machine.tailscale_name,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  for (const [key, val] of Object.entries(LOCATION_DB)) {
+    if (haystack.includes(key)) return val;
+  }
+  return null;
+}
+
+// ── STATE ─────────────────────────────────────────────────────────
+let currentData      = null;
+let lastTimestamp    = null;
+let currentCluster   = null; // cluster currently shown in panel
+let worldDataCache   = null;
+
+// ── UTILITIES ─────────────────────────────────────────────────────
+function parseVRAM(detail) {
+  if (!detail) return null;
+  const m = detail.match(/VRAM:\s*([\d.]+)GB\s*\/\s*([\d.]+)GB/);
+  return m ? { used: parseFloat(m[1]), total: parseFloat(m[2]) } : null;
+}
+function parseModel(detail) {
+  if (!detail) return null;
+  const m = detail.match(/·\s*(.+?)\s+active in VRAM/);
+  return m ? m[1] : null;
+}
+
+// ── SUMMARY BAR ───────────────────────────────────────────────────
+function renderSummary(data) {
+  const s   = data.summary || {};
+  const bar = document.getElementById('summary-bar');
+  bar.innerHTML = `
+    <div class="sum-item ${s.machines_down > 0 ? 'warn' : 'neutral'}">
+      <span class="val">${s.machines_total ?? '—'}</span><span class="lbl">Hosts</span>
+    </div>
+    <div class="sum-divider"></div>
+    <div class="sum-item good"><span class="val">${s.machines_up ?? '—'}</span><span class="lbl">Up</span></div>
+    ${s.machines_down > 0 ? `<div class="sum-item warn"><span class="val">${s.machines_down}</span><span class="lbl">Down</span></div>` : ''}
+    <div class="sum-divider"></div>
+    <div class="sum-item neutral"><span class="val">${s.services_total ?? '—'}</span><span class="lbl">Services</span></div>
+    <div class="sum-item good"><span class="val">${s.services_up ?? '—'}</span><span class="lbl">Svc Up</span></div>
+    ${s.services_down > 0 ? `<div class="sum-item warn"><span class="val">${s.services_down}</span><span class="lbl">Svc Down</span></div>` : ''}
+    <div class="sum-divider"></div>
+    <div class="sum-item neutral"><span class="val">${s.public_endpoints_total ?? '—'}</span><span class="lbl">Public</span></div>
+    ${s.public_endpoints_down > 0 ? `<div class="sum-item warn"><span class="val">${s.public_endpoints_down}</span><span class="lbl">Pub Down</span></div>` : ''}
+  `;
+}
+
+// ── AGE COUNTER ───────────────────────────────────────────────────
+setInterval(() => {
+  if (!lastTimestamp) return;
+  const sec = Math.floor((Date.now() - lastTimestamp) / 1000);
+  const el  = document.getElementById('meta-age');
+  el.textContent = sec < 60 ? `${sec}s ago` : `${Math.floor(sec / 60)}m ${sec % 60}s ago`;
+  el.className   = 'age' + (sec < 45 ? ' fresh' : '');
+}, 1000);
+
+// ── CLUSTER BUILDER ───────────────────────────────────────────────
+function buildClusters(machines) {
+  const map = new Map(); // label → { loc, machines[] }
+
+  machines.forEach(m => {
+    const loc = resolveLocation(m.machine);
+    if (!loc) return;
+    if (!map.has(loc.label)) map.set(loc.label, { loc, machines: [] });
+    map.get(loc.label).machines.push(m);
+  });
+
+  return Array.from(map.values()).map(({ loc, machines: ms }) => {
+    const upCount   = ms.filter(m => m.host?.status === 'up').length;
+    const downCount = ms.filter(m => m.host?.status === 'down').length;
+    const status    = downCount > 0 ? 'down' : upCount > 0 ? 'up' : 'unknown';
+    const totalSvcs = ms.reduce((a, m) => a + (m.services?.length || 0), 0);
+    const upSvcs    = ms.reduce((a, m) => a + (m.services?.filter(s => s.tailscale_check?.status === 'up').length || 0), 0);
+    return { loc, machines: ms, status, upCount, downCount, totalSvcs, upSvcs };
+  });
+}
+
+// ── ZOOM & PAN ────────────────────────────────────────────────────
+const zoom = { scale: 1, tx: 0, ty: 0 };
+const ZOOM_MIN = 0.4, ZOOM_MAX = 12;
+
+function applyZoom(el) {
+  el.setAttribute('transform', `translate(${zoom.tx},${zoom.ty}) scale(${zoom.scale})`);
+}
+
+function resetZoom() {
+  zoom.scale = 1; zoom.tx = 0; zoom.ty = 0;
+  const zl = document.getElementById('zoom-layer');
+  if (zl) applyZoom(zl);
+}
+
+// ── MAP RENDER ────────────────────────────────────────────────────
+function showError(msg) {
+  const el = document.getElementById('loading');
+  el.classList.add('no-spinner');
+  el.style.color = '#ff3d3d';
+  el.style.fontSize = '10px';
+  el.style.letterSpacing = '1px';
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+async function renderMap(data) {
+  const mapSvg = document.getElementById('map-svg');
+  const wrap   = document.getElementById('map-wrap');
+  const W      = wrap.offsetWidth;
+  const H      = wrap.offsetHeight;
+
+  // Guard: D3 must be loaded
+  if (typeof d3 === 'undefined') {
+    showError('ERROR: D3 library failed to load — check network / CSP');
+    return;
+  }
+  if (typeof topojson === 'undefined') {
+    showError('ERROR: TopoJSON library failed to load — check network / CSP');
+    return;
+  }
+
+  mapSvg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  mapSvg.innerHTML = '';
+
+  // Fetch world data once, try two CDNs
+  if (!worldDataCache) {
+    const urls = [
+      'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json',
+      'https://unpkg.com/world-atlas@2/countries-110m.json',
+    ];
+    let loaded = false;
+    for (const url of urls) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        worldDataCache = await res.json();
+        loaded = true;
+        break;
+      } catch(e) {
+        console.warn('Map data fetch failed:', url, e.message);
+      }
+    }
+    if (!loaded) {
+      showError('ERROR: Could not load world map data — check network connection');
+      return;
+    }
+  }
+
+  document.getElementById('loading').classList.add('hidden');
+
+  const projection = d3.geoNaturalEarth1()
+    .scale(W / 6.2)
+    .translate([W / 2, H / 2]);
+
+  const pathGen = d3.geoPath().projection(projection);
+
+  // Zoom layer — all map content lives here
+  const zl = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  zl.setAttribute('id', 'zoom-layer');
+  applyZoom(zl);
+  mapSvg.appendChild(zl);
+
+  // Ocean background
+  const sphere = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  sphere.setAttribute('d', pathGen({ type: 'Sphere' }));
+  sphere.setAttribute('fill', '#050d15');
+  sphere.setAttribute('stroke', 'none');
+  zl.appendChild(sphere);
+
+  // Graticule grid
+  const graticule = d3.geoGraticule().step([30, 30])();
+  const gEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  gEl.setAttribute('d', pathGen(graticule));
+  gEl.setAttribute('class', 'map-graticule');
+  zl.appendChild(gEl);
+
+  // Countries
+  const countries = topojson.feature(worldDataCache, worldDataCache.objects.countries);
+  countries.features.forEach(feature => {
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', pathGen(feature) || '');
+    p.setAttribute('class', 'map-country');
+    zl.appendChild(p);
+  });
+
+  // Country borders
+  const borders = topojson.mesh(worldDataCache, worldDataCache.objects.countries, (a, b) => a !== b);
+  const bEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  bEl.setAttribute('d', pathGen(borders) || '');
+  bEl.setAttribute('class', 'map-border');
+  zl.appendChild(bEl);
+
+  // ── Build & draw clusters ──────────────────────────────
+  const clusters = buildClusters(data.machines || []);
+
+  // Draw faint arcs between all cluster pairs (connection feel)
+  for (let i = 0; i < clusters.length; i++) {
+    for (let j = i + 1; j < clusters.length; j++) {
+      const [ax, ay] = projection(clusters[i].loc.coords) || [];
+      const [bx, by] = projection(clusters[j].loc.coords) || [];
+      if (ax == null || bx == null) continue;
+      // Cubic bezier with midpoint lifted toward center
+      const mx = (ax + bx) / 2;
+      const my = (ay + by) / 2 - Math.hypot(bx - ax, by - ay) * 0.15;
+      const arc = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      arc.setAttribute('d', `M${ax},${ay} Q${mx},${my} ${bx},${by}`);
+      arc.setAttribute('class', 'cluster-arc');
+      zl.appendChild(arc);
+    }
+  }
+
+  // Draw each cluster
+  clusters.forEach(cluster => {
+    const [px, py] = projection(cluster.loc.coords) || [];
+    if (px == null) return;
+
+    const r = cluster.machines.length > 1 ? 10 : 7;
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'cluster-g');
+
+    // Pulse ring
+    const pulse = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    pulse.setAttribute('cx', px); pulse.setAttribute('cy', py);
+    pulse.setAttribute('r', r);
+    pulse.setAttribute('class', `cluster-pulse ${cluster.status}`);
+    g.appendChild(pulse);
+
+    // Halo ring
+    const halo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    halo.setAttribute('cx', px); halo.setAttribute('cy', py);
+    halo.setAttribute('r', r + 4);
+    halo.setAttribute('class', `cluster-halo ${cluster.status}`);
+    g.appendChild(halo);
+
+    // Core dot
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('cx', px); dot.setAttribute('cy', py);
+    dot.setAttribute('r', r);
+    dot.setAttribute('class', `cluster-dot ${cluster.status}`);
+    g.appendChild(dot);
+
+    // Count badge for multi-machine clusters
+    if (cluster.machines.length > 1) {
+      const cnt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      cnt.setAttribute('x', px); cnt.setAttribute('y', py);
+      cnt.setAttribute('class', 'cluster-count');
+      cnt.textContent = cluster.machines.length;
+      g.appendChild(cnt);
+    }
+
+    // City name label
+    const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    lbl.setAttribute('x', px + r + 6); lbl.setAttribute('y', py - 2);
+    lbl.setAttribute('class', 'cluster-name');
+    lbl.textContent = cluster.loc.label;
+    g.appendChild(lbl);
+
+    // Sub-label: host count + status
+    const sub = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    sub.setAttribute('x', px + r + 6); sub.setAttribute('y', py + 9);
+    sub.setAttribute('class', 'cluster-sub');
+    const downTxt = cluster.downCount > 0 ? ` · ${cluster.downCount} DOWN` : '';
+    sub.textContent = `${cluster.machines.length} host${cluster.machines.length !== 1 ? 's' : ''}${downTxt}`;
+    g.appendChild(sub);
+
+    g.addEventListener('click', () => showStation(cluster));
+    zl.appendChild(g);
+  });
+
+  // ── Wire up zoom/pan ───────────────────────────────────
+  mapSvg.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect     = mapSvg.getBoundingClientRect();
+    const mx       = e.clientX - rect.left;
+    const my       = e.clientY - rect.top;
+    const delta    = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    const newScale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom.scale * delta));
+    zoom.tx = mx - (mx - zoom.tx) * (newScale / zoom.scale);
+    zoom.ty = my - (my - zoom.ty) * (newScale / zoom.scale);
+    zoom.scale = newScale;
+    applyZoom(zl);
+  }, { passive: false });
+
+  mapSvg.addEventListener('dblclick', resetZoom);
+
+  let drag = null;
+  mapSvg.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    drag = { sx: e.clientX, sy: e.clientY, tx: zoom.tx, ty: zoom.ty };
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!drag) return;
+    zoom.tx = drag.tx + (e.clientX - drag.sx);
+    zoom.ty = drag.ty + (e.clientY - drag.sy);
+    applyZoom(zl);
+  });
+  window.addEventListener('mouseup', () => { drag = null; });
+
+  // Touch
+  let touches = {};
+  mapSvg.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    for (const t of e.changedTouches) touches[t.identifier] = { x: t.clientX, y: t.clientY };
+  }, { passive: false });
+  mapSvg.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      const t = e.touches[0], old = touches[t.identifier];
+      if (!old) return;
+      zoom.tx += t.clientX - old.x; zoom.ty += t.clientY - old.y;
+      touches[t.identifier] = { x: t.clientX, y: t.clientY };
+    } else if (e.touches.length === 2) {
+      const [t1, t2] = [e.touches[0], e.touches[1]];
+      const o1 = touches[t1.identifier], o2 = touches[t2.identifier];
+      if (!o1 || !o2) return;
+      const prev = Math.hypot(o1.x - o2.x, o1.y - o2.y);
+      const next = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      if (prev === 0) return;
+      const midX = (t1.clientX + t2.clientX) / 2;
+      const midY = (t1.clientY + t2.clientY) / 2;
+      const rect = mapSvg.getBoundingClientRect();
+      const mx = midX - rect.left, my = midY - rect.top;
+      const ns2 = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom.scale * (next / prev)));
+      zoom.tx = mx - (mx - zoom.tx) * (ns2 / zoom.scale);
+      zoom.ty = my - (my - zoom.ty) * (ns2 / zoom.scale);
+      zoom.scale = ns2;
+      touches[t1.identifier] = { x: t1.clientX, y: t1.clientY };
+      touches[t2.identifier] = { x: t2.clientX, y: t2.clientY };
+    }
+    applyZoom(zl);
+  }, { passive: false });
+  mapSvg.addEventListener('touchend', (e) => {
+    for (const t of e.changedTouches) delete touches[t.identifier];
+  }, { passive: false });
+
+  // Show "no location data" hint if nothing resolved
+  if (clusters.length === 0) {
+    const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    hint.setAttribute('x', W / 2); hint.setAttribute('y', H - 40);
+    hint.setAttribute('fill', '#2a4050'); hint.setAttribute('font-family', 'monospace');
+    hint.setAttribute('font-size', '11'); hint.setAttribute('text-anchor', 'middle');
+    hint.textContent = 'No location data — add a location field to your machines';
+    mapSvg.appendChild(hint);
+  }
+}
+
+// ── PANEL: STATION VIEW ───────────────────────────────────────────
+function showStation(cluster) {
+  currentCluster = cluster;
+
+  const detail      = document.getElementById('detail');
+  const inner       = document.getElementById('detail-inner');
+  const placeholder = document.getElementById('detail-placeholder');
+  const stationView = document.getElementById('station-view');
+  const hostDetail  = document.getElementById('host-detail');
+
+  detail.classList.remove('empty');
+  placeholder.style.display = 'none';
+  inner.style.display       = 'block';
+  stationView.style.display = 'block';
+  hostDetail.classList.remove('visible');
+
+  const { loc, machines, status, upCount, downCount, totalSvcs, upSvcs } = cluster;
+  const [lng, lat] = loc.coords;
+
+  stationView.innerHTML = `
+    <div class="station-header">
+      <div class="station-city">${loc.label}</div>
+      <div class="station-coords">${lat.toFixed(4)}° ${lat >= 0 ? 'N' : 'S'} &nbsp; ${Math.abs(lng).toFixed(4)}° ${lng >= 0 ? 'E' : 'W'}</div>
+      <div class="station-stats">
+        <div class="station-stat">
+          <div class="ss-lbl">HOSTS</div>
+          <div class="ss-val">${machines.length}</div>
+        </div>
+        <div class="station-stat">
+          <div class="ss-lbl">STATUS</div>
+          <div class="ss-val ${status}">${downCount > 0 ? downCount + ' DOWN' : 'ALL UP'}</div>
+        </div>
+        <div class="station-stat">
+          <div class="ss-lbl">SERVICES</div>
+          <div class="ss-val">${upSvcs}/${totalSvcs}</div>
+        </div>
+      </div>
+    </div>
+    <div class="station-host-list">
+      <div class="station-section-title">Machines</div>
+      ${machines.map(m => {
+        const st   = m.host?.status || 'unknown';
+        const ping = m.host?.response_time_ms;
+        const svcs = m.services || [];
+        const upS  = svcs.filter(s => s.tailscale_check?.status === 'up').length;
+        return `<div class="host-card ${st}" data-name="${m.machine.tailscale_name}">
+          <div class="host-card-top">
+            <span class="host-card-name">${m.machine.display_name}</span>
+            <span class="host-card-status ${st}">${st.toUpperCase()}</span>
+          </div>
+          <div class="host-card-meta">
+            ${ping != null ? `<span>${ping}ms</span>` : ''}
+            ${svcs.length ? `<span>${upS}/${svcs.length} svcs</span>` : ''}
+            ${m.machine.primary_role ? `<span style="color:#1e3040">${m.machine.primary_role}</span>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+  // Attach click handlers to each host card
+  machines.forEach(m => {
+    const card = stationView.querySelector(`[data-name="${m.machine.tailscale_name}"]`);
+    if (card) card.addEventListener('click', () => showHostDetail(m));
+  });
+}
+
+// ── PANEL: HOST DETAIL ─────────────────────────────────────────────
+function showHostDetail(m) {
+  const stationView = document.getElementById('station-view');
+  const hostDetail  = document.getElementById('host-detail');
+  const inner       = document.getElementById('host-detail-inner');
+
+  stationView.style.display = 'none';
+  hostDetail.classList.add('visible');
+
+  const status = m.host?.status || 'unknown';
+  const ping   = m.host?.response_time_ms;
+
+  let html = `
+    <div class="detail-host-name">${m.machine.display_name}</div>
+    <div class="detail-host-role">${m.machine.primary_role || ''}</div>
+    <div class="detail-stat-row">
+      <div class="detail-stat"><div class="ds-label">STATUS</div><div class="ds-val ${status}">${status.toUpperCase()}</div></div>
+      <div class="detail-stat"><div class="ds-label">LATENCY</div><div class="ds-val">${ping != null ? ping + 'ms' : '—'}</div></div>
+      <div class="detail-stat"><div class="ds-label">IP</div><div class="ds-val" style="font-size:11px">${m.machine.tailscale_ip || '—'}</div></div>
+    </div>`;
+
+  if (m.host?.detail) html += `<div class="svc-detail-text" style="margin-bottom:12px">${m.host.detail}</div>`;
+
+  html += `<div class="detail-section-title">Services</div>`;
+
+  (m.services || []).forEach(s => {
+    const ss     = s.tailscale_check?.status || 'unknown';
+    const vram   = parseVRAM(s.tailscale_check?.detail);
+    const model  = parseModel(s.tailscale_check?.detail);
+    const tsMs   = s.tailscale_check?.response_time_ms;
+    const detail = s.tailscale_check?.detail;
+    const pClass = s.priority === 'P' ? 'P' : '';
+
+    html += `<div class="svc-card ${ss}">
+      <div class="svc-card-header">
+        <span class="svc-card-name">${s.name}</span>
+        <span class="svc-card-priority ${pClass}">${s.priority || ''}</span>
+      </div>`;
+    if (vram) {
+      const pct      = (vram.used / vram.total * 100).toFixed(0);
+      const barClass = pct > 85 ? 'critical' : pct > 60 ? 'high' : '';
+      html += `<div class="vram-bar-wrap">
+        <div class="vram-bar-label"><span>VRAM</span><span style="color:var(--text-bright)">${vram.used}GB / ${vram.total}GB &nbsp;${pct}%</span></div>
+        <div class="vram-bar-track"><div class="vram-bar-fill ${barClass}" style="width:${pct}%"></div></div>
+      </div>`;
+    }
+    if (model) {
+      html += `<div class="svc-detail-text" style="margin-top:6px;color:var(--blue)">▸ ${model}</div>`;
+    } else if (detail && !vram) {
+      html += `<div class="svc-detail-text">${detail.substring(0, 120)}</div>`;
+    }
+    html += `<div class="svc-meta-row">`;
+    if (s.port)       html += `<div class="svc-meta-item">PORT <span>:${s.port}</span></div>`;
+    if (tsMs != null) html += `<div class="svc-meta-item">TS <span>${tsMs}ms</span></div>`;
+    html += `</div>`;
+    if (s.public_check) {
+      const pubStatus = s.public_check.status;
+      const pubUrl    = s.public_check.url?.replace('https://', '');
+      const pubMs     = s.public_check.response_time_ms;
+      html += `<div class="pub-badge ${pubStatus}">${pubUrl}${pubMs ? ' · ' + pubMs + 'ms' : ''}</div>`;
+    }
+    html += `</div>`;
+  });
+
+  inner.innerHTML = html;
+}
+
+function backToStation() {
+  if (!currentCluster) return;
+  document.getElementById('host-detail').classList.remove('visible');
+  document.getElementById('station-view').style.display = 'block';
+}
+
+// ── PANEL TOGGLE ──────────────────────────────────────────────────
+const toggleBtn   = document.getElementById('detail-toggle');
+const detailPanel = document.getElementById('detail');
+toggleBtn.addEventListener('click', () => {
+  const collapsed = detailPanel.classList.toggle('collapsed');
+  toggleBtn.textContent  = collapsed ? '▶' : '◀';
+  toggleBtn.style.right  = collapsed ? '4px' : '284px';
+});
+
+// ── DEBUG OVERLAY ─────────────────────────────────────────────────
+function showDebug(lines) {
+  let el = document.getElementById('debug-overlay');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'debug-overlay';
+    el.style.cssText = `
+      position:fixed; bottom:60px; left:24px; z-index:200;
+      background:rgba(3,5,8,0.97); border:1px solid rgba(60,180,255,0.2);
+      font-family:'JetBrains Mono',monospace; font-size:9px; color:#3cb4ff;
+      padding:10px 14px; border-radius:3px; max-width:500px; max-height:260px;
+      overflow-y:auto; line-height:1.7; letter-spacing:0.5px;
+      white-space:pre-wrap; word-break:break-all;
+    `;
+    document.body.appendChild(el);
+  }
+  el.textContent = lines.join('\n');
+}
+
+// ── FETCH & POLL ──────────────────────────────────────────────────
+async function refresh() {
+  showDebug([`Fetching: ${API_URL}`, '…']);
+  try {
+    const res = await fetch(API_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    currentData = data;
+
+    // ── Dump machine fields for location debugging ──
+    const machines = data.machines || [];
+    const debugLines = [
+      `✓ API OK  —  ${machines.length} machines`,
+      `meta: checker=${data.meta?.checker_host}  ts=${data.meta?.timestamp_utc}`,
+      '─────────────────────────────────────────────',
+    ];
+    machines.slice(0, 12).forEach(m => {
+      const loc = resolveLocation(m.machine);
+      const vals = [
+        m.machine.display_name,
+        m.machine.tailscale_name,
+        m.machine.primary_role || '—',
+        loc ? `📍 ${loc.label}` : '⚠ NO LOCATION',
+      ].join(' | ');
+      debugLines.push(vals);
+    });
+    if (machines.length > 12) debugLines.push(`… +${machines.length - 12} more`);
+    debugLines.push('─────────────────────────────────────────────');
+    debugLines.push('machine keys: ' + (machines[0] ? Object.keys(machines[0].machine).join(', ') : 'none'));
+    // Raw dump of first machine's .machine object to verify shape
+    if (machines[0]) {
+      debugLines.push('machines[0].machine = ' + JSON.stringify(machines[0].machine).substring(0, 200));
+    } else {
+      debugLines.push('⚠ machines array is EMPTY');
+    }
+    // Also confirm clusters built
+    const testClusters = buildClusters(machines);
+    debugLines.push(`clusters built: ${testClusters.length} (${testClusters.map(c=>c.loc.label).join(', ') || 'NONE'})`);
+    showDebug(debugLines);
+
+    if (data.meta) {
+      lastTimestamp = new Date(data.meta.timestamp_utc).getTime();
+      document.getElementById('meta-checker').textContent = (data.meta.checker_host || '—').toUpperCase();
+    }
+    renderSummary(data);
+    renderMap(data);
+    if (currentCluster) {
+      const clusters = buildClusters(data.machines || []);
+      const updated  = clusters.find(c => c.loc.label === currentCluster.loc.label);
+      if (updated) showStation(updated);
+    }
+  } catch (e) {
+    showDebug([
+      `✗ FETCH FAILED`,
+      `URL: ${API_URL}`,
+      `Error: ${e.message}`,
+      '',
+      'Likely causes:',
+      '• CORS — API must allow http://127.0.0.1:8000',
+      '• Network — API host unreachable from this machine',
+      '• Check browser console (F12) for details',
+    ]);
+    if (!worldDataCache) renderMap({ machines: [], summary: {} });
+    document.getElementById('meta-age').textContent = 'API ERROR';
+    document.getElementById('meta-age').className = 'age';
+  }
+}
+
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (currentData) renderMap(currentData); }, 150);
+});
+
+// ── STARTUP SELF-TEST (runs before first fetch) ───────────────────
+// Verifies the override map resolves correctly against known names.
+// Remove this block once nodes are confirmed visible.
+(function selfTest() {
+  const tests = Object.keys(MACHINE_LOCATION_OVERRIDES);
+  const results = ['── SELF-TEST: resolveLocation ──'];
+  let pass = 0, fail = 0;
+  tests.forEach(name => {
+    const loc = resolveLocation({ tailscale_name: name });
+    const ok = loc !== null;
+    results.push(`${ok ? '✓' : '✗'} ${name} → ${loc ? loc.label : 'NULL'}`);
+    ok ? pass++ : fail++;
+  });
+  results.push(`── ${pass} pass / ${fail} fail ──`);
+  results.push('Waiting for API…');
+  showDebug(results);
+})();
+
+refresh();
+setInterval(refresh, 30000);
+{% endraw %}
+</script>
+</body>
+</html>

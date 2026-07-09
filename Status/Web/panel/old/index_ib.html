@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>FLEET_OPS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #080b0f;
+  --bg2:      #0d1117;
+  --bg3:      #111620;
+  --bg4:      #161d28;
+  --border:   #1c2333;
+  --border2:  #243042;
+  --text:     #c9d1d9;
+  --text2:    #6e7f96;
+  --text3:    #3d4f63;
+  --green:    #39d353;
+  --green-dim:#1a3d22;
+  --red:      #f85149;
+  --red-dim:  #3d1a1a;
+  --blue:     #58a6ff;
+  --blue-dim: #1a2d4a;
+  --amber:    #e3b341;
+  --amber-dim:#3d2e0f;
+  --orange:   #f0883e;
+  --gray:     #484f58;
+  --font: 'Share Tech Mono', monospace;
+  --font-head: 'Orbitron', monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1.5;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+/* ── SCANLINE OVERLAY ───────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 999;
+}
+/* ── TOP BAR ───────────────────────────────────────── */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.topbar-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.topbar-title {
+  font-family: var(--font-head);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.topbar-title .cursor {
+  display: inline-block;
+  width: 10px;
+  height: 18px;
+  background: var(--green);
+  animation: blink 1s step-end infinite;
+  vertical-align: middle;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+.topbar-sub {
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+}
+#dataAge { color: var(--text2); }
+#dataAge.fresh { color: var(--green); }
+#dataAge.aging { color: var(--amber); }
+#dataAge.stale { color: var(--red); }
+.topbar-stats {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.stat-box {
+  border: 1px solid var(--border2);
+  background: var(--bg3);
+  padding: 6px 14px;
+  text-align: center;
+  min-width: 60px;
+}
+.stat-box .stat-label {
+  font-size: 9px;
+  color: var(--text3);
+  letter-spacing: 0.1em;
+  display: block;
+  margin-bottom: 2px;
+}
+.stat-box .stat-value {
+  font-family: var(--font-head);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.05em;
+}
+.stat-box .stat-value.ok { color: var(--green); }
+.stat-box .stat-value.warn { color: var(--amber); }
+.stat-box .stat-value.err { color: var(--red); }
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--green);
+  padding: 5px 12px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--green);
+  background: rgba(57,211,83,0.05);
+}
+.status-badge.warn { border-color: var(--amber); color: var(--amber); background: rgba(227,179,65,0.05); }
+.status-badge.err  { border-color: var(--red);   color: var(--red);   background: rgba(248,81,73,0.05); }
+.status-badge .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s infinite;
+}
+.status-badge.warn .dot,
+.status-badge.err .dot { animation: none; }
+@keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
+/* ── BANNER ────────────────────────────────────────── */
+.banner {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid;
+}
+.banner.stale { display:flex; background:rgba(227,179,65,0.08); border-color:rgba(227,179,65,0.3); color:var(--amber); }
+.banner.error  { display:flex; background:rgba(248,81,73,0.08);  border-color:rgba(248,81,73,0.3);  color:var(--red); }
+/* ── GRID ──────────────────────────────────────────── */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  padding: 0;
+}
+@media (max-width: 380px) {
+  .grid { grid-template-columns: 1fr; }
+}
+/* ── MACHINE CARD ──────────────────────────────────── */
+.card {
+  background: var(--bg2);
+  display: flex;
+  flex-direction: column;
+  transition: background 0.15s;
+}
+.card.secondary { background: var(--bg2); }
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+.card-header:hover { background: var(--bg3); }
+.card-name {
+  font-family: var(--font-head);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.card-role {
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+}
+.card-header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.host-ms {
+  font-size: 11px;
+  color: var(--text2);
+}
+.host-dot-inline {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.host-dot-inline.up   { background: var(--green); box-shadow: 0 0 6px rgba(57,211,83,0.5); }
+.host-dot-inline.down { background: var(--red);   box-shadow: 0 0 6px rgba(248,81,73,0.5); }
+.host-dot-inline.unknown { background: var(--gray); }
+/* ── SERVICE ROWS ──────────────────────────────────── */
+.card-body { flex: 1; }
+.card.collapsed .card-body { display: none; }
+.card.collapsed .card-footer { display: none; }
+.svc {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+.svc:last-child { border-bottom: none; }
+.svc.svc-down { background: rgba(248,81,73,0.03); }
+.svc-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.svc-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+.svc-dot.up      { background: var(--green); }
+.svc-dot.down    { background: var(--red); }
+.svc-dot.unknown { background: var(--gray); }
+.svc-info { min-width: 0; flex: 1; }
+.svc-name-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.svc-name {
+  font-size: 12px;
+  color: var(--text);
+  letter-spacing: 0.04em;
+}
+.pbadge {
+  font-size: 8px;
+  padding: 1px 4px;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  border: 1px solid;
+}
+.pbadge.P   { color: var(--green);  border-color: var(--green-dim);  background: rgba(57,211,83,0.08); }
+.pbadge.B1  { color: var(--green);  border-color: var(--green-dim);  background: rgba(57,211,83,0.08); }
+.pbadge.B2  { color: var(--blue);   border-color: var(--blue-dim);   background: rgba(88,166,255,0.08); }
+.pbadge.B5  { color: var(--amber);  border-color: var(--amber-dim);  background: rgba(227,179,65,0.08); }
+.pbadge.B9  { color: var(--orange); border-color: rgba(240,136,62,0.3); background: rgba(240,136,62,0.08); }
+.pbadge.B99 { color: var(--gray);   border-color: rgba(72,79,88,0.4); background: rgba(72,79,88,0.08); }
+.port { font-size: 9px; color: var(--text3); }
+.svc-detail {
+  font-size: 10px;
+  color: var(--text2);
+  margin-top: 1px;
+  word-break: break-word;
+}
+.svc-detail.err { color: var(--red); opacity: 0.75; }
+.svc-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.svc-badges { display: flex; gap: 3px; }
+.cbadge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border: 1px solid;
+  letter-spacing: 0.05em;
+}
+.cbadge.ok  { color: var(--green); border-color: rgba(57,211,83,0.3); background: rgba(57,211,83,0.06); }
+.cbadge.err { color: var(--red);   border-color: rgba(248,81,73,0.3); background: rgba(248,81,73,0.06); }
+.cbadge.unk { color: var(--gray);  border-color: rgba(72,79,88,0.3);  background: rgba(72,79,88,0.06); }
+.svc-ms { font-size: 9px; color: var(--text3); }
+/* ── CARD FOOTER ───────────────────────────────────── */
+.card-footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  background: var(--bg);
+}
+.card-footer-ip { font-size: 10px; color: var(--text3); }
+.card-footer-name { font-size: 10px; color: var(--text3); text-align: right; }
+/* ── PAGE FOOTER ───────────────────────────────────── */
+.pagefooter {
+  border-top: 1px solid var(--border);
+  padding: 20px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  background: var(--bg);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.pagefooter-wordmark {
+  font-family: var(--font-head);
+  font-size: clamp(28px, 6vw, 52px);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.04);
+  line-height: 1;
+}
+.pagefooter-wordmark span {
+  color: rgba(57,211,83,0.15);
+}
+.pagefooter-meta {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+}
+.pagefooter-meta a {
+  color: var(--blue);
+  text-decoration: none;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.pagefooter-meta span {
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: 0.05em;
+}
+/* ── LOADING ───────────────────────────────────────── */
+.loading-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1px;
+  background: var(--border);
+}
+.skel-card {
+  background: var(--bg2);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 180px;
+}
+.skel {
+  background: linear-gradient(90deg, var(--bg3) 25%, var(--bg4) 50%, var(--bg3) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  height: 11px;
+}
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+</style>
+</head>
+<body>
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="topbar-title">
+      FLEET_OPS <span class="cursor"></span>
+    </div>
+    <div class="topbar-sub">SRC: <span id="topbarSrc">—</span> &nbsp;/&nbsp; T: <span id="topbarTime">—</span> &nbsp;/&nbsp; <span id="dataAge">—</span></div>
+  </div>
+  <div class="topbar-stats">
+    <div class="stat-box">
+      <span class="stat-label">HOSTS</span>
+      <div class="stat-value" id="statHosts">—</div>
+    </div>
+    <div class="stat-box">
+      <span class="stat-label">SVC</span>
+      <div class="stat-value" id="statSvc">—</div>
+    </div>
+    <div class="stat-box">
+      <span class="stat-label">PUB</span>
+      <div class="stat-value" id="statPub">—</div>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="status-badge" id="statusBadge">
+      <span class="dot"></span>
+      <span id="statusText">CONNECTING</span>
+    </div>
+  </div>
+</div>
+<div class="banner" id="staleBanner">⚠ DATA STALE — CHECKER MAY BE DOWN</div>
+<div class="banner" id="errorBanner">✕ API UNREACHABLE</div>
+<div id="mainContent">
+  <div class="loading-grid">
+    <div class="skel-card"><div class="skel" style="width:45%"></div><div class="skel" style="width:70%"></div><div class="skel" style="width:55%"></div><div class="skel" style="width:65%"></div></div>
+    <div class="skel-card"><div class="skel" style="width:50%"></div><div class="skel" style="width:60%"></div><div class="skel" style="width:75%"></div></div>
+    <div class="skel-card"><div class="skel" style="width:40%"></div><div class="skel" style="width:55%"></div></div>
+    <div class="skel-card"><div class="skel" style="width:55%"></div><div class="skel" style="width:70%"></div><div class="skel" style="width:50%"></div><div class="skel" style="width:65%"></div><div class="skel" style="width:60%"></div></div>
+  </div>
+</div>
+<div class="pagefooter">
+  <div class="pagefooter-wordmark">FLEET<span>_</span>STATUS</div>
+  <div class="pagefooter-meta">
+    <a href="#" id="altFeedLink">↗ BACKUP FEED</a>
+    <span id="footerMeta">POLL: 30S</span>
+    <span id="footerChecker">—</span>
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const isBkp = params.has('bkp');
+const API_URL = isBkp
+  ? 'https://fleet-bkp.ldmathes.cc/api/status'
+  : 'https://fleet.ldmathes.cc/api/status';
+
+document.getElementById('altFeedLink').href = isBkp
+  ? 'https://fleet.ldmathes.cc/panel/index.html'
+  : 'https://fleet-bkp.ldmathes.cc/panel/index.html?bkp';
+
+const POLL_MS = 30000;
+const STALE_S = 300;
+
+let lastData = null;
+let collapsed = {};
+let lastTimestamp = null;
+
+// Live age counter
+setInterval(() => {
+  const el = document.getElementById('dataAge');
+  if (!el || !lastTimestamp) return;
+  const s = Math.floor((Date.now() - new Date(lastTimestamp).getTime()) / 1000);
+  if (s < 60) {
+    el.textContent = s + 's ago';
+    el.className = s < 45 ? 'fresh' : 'aging';
+  } else if (s < 300) {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    el.textContent = m + 'm ' + sec + 's ago';
+    el.className = 'aging';
+  } else {
+    const m = Math.floor(s / 60);
+    el.textContent = m + 'm ago — STALE';
+    el.className = 'stale';
+  }
+}, 1000);
+
+function fmtTime(u) {
+  if (!u) return '—';
+  try { return new Date(u).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+  catch { return u; }
+}
+
+function ageS(u) {
+  if (!u) return Infinity;
+  return (Date.now() - new Date(u).getTime()) / 1000;
+}
+
+function statusClass(s) {
+  return s === 'up' ? 'up' : s === 'down' ? 'down' : 'unknown';
+}
+
+function cbClass(s) {
+  return s === 'up' ? 'ok' : s === 'down' ? 'err' : 'unk';
+}
+
+function statColor(up, total) {
+  if (up === total) return 'ok';
+  if (up < total * 0.7) return 'err';
+  return 'warn';
+}
+
+function renderSvc(svc) {
+  const tc = svc.tailscale_check || {};
+  const pc = svc.public_check;
+  const st = tc.status || 'unknown';
+  const detail = tc.detail || '';
+  const isDown = st === 'down';
+  const pubBadge = pc
+    ? `<span class="cbadge ${cbClass(pc.status)}">${pc.status === 'up' ? 'OK' : 'ERR'}&nbsp;PUB</span>`
+    : '';
+  const tsBadge = `<span class="cbadge ${cbClass(st)}">${st === 'up' ? 'OK' : st === 'down' ? 'ERR' : 'UNK'}&nbsp;TS</span>`;
+  const msLine = tc.response_time_ms
+    ? `<div class="svc-ms">${tc.response_time_ms}ms${pc && pc.response_time_ms ? ' / ' + pc.response_time_ms + 'ms pub' : ''}</div>`
+    : '';
+  return `
+    <div class="svc${isDown ? ' svc-down' : ''}">
+      <div class="svc-left">
+        <div class="svc-dot ${statusClass(st)}"></div>
+        <div class="svc-info">
+          <div class="svc-name-row">
+            <span class="svc-name">${svc.name}</span>
+            <span class="pbadge ${svc.priority}">${svc.priority}</span>
+            <span class="port">:${svc.port}</span>
+          </div>
+          ${detail ? `<div class="svc-detail${isDown ? ' err' : ''}">${detail}</div>` : ''}
+        </div>
+      </div>
+      <div class="svc-right">
+        <div class="svc-badges">${tsBadge}${pubBadge}</div>
+        ${msLine}
+      </div>
+    </div>`;
+}
+
+function renderCard(m) {
+  const host = m.host || {};
+  const hs = host.status || 'unknown';
+  const name = m.machine.tailscale_name;
+  // Default secondary machines collapsed
+  if (!(name in collapsed)) {
+    collapsed[name] = true;
+  }
+  const isCollapsed = collapsed[name];
+  const hostMs = host.response_time_ms ? `${host.response_time_ms}ms` : '';
+  const services = (m.services || []).map(renderSvc).join('');
+  const pollTime = m.poll ? fmtTime(m.poll.timestamp_utc) : '—';
+  return `
+    <div class="card secondary${isCollapsed ? ' collapsed' : ''}" data-m="${name}">
+      <div class="card-header" onclick="toggle('${name}')">
+        <div>
+          <div class="card-name">${m.machine.display_name.toUpperCase()}</div>
+          <div class="card-role">${m.machine.primary_role.toUpperCase()}</div>
+        </div>
+        <div class="card-header-right">
+          <div class="host-ms">${hostMs}<span class="host-dot-inline ${statusClass(hs)}"></span></div>
+          <div class="card-role" data-collapse-hint style="font-size:9px;color:var(--text3)">${isCollapsed ? '▾ EXPAND' : '▴ COLLAPSE'}</div>
+        </div>
+      </div>
+      <div class="card-body">${services}</div>
+      <div class="card-footer">
+        <span class="card-footer-ip">${m.machine.tailscale_ip}</span>
+        <span class="card-footer-name">${name} · ${pollTime}</span>
+      </div>
+    </div>`;
+}
+
+function toggle(name) {
+  collapsed[name] = !collapsed[name];
+  const card = document.querySelector(`[data-m="${name}"]`);
+  if (!card) return;
+  card.classList.toggle('collapsed', collapsed[name]);
+  const hint = card.querySelector('[data-collapse-hint]');
+  if (hint) hint.textContent = collapsed[name] ? '▾ EXPAND' : '▴ COLLAPSE';
+}
+
+function render(data) {
+  lastData = data;
+  lastTimestamp = data.meta?.timestamp_utc || null;
+  const sum = data.summary || {};
+  const meta = data.meta || {};
+  
+  // Sub
+  document.getElementById('topbarSrc').textContent = (meta.checker_host || '—').toUpperCase();
+  document.getElementById('topbarTime').textContent = fmtTime(meta.timestamp_utc);
+  
+  // Stats
+  const hostsEl = document.getElementById('statHosts');
+  const svcEl   = document.getElementById('statSvc');
+  const pubEl   = document.getElementById('statPub');
+  hostsEl.textContent = `${sum.machines_up}/${sum.machines_total}`;
+  hostsEl.className = `stat-value ${statColor(sum.machines_up, sum.machines_total)}`;
+  svcEl.textContent = `${sum.services_up}/${sum.services_total}`;
+  svcEl.className = `stat-value ${statColor(sum.services_up, sum.services_total)}`;
+  pubEl.textContent = `${sum.public_endpoints_up}/${sum.public_endpoints_total}`;
+  pubEl.className = `stat-value ${statColor(sum.public_endpoints_up, sum.public_endpoints_total)}`;
+  
+  // Status badge
+  const badge = document.getElementById('statusBadge');
+  const statusText = document.getElementById('statusText');
+  const allOk = sum.services_up === sum.services_total && sum.public_endpoints_up === sum.public_endpoints_total;
+  const hasDown = sum.services_down > 0 || sum.public_endpoints_down > 0;
+  const isCritical = sum.services_total > 0 && (sum.services_down / sum.services_total) > 0.5;
+  badge.className = `status-badge${isCritical ? ' err' : hasDown ? ' warn' : ''}`;
+  statusText.textContent = allOk ? 'OPERATIONAL' : `${sum.services_down + sum.public_endpoints_down} DEGRADED`;
+  
+  // Stale
+  const age = ageS(meta.timestamp_utc);
+  const staleBanner = document.getElementById('staleBanner');
+  const errorBanner = document.getElementById('errorBanner');
+  staleBanner.className = age > STALE_S ? 'banner stale' : 'banner';
+  errorBanner.className = 'banner';
+  if (age > STALE_S) badge.className = 'status-badge warn';
+  
+  // Cards
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  grid.innerHTML = (data.machines || []).map(renderCard).join('');
+  document.getElementById('mainContent').replaceChildren(grid);
+  
+  // Footer
+  document.getElementById('footerChecker').textContent =
+    `CHECKER: ${(meta.checker_host || '—').toUpperCase()} · CYCLE: ${meta.cycle_duration_ms || '—'}MS`;
+}
+
+async function poll() {
+  try {
+    const res = await fetch(API_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    document.getElementById('errorBanner').className = 'banner';
+    render(data);
+  } catch (e) {
+    const badge = document.getElementById('statusBadge');
+    const statusText = document.getElementById('statusText');
+    badge.className = 'status-badge err';
+    statusText.textContent = 'API ERROR';
+    document.getElementById('errorBanner').className = 'banner error';
+    document.getElementById('errorBanner').textContent = `✕ API UNREACHABLE — ${e.message}${lastData ? ' — SHOWING LAST STATE' : ''}`;
+    if (!lastData) {
+      document.getElementById('mainContent').innerHTML =
+        '<div style="padding:60px;text-align:center;color:var(--text3);letter-spacing:0.1em">WAITING FOR API…</div>';
+    }
+  }
+}
+
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>

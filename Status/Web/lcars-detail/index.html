@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FLEET_OPS // LCARS HYBRID</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Antonio:wght@700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:        #070b12;
+      --bg2:       #0d1420;
+      --bg3:       #111c2e;
+      --border:    rgba(255,255,255,0.07);
+      --border2:   rgba(255,255,255,0.12);
+      --green:     #00e887;
+      --yellow:    #f2a93b;
+      --red:       #ff3b5c;
+      --blue:      #4a9eff;
+      --text:      #c8d8e8;
+      --text-dim:  #4a6070;
+      --text-bright:#ffffff;
+      --mono:      'JetBrains Mono', monospace;
+      --sans:      'Antonio', sans-serif;
+      
+      --lc-orange:     #ff9900;
+      --lc-blue:       #99ccff;
+      --lc-periwinkle: #9999ff;
+      --lc-pink:       #cc99cc;
+      --lc-red:        #cc0000;
+      --lc-green:      #00ff88;
+      --lc-bg:         #030508;
+      --lc-border:     #1a1f2e;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--lc-bg);
+      color: var(--text);
+      font-family: var(--mono);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+    }
+
+    /* ── LEFT DETAIL PANEL (tiles-style) ────────────── */
+    #left-panel {
+      width: 45%;
+      background: var(--bg);
+      border-right: 2px solid #111;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 16px;
+      gap: 12px;
+    }
+
+    #detail-scroll {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .detail-section-title {
+      color: var(--yellow);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 4px;
+    }
+
+    /* detail boxes - tiles style */
+    .detail-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 12px;
+      color: var(--text);
+    }
+
+    .box-label {
+      font-size: 9px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+
+    .box-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-bright);
+      letter-spacing: 0.5px;
+    }
+
+    .box-unit {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-left: 4px;
+    }
+
+    /* service cards */
+    .service-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 10px;
+      margin-bottom: 8px;
+    }
+
+    .service-name {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-bright);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 4px;
+    }
+
+    .service-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+
+    .service-label {
+      color: var(--text-dim);
+      font-size: 9px;
+    }
+
+    .service-val {
+      color: var(--text-bright);
+      font-weight: 700;
+    }
+
+    .service-val.ok  { color: var(--green); }
+    .service-val.warn{ color: var(--yellow); }
+    .service-val.err { color: var(--red); }
+
+    /* VRAM bar */
+    .vram-bar-wrap {
+      height: 4px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 2px;
+    }
+
+    .vram-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      background: var(--green);
+      transition: width 0.3s;
+    }
+
+    .vram-bar-fill.warn { background: var(--yellow); }
+    .vram-bar-fill.crit { background: var(--red); }
+
+    #no-selection {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 200px;
+      color: var(--text-dim);
+      font-size: 12px;
+      letter-spacing: 1px;
+    }
+
+    #no-selection.hidden { display: none; }
+
+    /* ── RIGHT LCARS PANEL ────────────────────────── */
+    #right-panel {
+      flex: 1;
+      background: var(--lc-bg);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      z-index: 100;
+      overflow: hidden;
+    }
+
+    /* Keep original LCARS styling from index_LCARS.html */
+    #lcars-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: rgba(255,255,255,0.05);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--yellow);
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--green);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- LEFT DETAIL PANEL (tiles-style metrics) -->
+  <div id="left-panel">
+    <div id="no-selection">CLICK HOST ON SCHEMATIC</div>
+    <div id="detail-scroll" style="display: none;">
+      <!-- populated by JS -->
+    </div>
+  </div>
+
+  <!-- RIGHT LCARS PANEL (loaded via iframe) -->
+  <iframe id="right-panel" src="https://fleet.ldmathes.cc/ST/index_LCARS.html" style="flex: 1; border: none; background: var(--lc-bg); width: 55%;"></iframe>
+
+  <script>
+    const API_URL = 'https://fleet.ldmathes.cc/api/status';
+    let allData = null;
+    let selectedHost = null;
+
+    async function fetchData() {
+      try {
+        const res = await fetch(API_URL);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        allData = await res.json();
+      } catch (err) {
+        console.error('Fetch error:', err);
+      }
+    }
+
+    function getHostStatus(machine) {
+      const hostDown = machine.host?.status !== 'up';
+      if (hostDown) return 'down';
+      const anyDown = (machine.services || []).some(s => 
+        s.priority === 'P' && s.tailscale_check?.status !== 'up'
+      );
+      return anyDown ? 'down' : 'up';
+    }
+
+    function parseVRAM(detail) {
+      if (!detail) return null;
+      const m = detail.match(/VRAM:\s*([\d.]+)GB\s*\/\s*([\d.]+)GB/);
+      if (!m) return null;
+      return { used: parseFloat(m[1]), total: parseFloat(m[2]) };
+    }
+
+    function parseGPU(detail) {
+      if (!detail) return null;
+      const m = detail.match(/GPU:\s*cuda:\d+\s+(.+?)\s*(?::|·|\u00b7|$)/);
+      return m ? m[1].trim() : null;
+    }
+
+    function parseQueue(detail) {
+      if (!detail) return null;
+      const m = detail.match(/Queue:\s*(.+?)(?:\s*·|\s*$)/);
+      return m ? m[1].trim() : null;
+    }
+
+    function parseOllama(detail) {
+      if (!detail) return null;
+      const m = detail.match(/(\d+)\s+models?\s+available\s*[·\u00b7]\s*(.+)/);
+      if (!m) return null;
+      return { count: parseInt(m[1]), active: m[2].trim() };
+    }
+
+    function parsePlex(detail) {
+      if (!detail) return null;
+      const streams = detail.match(/(\d+)\s+active\s+streams?/i);
+      const remote = detail.match(/Remote:\s*(\w+)/i);
+      const libs = detail.match(/(\d+)\s+libraries?/i);
+      return {
+        streams: streams ? parseInt(streams[1]) : 0,
+        remote: remote ? remote[1] : null,
+        libs: libs ? parseInt(libs[1]) : null,
+      };
+    }
+
+    function parseSyncthing(detail) {
+      if (!detail) return null;
+      const folders = detail.match(/(\d+)\s+folders?/i);
+      const state = detail.match(/^(\w+)/);
+      return {
+        state: state ? state[1] : null,
+        folders: folders ? parseInt(folders[1]) : null,
+      };
+    }
+
+    function renderDetail(machine) {
+      const hostStatus = machine.host?.status || 'unknown';
+      const ping = machine.host?.response_time_ms;
+      const ip = machine.machine.tailscale_ip;
+      const role = machine.machine.primary_role || 'UNKNOWN';
+
+      let html = `
+        <div class="detail-section-title">${machine.machine.display_name} · ${role}</div>
+        
+        <div class="detail-box">
+          <div class="box-label">HOST STATUS</div>
+          <div class="box-value">${hostStatus.toUpperCase()}</div>
+        </div>
+        
+        <div class="detail-box">
+          <div class="box-label">LATENCY</div>
+          <div class="box-value">${ping !== null ? ping : '–'}<span class="box-unit">ms</span></div>
+        </div>
+        
+        <div class="detail-box">
+          <div class="box-label">IP ADDRESS</div>
+          <div style="font-size: 12px; word-break: break-all; color: var(--green);">${ip || '–'}</div>
+        </div>
+      `;
+
+      // Primary services
+      const pSvcs = (machine.services || []).filter(s => s.priority === 'P');
+      if (pSvcs.length) {
+        html += `<div class="detail-section-title">PRIMARY SERVICES</div>`;
+        for (const svc of pSvcs) {
+          html += renderServiceCard(svc);
+        }
+      }
+
+      // Secondary services
+      const sSvcs = (machine.services || []).filter(s => s.priority === 'S');
+      if (sSvcs.length) {
+        html += `<div class="detail-section-title">SECONDARY SERVICES</div>`;
+        for (const svc of sSvcs) {
+          html += renderServiceCard(svc);
+        }
+      }
+
+      document.getElementById('no-selection').style.display = 'none';
+      const scroll = document.getElementById('detail-scroll');
+      scroll.innerHTML = html;
+      scroll.style.display = 'block';
+    }
+
+    function renderServiceCard(svc) {
+      const status = svc.tailscale_check?.status || 'unknown';
+      const detail = svc.tailscale_check?.detail || '';
+      const ct = svc.check_type || '';
+      const ms = svc.tailscale_check?.response_time_ms;
+
+      let html = `<div class="service-card">
+        <div class="service-name">${svc.name}</div>
+        <div class="service-row">
+          <span class="service-label">STATUS</span>
+          <span class="service-val ${status === 'up' ? 'ok' : 'err'}">${status.toUpperCase()}</span>
+        </div>`;
+
+      if (ms) {
+        html += `<div class="service-row">
+          <span class="service-label">LATENCY</span>
+          <span class="service-val">${ms}ms</span>
+        </div>`;
+      }
+
+      // Type-specific metrics
+      if (ct === 'comfyui') {
+        const vram = parseVRAM(detail);
+        const queue = parseQueue(detail);
+        const gpu = parseGPU(detail);
+        if (vram) {
+          const pct = Math.round(vram.used / vram.total * 100);
+          const bc = pct > 85 ? 'crit' : pct > 60 ? 'warn' : '';
+          html += `<div class="service-row">
+            <span class="service-label">VRAM</span>
+            <span class="service-val">${pct}%</span>
+          </div>
+          <div class="vram-bar-wrap"><div class="vram-bar-fill ${bc}" style="width:${pct}%"></div></div>
+          <div style="font-size: 9px; color: var(--text-dim); margin-top: 2px;">${vram.used}GB / ${vram.total}GB</div>`;
+        }
+        if (queue) {
+          const qClass = queue === 'idle' ? 'ok' : 'warn';
+          html += `<div class="service-row">
+            <span class="service-label">QUEUE</span>
+            <span class="service-val ${qClass}">${queue}</span>
+          </div>`;
+        }
+        if (gpu) {
+          html += `<div class="service-row">
+            <span class="service-label">GPU</span>
+            <span class="service-val" style="font-size: 10px;">${gpu}</span>
+          </div>`;
+        }
+      } else if (ct === 'ollama') {
+        const ol = parseOllama(detail);
+        if (ol) {
+          html += `<div class="service-row">
+            <span class="service-label">MODELS</span>
+            <span class="service-val">${ol.count}</span>
+          </div>
+          <div class="service-row">
+            <span class="service-label">ACTIVE</span>
+            <span class="service-val" style="font-size: 10px;">${ol.active}</span>
+          </div>`;
+        }
+      } else if (ct === 'plex') {
+        const pl = parsePlex(detail);
+        if (pl) {
+          html += `<div class="service-row">
+            <span class="service-label">STREAMS</span>
+            <span class="service-val">${pl.streams}</span>
+          </div>`;
+          if (pl.remote) {
+            html += `<div class="service-row">
+              <span class="service-label">REMOTE</span>
+              <span class="service-val">${pl.remote}</span>
+            </div>`;
+          }
+          if (pl.libs) {
+            html += `<div class="service-row">
+              <span class="service-label">LIBRARIES</span>
+              <span class="service-val">${pl.libs}</span>
+            </div>`;
+          }
+        }
+      } else if (ct === 'syncthing') {
+        const st = parseSyncthing(detail);
+        if (st) {
+          html += `<div class="service-row">
+            <span class="service-label">STATE</span>
+            <span class="service-val">${st.state}</span>
+          </div>`;
+          if (st.folders) {
+            html += `<div class="service-row">
+              <span class="service-label">FOLDERS</span>
+              <span class="service-val">${st.folders}</span>
+            </div>`;
+          }
+        }
+      }
+
+      html += `</div>`;
+      return html;
+    }
+
+    // Global host selector (called by LCARS schematic)
+    window.selectHostByName = function(displayName) {
+      if (!allData) return;
+      const machine = allData.machines.find(m => m.machine.display_name === displayName);
+      if (machine) {
+        selectedHost = machine;
+        renderDetail(machine);
+      }
+    };
+
+    // Init
+    fetchData();
+    setInterval(fetchData, 30000);
+  </script>
+
+</body>
+</html>

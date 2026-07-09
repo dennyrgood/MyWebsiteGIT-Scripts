@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FLEET_OPS // Directory</title>
+    <style>
+        :root {
+            --bg-color: #0a0b0d;
+            --card-bg: #14161a;
+            --accent-green: #00ff9d;
+            --text-main: #e0e0e0;
+            --text-dim: #888;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        header {
+            width: 100%;
+            max-width: 1200px;
+            margin-bottom: 50px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 20px;
+        }
+
+        h1 {
+            letter-spacing: 4px;
+            font-weight: 800;
+            margin: 0;
+            font-size: 1.5rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 30px;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            overflow: hidden;
+            text-decoration: none;
+            color: inherit;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+            border: 1px solid #222;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            border-color: var(--accent-green);
+        }
+
+        .thumb {
+            width: 100%;
+            height: 200px;
+            background-size: cover;
+            background-position: center;
+            border-bottom: 1px solid #222;
+        }
+
+        .info {
+            padding: 20px;
+        }
+
+        .info h2 {
+            margin: 0 0 10px 0;
+            font-size: 1.1rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--accent-green);
+        }
+
+        .info p {
+            margin: 0;
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            line-height: 1.4;
+        }
+
+        /* Mapping thumbnails to your files */
+        .thumb-zones { background-image: url('SCR-20260308-nokk.png'); }
+        .thumb-organic { background-image: url('SCR-20260308-nnyx.png'); }
+        .thumb-organic-l { background-image: url('SCR-20260308-ntns.png'); }
+        .thumb-panel { background-image: url('SCR-20260308-nogl.png'); }
+        .thumb-mobile { background-image: url('SCR-20260308-nnuq.png'); }
+        .thumb-orig { background-image: url('SCR-20260308-nocl.png'); }
+        .thumb-ST { background-image: url('SCR-20260402-jnel.png'); }
+        .thumb-ST2 { background-image: url('SCR-20260404-byqk.png'); }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>FLEET_OPS <span style="color: var(--accent-green);">//</span> SYSTEM_PORTAL</h1>
+    </header>
+
+    <div class="grid">
+        <a href="zones/index.html" class="card">
+            <div class="thumb thumb-zones"></div>
+            <div class="info">
+                <h2>Zones</h2>
+                <p>Orbital node visualization. High-level geographical and latency-based fleet distribution.</p>
+            </div>
+        </a>
+
+        <a href="organic/index.html" class="card">
+            <div class="thumb thumb-organic"></div>
+            <div class="info">
+                <h2>Organic</h2>
+                <p>Dynamic graph-based topology. View interconnected service mesh and health Hubs.</p>
+            </div>
+        </a>
+
+
+        <a href="organic/index_by_latency.html" class="card">
+            <div class="thumb thumb-organic-l"></div>
+            <div class="info">
+                <h2>Organic by Latency</h2>
+                <p>Dynamic graph-based topology. View interconnected service mesh and health Hubs.</p>
+            </div>
+        </a>
+
+        <a href="panel/index.html" class="card">
+            <div class="thumb thumb-panel"></div>
+            <div class="info">
+                <h2>Panel</h2>
+                <p>Comprehensive service dashboard. Detailed GPU metrics, VRAM usage, and endpoint health.</p>
+            </div>
+        </a>
+
+        <a href="mobile/index.html" class="card">
+            <div class="thumb thumb-mobile"></div>
+            <div class="info">
+                <h2>Mobile</h2>
+                <p>Optimized vertical stack for handheld monitoring and quick status checks.</p>
+            </div>
+        </a>
+
+        <a href="orig/index.html" class="card">
+            <div class="thumb thumb-orig"></div>
+            <div class="info">
+                <h2>Original</h2>
+                <p>The legacy baseline view. Clean, card-based interface for core service monitoring.</p>
+            </div>
+        </a>
+
+        <a href="ST/index.html" class="card">
+            <div class="thumb thumb-ST"></div>
+            <div class="info">
+                <h2>Star Trek</h2>
+                <p>Star Trek based interface for core service monitoring.</p>
+            </div>
+        </a>
+        <a href="ST/index_LCARS.html" class="card">
+            <div class="thumb thumb-ST2"></div>
+            <div class="info">
+                <h2>Star Trek - LCARS</h2>
+                <p>Star Trek based LCARS interface for core service monitoring.</p>
+            </div>
+        </a>
+    </div> 
+    </div> 
+    
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const params = new URLSearchParams(window.location.search);
+        
+        // Check if bkp is present in the current URL
+        if (params.has('bkp')) {
+            const links = document.querySelectorAll('.grid a.card');
+            
+            links.forEach(link => {
+                const originalHref = link.getAttribute('href');
+                
+                // Manually append ?bkp to the end of the href
+                // This avoids the automatic "=" added by the URLSearchParams object
+                link.href = originalHref + '?bkp';
+            });
+
+            // Visual confirmation: Change header slashes to orange
+            const accent = document.querySelector('h1 span');
+            if (accent) accent.style.color = '#ff9100';
+            
+            console.log("Routing configured for Backup API (Clean URL).");
+        }
+    });
+</script>
+
+
+</body>
+</html>

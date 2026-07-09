@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fleet Status Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        .status-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+        body { font-family: 'JetBrains Mono', monospace; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .text-glow-green { text-shadow: 0 0 12px rgba(16, 185, 129, 0.6); }
+        /* Prevent extra scrolling */
+        html, body { height: 100%; margin: 0; padding: 0; overflow-x: hidden; }
+    </style>
+</head>
+<body class="bg-[#05070a] text-slate-200 p-6 md:p-10 selection:bg-emerald-500/30">
+
+    <div class="max-w-[1900px] mx-auto pb-0">
+        <!-- Main Functional Header -->
+        <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-12 gap-8 border-b border-white/10 pb-10">
+            <div>
+                <h1 class="text-5xl font-black tracking-tighter text-white flex items-center gap-3">
+                    FLEET_OPS <span class="text-emerald-500 animate-pulse text-glow-green">_</span>
+                </h1>
+                <div id="sub-header" class="text-xs text-slate-500 mt-4 tracking-[0.4em] uppercase flex items-center gap-4">
+                    <span id="source-node">SOURCE_PENDING</span> 
+                    <span class="text-slate-800">/</span> 
+                    <span id="sync-time">SYNC_PENDING</span>
+                </div>
+            </div>
+
+            <!-- Summary Stats -->
+            <div id="summary-container" class="flex gap-5 overflow-x-auto no-scrollbar">
+                <!-- Injected via JS -->
+            </div>
+
+            <div id="global-status" class="px-6 py-3 rounded-xl bg-slate-900/50 border border-white/10 flex items-center gap-4 shadow-xl">
+                <div class="w-3 h-3 rounded-full bg-slate-700"></div>
+                <span class="text-xs font-bold tracking-[0.2em] text-slate-500 uppercase font-mono">Awaiting Data</span>
+            </div>
+        </header>
+
+        <!-- Machine Grid -->
+        <main id="machine-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6 items-start">
+            <!-- Injected via JS -->
+        </main>
+        
+        <!-- Redundant Footer Sections Removed -->
+    </div>
+
+    <script>
+        //const API_BASE = "https://fleet.ldmathes.cc";
+// Update this URL to your live endpoint or local JSON file
+//const API_URL = 'https://fleet.ldmathes.cc/api/status';
+        const params = new URLSearchParams(window.location.search);
+        const API_BASE = params.has('bkp')
+         ? 'https://fleet-bkp.ldmathes.cc'
+         : 'https://fleet.ldmathes.cc';
+
+        async function updateDashboard() {
+            try {
+                const response = await fetch(`${API_BASE}/api/status`, { mode: 'cors' });
+                if (!response.ok) throw new Error('OFFLINE');
+                const data = await response.json();
+                
+                renderSummary(data.summary);
+                renderGrid(data.machines);
+                renderHeader(data.meta);
+            } catch (err) {
+                console.error("Fetch Error:", err);
+                document.getElementById('global-status').innerHTML = `<div class="w-3 h-3 rounded-full bg-red-500 status-pulse"></div> <span class="text-red-500 text-xs font-bold tracking-widest uppercase">Link_Lost</span>`;
+            }
+        }
+
+        function renderSummary(s) {
+            const container = document.getElementById('summary-container');
+            const stats = [
+                { label: 'HOSTS', val: `${s.machines_up}/${s.machines_total}`, color: 'emerald' },
+                { label: 'SERVICES', val: `${s.services_up}/${s.services_total}`, color: 'blue' },
+                { label: 'PUBLIC', val: `${s.public_endpoints_up}/${s.public_endpoints_total}`, color: 'purple' }
+            ];
+            container.innerHTML = stats.map(st => `
+                <div class="bg-slate-900/40 border border-white/10 p-4 rounded-xl min-w-[140px] shadow-lg">
+                    <div class="text-[10px] font-bold text-slate-500 tracking-[0.2em] mb-2 uppercase opacity-60">${st.label}</div>
+                    <div class="text-2xl font-black text-${st.color}-400 tabular-nums">${st.val}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderGrid(machines) {
+            const grid = document.getElementById('machine-grid');
+            grid.innerHTML = machines.map(m => {
+                const isUp = m.host.status === 'up';
+                return `
+                <div class="bg-slate-900/10 border-2 ${isUp ? 'border-white/5' : 'border-red-900/40'} rounded-2xl p-8 hover:bg-slate-900/30 transition-all group shadow-2xl">
+                    <div class="flex justify-between items-start mb-8">
+                        <div class="max-w-[75%]">
+                            <h2 class="text-2xl font-black tracking-tight leading-none text-white group-hover:text-emerald-400 transition-colors truncate">${m.machine.display_name.toUpperCase()}</h2>
+                            <p class="text-[11px] text-slate-500 mt-3 uppercase tracking-[0.2em] font-bold opacity-80">${m.machine.primary_role}</p>
+                        </div>
+                        <div class="flex items-center gap-3 bg-black/60 px-3 py-1.5 rounded-lg border border-white/10">
+                            <span class="text-xs font-bold text-slate-500 tabular-nums">${m.host.response_time_ms || 0}ms</span>
+                            <div class="w-3 h-3 rounded-full ${isUp ? 'bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.7)]' : 'bg-red-500 status-pulse'}"></div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-6">
+                        ${m.services.map(s => {
+                            const svcUp = (s.public_check?.status === 'up') || (s.tailscale_check?.status === 'up');
+                            const detail = s.tailscale_check?.detail || s.public_check?.detail || "";
+                            return `
+                            <div class="border-l-4 ${svcUp ? 'border-emerald-500/30' : 'border-red-500/30'} pl-4 py-1">
+                                <div class="flex justify-between items-center mb-1">
+                                    <div class="flex items-center gap-3">
+                                        <span class="text-[10px] px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded font-black uppercase tracking-tighter">${s.priority}</span>
+                                        <span class="text-[14px] text-slate-200 font-bold tracking-tight">${s.name}</span>
+                                    </div>
+                                    <span class="text-xs font-black tracking-tighter ${svcUp ? 'text-emerald-400' : 'text-red-400'}">${svcUp ? 'OK' : 'ERR'}</span>
+                                </div>
+                                ${detail ? `<p class="text-[11px] text-slate-500/90 leading-relaxed uppercase font-medium italic group-hover:text-slate-400 transition-opacity">${detail.replace(' — service alive', '')}</p>` : ''}
+                            </div>
+                            `;
+                        }).join('')}
+                    </div>
+
+                    <div class="mt-10 pt-6 border-t border-white/5 flex justify-between items-center opacity-30 group-hover:opacity-100 transition-all duration-500">
+                        <span class="text-[11px] font-mono tabular-nums tracking-wider">${m.machine.tailscale_ip}</span>
+                        <span class="text-[11px] font-mono tracking-tighter">${m.machine.tailscale_name}</span>
+                    </div>
+                </div>
+                `;
+            }).join('');
+        }
+
+        function renderHeader(meta) {
+            let host = meta.checker_host || 'unknown';
+            if(host.toLowerCase().includes('amsterdam')) host = 'AMSTERDAM';
+            
+            document.getElementById('source-node').innerText = `SOURCE: ${host.toUpperCase()}`;
+            document.getElementById('sync-time').innerText = `T: ${new Date(meta.timestamp_utc).toLocaleTimeString([], { hour12: false })}`;
+            document.getElementById('global-status').innerHTML = `<div class="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.8)]"></div> <span class="text-emerald-500 text-xs font-black tracking-[0.25em] uppercase">Operational</span>`;
+        }
+
+        updateDashboard();
+        setInterval(updateDashboard, 30000);
+    </script>
+</body>
+</html>

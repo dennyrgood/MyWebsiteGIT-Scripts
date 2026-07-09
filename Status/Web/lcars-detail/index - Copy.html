@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FLEET_OPS // LCARS TACTICAL</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --lcars-bg: #0a0e20;
+      --lcars-blue: #5588ff;
+      --lcars-purple: #8844ff;
+      --lcars-orange: #ff9944;
+      --lcars-yellow: #ffff00;
+      --lcars-green: #00ff88;
+      --lcars-red: #ff3366;
+      --lcars-teal: #00ffff;
+      --text-main: #000;
+      --text-dim: #444;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--lcars-bg);
+      font-family: 'Orbitron', monospace;
+      min-height: 100vh;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* ── LEFT SIDEBAR ──────────────────────────────── */
+    #left-panel {
+      width: 500px;
+      background: linear-gradient(90deg, var(--lcars-blue) 0%, var(--lcars-purple) 100%);
+      border-right: 4px solid var(--lcars-orange);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #header-top {
+      background: var(--lcars-blue);
+      padding: 16px 24px;
+      border-bottom: 3px solid var(--lcars-orange);
+      color: var(--text-main);
+    }
+
+    #title {
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      margin-bottom: 8px;
+    }
+
+    #summary-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .stat-box {
+      background: rgba(0,0,0,0.2);
+      border: 2px solid var(--text-main);
+      padding: 6px 8px;
+      text-align: center;
+      color: var(--text-main);
+      font-size: 12px;
+    }
+
+    .stat-box .val {
+      font-size: 16px;
+      font-weight: 900;
+      display: block;
+    }
+
+    #host-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .host-btn {
+      background: rgba(0,0,0,0.3);
+      border: 3px solid var(--text-main);
+      padding: 12px 16px;
+      color: var(--text-main);
+      font-family: 'Orbitron', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-align: left;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      letter-spacing: 1px;
+    }
+
+    .host-btn:hover {
+      background: rgba(0,0,0,0.5);
+      transform: translateX(4px);
+    }
+
+    .host-btn.active {
+      background: var(--lcars-orange);
+      color: #000;
+      border-color: #000;
+    }
+
+    .host-status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--lcars-green);
+      flex-shrink: 0;
+    }
+
+    .host-status-dot.down { background: var(--lcars-red); }
+    .host-status-dot.warn { background: var(--lcars-yellow); }
+
+    #footer-left {
+      background: var(--lcars-blue);
+      border-top: 3px solid var(--lcars-orange);
+      padding: 12px 24px;
+      color: var(--text-main);
+      font-size: 11px;
+      text-align: center;
+    }
+
+    /* ── RIGHT DETAIL PANEL ────────────────────────── */
+    #right-panel {
+      flex: 1;
+      background: var(--lcars-bg);
+      padding: 24px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    #detail-header {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    .detail-section-title {
+      color: var(--lcars-orange);
+      font-size: 14px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      border-bottom: 2px solid var(--lcars-orange);
+      padding-bottom: 4px;
+    }
+
+    /* detail boxes */
+    .detail-box {
+      background: linear-gradient(135deg, rgba(85,136,255,0.1), rgba(136,68,255,0.1));
+      border: 2px solid var(--lcars-blue);
+      border-radius: 4px;
+      padding: 14px;
+      color: var(--lcars-teal);
+    }
+
+    .detail-box.orange {
+      background: linear-gradient(135deg, rgba(255,153,68,0.1), rgba(255,153,68,0.05));
+      border-color: var(--lcars-orange);
+      color: var(--lcars-orange);
+    }
+
+    .detail-box.green {
+      background: linear-gradient(135deg, rgba(0,255,136,0.1), rgba(0,255,136,0.05));
+      border-color: var(--lcars-green);
+      color: var(--lcars-green);
+    }
+
+    .detail-box.red {
+      background: linear-gradient(135deg, rgba(255,51,102,0.1), rgba(255,51,102,0.05));
+      border-color: var(--lcars-red);
+      color: var(--lcars-red);
+    }
+
+    .box-label {
+      font-size: 9px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      opacity: 0.8;
+      margin-bottom: 4px;
+    }
+
+    .box-value {
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: 1px;
+    }
+
+    .box-unit {
+      font-size: 11px;
+      opacity: 0.7;
+      margin-left: 4px;
+    }
+
+    /* metrics grid */
+    #metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+
+    .metric-card {
+      background: rgba(85,136,255,0.08);
+      border: 2px solid var(--lcars-blue);
+      border-radius: 4px;
+      padding: 12px;
+      color: var(--lcars-teal);
+    }
+
+    .metric-card.service {
+      border-color: var(--lcars-purple);
+      background: rgba(136,68,255,0.08);
+      color: var(--lcars-purple);
+    }
+
+    .metric-name {
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      border-bottom: 1px solid currentColor;
+      padding-bottom: 4px;
+    }
+
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+
+    .metric-label {
+      opacity: 0.7;
+      font-size: 10px;
+    }
+
+    .metric-val {
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    /* VRAM bar */
+    .vram-container {
+      margin: 8px 0;
+    }
+
+    .vram-bar {
+      height: 8px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid currentColor;
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+
+    .vram-fill {
+      height: 100%;
+      background: var(--lcars-green);
+      transition: width 0.3s;
+    }
+
+    .vram-fill.warn { background: var(--lcars-yellow); }
+    .vram-fill.crit { background: var(--lcars-red); }
+
+    .vram-pct {
+      font-size: 10px;
+      margin-top: 2px;
+      opacity: 0.8;
+    }
+
+    /* no selection state */
+    #no-selection {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 400px;
+      color: var(--lcars-orange);
+      font-size: 16px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    #no-selection.hidden { display: none; }
+
+    /* scrollbar styling */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: rgba(0,0,0,0.2);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--lcars-orange);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--lcars-yellow);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- LEFT SIDEBAR -->
+  <div id="left-panel">
+    <div id="header-top">
+      <div id="title">FLEET.TACTICAL.DATA</div>
+      <div id="summary-stats">
+        <div class="stat-box">
+          <span class="val" id="s-hosts">–</span>
+          <span>HOSTS</span>
+        </div>
+        <div class="stat-box">
+          <span class="val" id="s-svc">–</span>
+          <span>SVC</span>
+        </div>
+        <div class="stat-box">
+          <span class="val" id="s-pub">–</span>
+          <span>PUB</span>
+        </div>
+        <div class="stat-box">
+          <span class="val" id="s-time">–</span>
+          <span>T</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="host-list">
+      <!-- populated by JS -->
+    </div>
+
+    <div id="footer-left">
+      <span>FLEET_OPS · LCARS TACTICAL</span>
+    </div>
+  </div>
+
+  <!-- RIGHT DETAIL PANEL -->
+  <div id="right-panel">
+    <div id="no-selection">SELECT A HOST TO VIEW TACTICAL DATA</div>
+    <div id="detail-content" style="display: none;">
+      <!-- populated by JS -->
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'https://fleet.ldmathes.cc/api/status';
+    let allData = null;
+    let selectedHost = null;
+
+    async function fetchData() {
+      try {
+        const res = await fetch(API_URL);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        allData = await res.json();
+        renderHostList();
+        updateSummary();
+      } catch (err) {
+        console.error('Fetch error:', err);
+      }
+    }
+
+    function updateSummary() {
+      if (!allData) return;
+      const s = allData.summary;
+      document.getElementById('s-hosts').textContent = `${s.machines_up}/${s.machines_total}`;
+      document.getElementById('s-svc').textContent = `${s.services_up}/${s.services_total}`;
+      document.getElementById('s-pub').textContent = `${s.public_endpoints_up}/${s.public_endpoints_total}`;
+      const ts = new Date(allData.meta.timestamp_utc);
+      document.getElementById('s-time').textContent = ts.toLocaleTimeString();
+    }
+
+    function getHostStatus(machine) {
+      const hostDown = machine.host?.status !== 'up';
+      if (hostDown) return 'down';
+      const anyDown = (machine.services || []).some(s => 
+        s.priority === 'P' && s.tailscale_check?.status !== 'up'
+      );
+      return anyDown ? 'down' : (anyDown ? 'warn' : 'up');
+    }
+
+    function renderHostList() {
+      if (!allData) return;
+      const list = document.getElementById('host-list');
+      list.innerHTML = '';
+      const machines = [...(allData.machines || [])].sort((a, b) =>
+        a.machine.display_name.localeCompare(b.machine.display_name)
+      );
+
+      for (const machine of machines) {
+        const status = getHostStatus(machine);
+        const btn = document.createElement('button');
+        btn.className = 'host-btn';
+        btn.innerHTML = `
+          <span>${machine.machine.display_name}</span>
+          <span class="host-status-dot ${status}"></span>
+        `;
+        btn.addEventListener('click', () => selectHost(machine));
+        list.appendChild(btn);
+      }
+    }
+
+    function selectHost(machine) {
+      selectedHost = machine;
+      document.querySelectorAll('.host-btn').forEach(b => b.classList.remove('active'));
+      event.target.closest('.host-btn').classList.add('active');
+      renderDetail(machine);
+    }
+
+    function parseVRAM(detail) {
+      if (!detail) return null;
+      const m = detail.match(/VRAM:\s*([\d.]+)GB\s*\/\s*([\d.]+)GB/);
+      if (!m) return null;
+      return { used: parseFloat(m[1]), total: parseFloat(m[2]) };
+    }
+
+    function parseGPU(detail) {
+      if (!detail) return null;
+      const m = detail.match(/GPU:\s*cuda:\d+\s+(.+?)\s*(?::|·|\u00b7|$)/);
+      return m ? m[1].trim() : null;
+    }
+
+    function parseQueue(detail) {
+      if (!detail) return null;
+      const m = detail.match(/Queue:\s*(.+?)(?:\s*·|\s*$)/);
+      return m ? m[1].trim() : null;
+    }
+
+    function parseOllama(detail) {
+      if (!detail) return null;
+      const m = detail.match(/(\d+)\s+models?\s+available\s*[·\u00b7]\s*(.+)/);
+      if (!m) return null;
+      return { count: parseInt(m[1]), active: m[2].trim() };
+    }
+
+    function parsePlex(detail) {
+      if (!detail) return null;
+      const streams = detail.match(/(\d+)\s+active\s+streams?/i);
+      const remote = detail.match(/Remote:\s*(\w+)/i);
+      const libs = detail.match(/(\d+)\s+libraries?/i);
+      return {
+        streams: streams ? parseInt(streams[1]) : 0,
+        remote: remote ? remote[1] : null,
+        libs: libs ? parseInt(libs[1]) : null,
+      };
+    }
+
+    function parseSyncthing(detail) {
+      if (!detail) return null;
+      const folders = detail.match(/(\d+)\s+folders?/i);
+      const state = detail.match(/^(\w+)/);
+      return {
+        state: state ? state[1] : null,
+        folders: folders ? parseInt(folders[1]) : null,
+      };
+    }
+
+    function renderDetail(machine) {
+      const hostStatus = machine.host?.status || 'unknown';
+      const ping = machine.host?.response_time_ms;
+      const ip = machine.machine.tailscale_ip;
+      const role = machine.machine.primary_role || 'UNKNOWN';
+
+      let html = `
+        <div class="detail-section-title">${machine.machine.display_name} · ${role}</div>
+
+        <div id="detail-header">
+          <div class="detail-box orange">
+            <div class="box-label">HOST STATUS</div>
+            <div class="box-value">${hostStatus.toUpperCase()}</div>
+          </div>
+          <div class="detail-box">
+            <div class="box-label">LATENCY</div>
+            <div class="box-value">${ping !== null ? ping : '–'}<span class="box-unit">ms</span></div>
+          </div>
+          <div class="detail-box">
+            <div class="box-label">TAILSCALE IP</div>
+            <div style="font-size: 14px; word-break: break-all;">${ip || '–'}</div>
+          </div>
+        </div>
+      `;
+
+      // Primary services
+      const pSvcs = (machine.services || []).filter(s => s.priority === 'P');
+      if (pSvcs.length) {
+        html += `<div class="detail-section-title">PRIMARY SERVICES</div>`;
+        html += `<div id="metrics-grid">`;
+        for (const svc of pSvcs) {
+          html += renderServiceCard(svc);
+        }
+        html += `</div>`;
+      }
+
+      // Secondary services
+      const sSvcs = (machine.services || []).filter(s => s.priority === 'S');
+      if (sSvcs.length) {
+        html += `<div class="detail-section-title">SECONDARY SERVICES</div>`;
+        html += `<div id="metrics-grid">`;
+        for (const svc of sSvcs) {
+          html += renderServiceCard(svc);
+        }
+        html += `</div>`;
+      }
+
+      document.getElementById('no-selection').classList.add('hidden');
+      const content = document.getElementById('detail-content');
+      content.innerHTML = html;
+      content.style.display = 'block';
+    }
+
+    function renderServiceCard(svc) {
+      const status = svc.tailscale_check?.status || 'unknown';
+      const detail = svc.tailscale_check?.detail || '';
+      const ct = svc.check_type || '';
+      const ms = svc.tailscale_check?.response_time_ms;
+
+      let html = `<div class="metric-card service">
+        <div class="metric-name">${svc.name}</div>
+        <div class="metric-row">
+          <span class="metric-label">STATUS</span>
+          <span class="metric-val">${status.toUpperCase()}</span>
+        </div>`;
+
+      if (ms) {
+        html += `<div class="metric-row">
+          <span class="metric-label">LATENCY</span>
+          <span class="metric-val">${ms}ms</span>
+        </div>`;
+      }
+
+      // Type-specific metrics
+      if (ct === 'comfyui') {
+        const vram = parseVRAM(detail);
+        const queue = parseQueue(detail);
+        const gpu = parseGPU(detail);
+        if (vram) {
+          const pct = Math.round(vram.used / vram.total * 100);
+          const bc = pct > 85 ? 'crit' : pct > 60 ? 'warn' : '';
+          html += `<div class="vram-container">
+            <div class="metric-row">
+              <span class="metric-label">VRAM</span>
+              <span class="metric-val">${pct}%</span>
+            </div>
+            <div class="vram-bar"><div class="vram-fill ${bc}" style="width:${pct}%"></div></div>
+            <div class="vram-pct">${vram.used}GB / ${vram.total}GB</div>
+          </div>`;
+        }
+        if (queue) {
+          html += `<div class="metric-row">
+            <span class="metric-label">QUEUE</span>
+            <span class="metric-val">${queue}</span>
+          </div>`;
+        }
+        if (gpu) {
+          html += `<div class="metric-row">
+            <span class="metric-label">GPU</span>
+            <span class="metric-val" style="font-size:11px">${gpu}</span>
+          </div>`;
+        }
+      } else if (ct === 'ollama') {
+        const ol = parseOllama(detail);
+        if (ol) {
+          html += `<div class="metric-row">
+            <span class="metric-label">MODELS</span>
+            <span class="metric-val">${ol.count}</span>
+          </div>
+          <div class="metric-row">
+            <span class="metric-label">ACTIVE</span>
+            <span class="metric-val" style="font-size:11px">${ol.active}</span>
+          </div>`;
+        }
+      } else if (ct === 'plex') {
+        const pl = parsePlex(detail);
+        if (pl) {
+          html += `<div class="metric-row">
+            <span class="metric-label">STREAMS</span>
+            <span class="metric-val">${pl.streams}</span>
+          </div>`;
+          if (pl.remote) {
+            html += `<div class="metric-row">
+              <span class="metric-label">REMOTE</span>
+              <span class="metric-val">${pl.remote}</span>
+            </div>`;
+          }
+          if (pl.libs) {
+            html += `<div class="metric-row">
+              <span class="metric-label">LIBRARIES</span>
+              <span class="metric-val">${pl.libs}</span>
+            </div>`;
+          }
+        }
+      } else if (ct === 'syncthing') {
+        const st = parseSyncthing(detail);
+        if (st) {
+          html += `<div class="metric-row">
+            <span class="metric-label">STATE</span>
+            <span class="metric-val">${st.state}</span>
+          </div>`;
+          if (st.folders) {
+            html += `<div class="metric-row">
+              <span class="metric-label">FOLDERS</span>
+              <span class="metric-val">${st.folders}</span>
+            </div>`;
+          }
+        }
+      }
+
+      html += `</div>`;
+      return html;
+    }
+
+    // Init
+    fetchData();
+    setInterval(fetchData, 30000);
+  </script>
+
+</body>
+</html>

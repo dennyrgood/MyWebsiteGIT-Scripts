@@ -1,0 +1,1389 @@
+<!DOCTYPE html>
+<!-- tiles.html — FLEET_OPS LCARS tiles view — Last updated: 2026-06-17 07:21 UTC — byline moved into title bar; disk separator line added -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FLEET_OPS // LCARS</title>
+  <link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:          #080a0f;
+      --bg2:         #0d1018;
+      --bg3:         #131820;
+
+      --up:          #00e5c8;
+      --up-dim:      rgba(0,229,200,0.10);
+      --up-border:   rgba(0,229,200,0.7);
+      --warn:        #f5a623;
+      --warn-dim:    rgba(245,166,35,0.10);
+      --warn-border: rgba(245,166,35,0.7);
+      --down:        #ff3b5c;
+      --down-dim:    rgba(255,59,92,0.10);
+      --down-border: rgba(255,59,92,0.7);
+      --unknown:     #4a5568;
+      --unknown-dim: rgba(74,85,104,0.10);
+      --unknown-border: rgba(74,85,104,0.5);
+
+      --lcars-tan:   #ffb84d;
+      --lcars-blue:  #9b9eff;
+      --lcars-pink:  #cc88ff;
+      --lcars-coral: #ff8c69;
+
+      --text:        #c8dce8;
+      --text-dim:    #3a5060;
+      --text-bright: #ffffff;
+      --mono:        'Share Tech Mono', monospace;
+      --display:     'Antonio', sans-serif;
+      --header-h:    64px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── HEADER ─────────────────────────────────────── */
+    #header {
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      border-bottom: 2px solid rgba(255,255,255,0.04);
+    }
+
+    /* row 1: left elbow | title | right elbow */
+    .hdr-row1 {
+      display: flex;
+      align-items: stretch;
+      height: 52px;
+    }
+
+    /* row 2: stats + src/time/age */
+    .hdr-row2 {
+      display: flex;
+      align-items: center;
+      min-height: 26px;
+      flex-wrap: wrap;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      padding: 0 0 0 48px;
+    }
+
+    .hdr-elbow {
+      width: 120px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .hdr-elbow-top {
+      height: 18px;
+      background: var(--lcars-tan);
+      border-radius: 18px 0 0 0;
+    }
+    .hdr-elbow-bot {
+      flex: 1;
+      width: 48px;
+      background: var(--lcars-tan);
+      border-radius: 0 0 0 14px;
+    }
+
+    .hdr-elbow-right {
+      width: 80px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+    }
+    .hdr-elbow-right-top {
+      height: 18px;
+      background: var(--lcars-blue);
+      width: 100%;
+      border-radius: 0 18px 0 0;
+    }
+    .hdr-elbow-right-bot {
+      flex: 1;
+      width: 48px;
+      background: var(--lcars-blue);
+      border-radius: 0 0 14px 0;
+    }
+
+    .hdr-title-block {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 0 20px;
+      gap: 2px;
+    }
+    .hdr-title {
+      font-family: var(--display);
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--lcars-tan);
+      letter-spacing: 4px;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+    .hdr-subtitle {
+      font-size: 10px;
+      color: var(--text-dim);
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+
+    .hdr-stats {
+      display: flex;
+      align-items: center;
+      flex: 1;
+      height: 100%;
+    }
+    .hdr-stat {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+      padding: 0 16px;
+      border-right: 1px solid rgba(255,255,255,0.06);
+      height: 100%;
+      align-items: center;
+    }
+    .hdr-stat-val {
+      font-family: var(--display);
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--up);
+      line-height: 1;
+    }
+    .hdr-stat-val.warn { color: var(--warn); }
+    .hdr-stat-val.down { color: var(--down); }
+    .hdr-stat-lbl {
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .hdr-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 10px;
+      color: var(--text-dim);
+      letter-spacing: 1px;
+      padding: 0 12px;
+      flex-shrink: 0;
+    }
+    .hdr-right .src { color: var(--lcars-blue); }
+    #sync-age { color: var(--warn); }
+    #sync-age.fresh { color: var(--up); }
+    #sync-age.stale { color: var(--down); animation: stale-pulse 1.5s ease-in-out infinite; }
+    @keyframes stale-pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    /* ── ALERT STRIP ────────────────────────────────── */
+    #alert-strip {
+      display: none;
+      background: rgba(255,59,92,0.08);
+      border-bottom: 1px solid rgba(255,59,92,0.3);
+      padding: 6px 20px;
+      font-size: 10px;
+      color: var(--down);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    #alert-strip.visible { display: flex; }
+    .alert-label {
+      font-family: var(--display);
+      font-size: 12px;
+      letter-spacing: 2px;
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+    .alert-item {
+      background: rgba(255,59,92,0.12);
+      border: 1px solid rgba(255,59,92,0.35);
+      border-radius: 3px;
+      padding: 2px 8px;
+      font-size: 10px;
+      letter-spacing: 1px;
+    }
+
+    /* ── GRID ───────────────────────────────────────── */
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+      grid-auto-rows: 1fr;
+      gap: 12px;
+      padding: 16px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    /* ── TILE — thick rounded border LCARS style ────── */
+    .tile {
+      background: var(--bg2);
+      border-radius: 10px;
+      border: 3px solid var(--unknown-border);
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s, background 0.15s;
+    }
+    .tile:hover { background: var(--bg3); }
+
+    .tile.status-up      { border-color: var(--up-border); }
+    .tile.status-down    { border-color: var(--down-border); }
+    .tile.status-warn    { border-color: var(--warn-border); }
+    .tile.status-unknown { border-color: var(--unknown-border); }
+
+    /* filled header band */
+    .tile-head {
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      min-height: 44px;
+      flex-shrink: 0;
+      gap: 8px;
+    }
+    .tile.status-up      .tile-head { background: var(--up-dim); }
+    .tile.status-down    .tile-head { background: var(--down-dim); }
+    .tile.status-warn    .tile-head { background: var(--warn-dim); }
+    .tile.status-unknown .tile-head { background: var(--unknown-dim); }
+
+    /* separator under header — matches border color */
+    .tile-head-sep {
+      height: 1px;
+      flex-shrink: 0;
+    }
+    .tile.status-up      .tile-head-sep { background: var(--up-border); opacity: 0.4; }
+    .tile.status-down    .tile-head-sep { background: var(--down-border); opacity: 0.4; }
+    .tile.status-warn    .tile-head-sep { background: var(--warn-border); opacity: 0.4; }
+    .tile.status-unknown .tile-head-sep { background: var(--unknown-border); opacity: 0.4; }
+
+    .tile-name {
+      font-family: var(--display);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+    }
+    .tile-name-label {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tile.status-up      .tile-name { color: var(--up); }
+    .tile.status-down    .tile-name { color: var(--down); }
+    .tile.status-warn    .tile-name { color: var(--warn); }
+    .tile.status-unknown .tile-name { color: var(--unknown); }
+
+    .tile-ping { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+    .tile-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%; flex-shrink: 0;
+    }
+    .tile.status-up      .tile-dot { background: var(--up); }
+    .tile.status-down    .tile-dot { background: var(--down); }
+    .tile.status-warn    .tile-dot { background: var(--warn); }
+    .tile.status-unknown .tile-dot { background: var(--unknown); }
+
+    .tile-role {
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .tile-primary {
+      padding: 4px 12px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .p-service { display: flex; flex-direction: column; gap: 2px; }
+    .p-svc-name {
+      font-size: 9px; color: var(--text-dim);
+      letter-spacing: 2px; text-transform: uppercase;
+    }
+    .p-svc-metric {
+      font-size: 11px; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .p-svc-metric .val  { color: var(--text-bright); }
+    .p-svc-metric .ok   { color: var(--up); }
+    .p-svc-metric .warn { color: var(--warn); }
+    .p-svc-metric .err  { color: var(--down); }
+
+    .vram-bar-wrap {
+      height: 8px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 3px;
+    }
+    .vram-bar-fill {
+      height: 100%; background: var(--up);
+      border-radius: 3px; transition: width 0.4s;
+    }
+    .vram-bar-fill.warn { background: var(--warn); }
+    .vram-bar-fill.crit { background: var(--down); }
+
+    .tile-secondary {
+      padding: 5px 12px 9px;
+      display: flex; flex-wrap: wrap; gap: 8px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      flex-shrink: 0;
+    }
+    .s-dot-wrap { display: flex; align-items: center; gap: 4px; }
+    .s-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--up); }
+    .s-dot.down    { background: var(--down); }
+    .s-dot.warn    { background: var(--warn); }
+    .s-dot.unknown { background: var(--unknown); }
+    .s-label { font-size: 9px; color: var(--text-dim); letter-spacing: 0.5px; }
+
+    /* spacer pushes sysinfo to bottom of tile */
+    .tile-spacer { flex: 1; }
+
+    /* ── TILE SYSINFO STRIP ─────────────────────────── */
+    .tile-sysinfo {
+      padding: 6px 12px 8px;
+      display: flex; flex-direction: column; gap: 4px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      flex-shrink: 0;
+    }
+    .si-row {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 9px; color: var(--text-dim);
+    }
+    .si-lbl {
+      letter-spacing: 1.5px; text-transform: uppercase;
+      flex-shrink: 0; width: 36px;
+    }
+    .si-val { color: var(--text); flex-shrink: 0; }
+    .si-val.warn { color: var(--warn); }
+    .si-val.crit { color: var(--down); }
+    .si-bar-wrap {
+      flex: 1; height: 5px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 2px; overflow: hidden;
+    }
+    .si-bar-fill {
+      height: 100%; border-radius: 2px;
+      background: var(--up); transition: width 0.4s;
+    }
+    .si-bar-fill.warn { background: var(--warn); }
+    .si-bar-fill.crit { background: var(--down); }
+    .si-extra { color: var(--text-dim); font-size: 9px; flex-shrink: 0; }
+
+    /* ── SPARKLINES ─────────────────────────────────── */
+    .si-spark-wrap {
+      flex: 1;
+      height: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+    .si-spark-wrap svg {
+      display: block;
+      width: 100%;
+      height: 12px;
+    }
+    /* Fallback bar shown while history loading or unavailable — sits inside spark-wrap */
+    .si-spark-wrap .si-bar-wrap {
+      position: absolute;
+      top: 3px; left: 0; right: 0;
+      height: 5px;
+    }
+
+    .si-sep { height: 1px; background: rgba(255,255,255,0.04); margin: 2px 0; }
+    .si-meta-row {
+      display: flex; flex-wrap: wrap; gap: 6px 12px;
+      font-size: 9px; color: var(--text-dim);
+    }
+    .si-meta-item { display: flex; gap: 4px; }
+    .si-meta-lbl { letter-spacing: 1px; text-transform: uppercase; }
+    .si-meta-val { color: var(--text); }
+    .si-meta-val.warn { color: var(--warn); }
+    .si-no-stats {
+      font-size: 9px; color: var(--fg-dim);
+      letter-spacing: 1px; text-transform: uppercase;
+      padding: 4px 0;
+    }
+
+    .si-stale {
+      font-size: 9px; color: var(--warn);
+      letter-spacing: 1px; text-transform: uppercase;
+      padding: 2px 0;
+    }
+
+    .si-pending {
+      font-size: 9px; color: var(--warn);
+      letter-spacing: 1px; text-transform: uppercase;
+    }
+
+    /* ── OVERLAY ────────────────────────────────────── */
+    #overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.75);
+      z-index: 200; opacity: 0; pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    #overlay.open { opacity: 1; pointer-events: all; }
+
+    /* ── MODAL ──────────────────────────────────────── */
+    #modal {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%) scale(0.96);
+      width: min(860px, 96vw);
+      max-height: 88vh;
+      background: var(--bg);
+      z-index: 201;
+      display: flex; flex-direction: column;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 3px solid var(--unknown-border);
+    }
+    #modal.open { opacity: 1; pointer-events: all; transform: translate(-50%, -50%) scale(1); }
+    #modal.status-up   { border-color: var(--up-border); }
+    #modal.status-down { border-color: var(--down-border); }
+    #modal.status-warn { border-color: var(--warn-border); }
+
+    #modal-topbar {
+      display: flex; align-items: stretch; height: 52px; flex-shrink: 0;
+    }
+    .modal-tb-pill {
+      width: 140px; flex-shrink: 0;
+      display: flex; flex-direction: column;
+    }
+    .modal-tb-pill-top {
+      flex: 1; border-radius: 7px 0 0 0;
+      transition: background 0.2s;
+    }
+    .modal-tb-pill-bot { height: 10px; background: var(--bg); }
+
+    .modal-tb-center {
+      flex: 1; display: flex; align-items: center;
+      padding: 0 20px; gap: 16px;
+      border-bottom: 3px solid var(--unknown-border);
+      transition: border-color 0.2s;
+    }
+    #modal-title {
+      font-family: var(--display);
+      font-size: 24px; font-weight: 700;
+      letter-spacing: 4px; color: var(--text-bright);
+      text-transform: uppercase;
+    }
+    #modal-status-badge {
+      font-size: 11px; letter-spacing: 2px;
+      padding: 3px 12px; border-radius: 3px;
+      text-transform: uppercase; font-weight: 700;
+    }
+    #modal-status-badge.up      { background: var(--up-dim);      color: var(--up);      border: 1px solid var(--up); }
+    #modal-status-badge.down    { background: var(--down-dim);    color: var(--down);    border: 1px solid var(--down); }
+    #modal-status-badge.warn    { background: var(--warn-dim);    color: var(--warn);    border: 1px solid var(--warn); }
+    #modal-status-badge.unknown { background: var(--unknown-dim); color: var(--unknown); border: 1px solid var(--unknown); }
+
+    #modal-role {
+      font-size: 10px; color: var(--text-dim);
+      letter-spacing: 2px; text-transform: uppercase; margin-left: auto;
+    }
+
+    .modal-tb-close-wrap {
+      width: 80px; flex-shrink: 0;
+      display: flex; flex-direction: column;
+    }
+    .modal-tb-close-top {
+      flex: 1; background: var(--down);
+      border-radius: 0 7px 0 0;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      font-family: var(--display); font-size: 13px; font-weight: 700;
+      color: #000; letter-spacing: 2px;
+      transition: opacity 0.15s;
+    }
+    .modal-tb-close-top:hover { opacity: 0.8; }
+    .modal-tb-close-bot { height: 10px; background: var(--bg); }
+
+    #modal-alert {
+      display: none;
+      background: rgba(255,59,92,0.1);
+      border-bottom: 1px solid rgba(255,59,92,0.3);
+      padding: 8px 20px;
+      font-size: 10px; color: var(--down);
+      letter-spacing: 1.5px; text-transform: uppercase;
+      flex-wrap: wrap; gap: 6px; align-items: center;
+    }
+    #modal-alert.visible { display: flex; }
+    .modal-alert-label {
+      font-family: var(--display); font-size: 13px;
+      letter-spacing: 2px; margin-right: 8px; flex-shrink: 0;
+    }
+    .modal-alert-item {
+      background: rgba(255,59,92,0.15);
+      border: 1px solid rgba(255,59,92,0.4);
+      border-radius: 3px; padding: 2px 8px;
+      font-size: 10px; letter-spacing: 1px;
+    }
+
+    #modal-body {
+      flex: 1; overflow-y: auto;
+      padding: 20px 24px 24px;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    #modal-body::-webkit-scrollbar { width: 3px; }
+    #modal-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); }
+
+    #modal-bottombar {
+      height: 14px; flex-shrink: 0;
+      display: flex; gap: 4px;
+    }
+    .mbb-seg { height: 100%; background: var(--lcars-blue); opacity: 0.5; }
+    .mbb-seg:first-child { width: 140px; background: var(--lcars-tan); opacity: 0.7; }
+    .mbb-seg:last-child  { flex: 1; }
+
+    .m-section-title {
+      font-size: 9px; color: var(--lcars-tan);
+      letter-spacing: 3px; text-transform: uppercase;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(255,184,77,0.2);
+      margin-bottom: 10px;
+    }
+    .m-info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 8px;
+    }
+    .m-info-cell {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 4px; padding: 8px 10px;
+    }
+    .m-info-lbl {
+      font-size: 9px; color: var(--text-dim);
+      letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px;
+    }
+    .m-info-val { font-size: 12px; color: var(--text-bright); word-break: break-all; }
+    .m-info-val.up   { color: var(--up); }
+    .m-info-val.down { color: var(--down); }
+    .m-info-val.warn { color: var(--warn); }
+
+    .m-svc-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 8px;
+    }
+    .m-svc-card {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 4px; padding: 10px 12px;
+      border-left: 3px solid var(--unknown);
+    }
+    .m-svc-card.up      { border-left-color: var(--up); }
+    .m-svc-card.down    { border-left-color: var(--down); }
+    .m-svc-card.warn    { border-left-color: var(--warn); }
+
+    .m-svc-head {
+      display: flex; justify-content: space-between;
+      align-items: center; margin-bottom: 8px;
+    }
+    .m-svc-name {
+      font-family: var(--display); font-size: 13px;
+      letter-spacing: 1.5px; color: var(--text-bright); text-transform: uppercase;
+    }
+    .m-svc-badge { font-size: 9px; padding: 1px 6px; border-radius: 2px; letter-spacing: 1px; }
+    .m-svc-badge.P { background: rgba(155,158,255,0.15); color: var(--lcars-blue); border: 1px solid rgba(155,158,255,0.3); }
+    .m-svc-badge.S { background: rgba(255,255,255,0.04); color: var(--text-dim); border: 1px solid rgba(255,255,255,0.07); }
+
+    .m-svc-row {
+      display: flex; justify-content: space-between;
+      font-size: 10px; margin-bottom: 3px; gap: 8px;
+    }
+    .m-svc-row .lbl { color: var(--text-dim); flex-shrink: 0; letter-spacing: 1px; }
+    .m-svc-row .val { color: var(--text-bright); text-align: right; word-break: break-all; }
+    .m-svc-row .val.up   { color: var(--up); }
+    .m-svc-row .val.down { color: var(--down); }
+    .m-svc-row .val.warn { color: var(--warn); }
+
+    .m-vram-wrap {
+      height: 8px; background: rgba(255,255,255,0.05);
+      border-radius: 3px; overflow: hidden; margin: 4px 0 2px;
+    }
+    .m-vram-fill { height: 100%; background: var(--up); border-radius: 3px; }
+    .m-vram-fill.warn { background: var(--warn); }
+    .m-vram-fill.crit { background: var(--down); }
+
+    .m-raw-toggle {
+      font-family: var(--mono); font-size: 10px; color: var(--text-dim);
+      cursor: pointer; padding: 6px 0 4px; display: block;
+      letter-spacing: 1px; border: none; background: none;
+      text-align: left; width: 100%;
+    }
+    .m-raw-toggle:hover { color: var(--lcars-tan); }
+    .m-raw-pre {
+      font-family: var(--mono); font-size: 9px; color: #3a5060;
+      background: rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.04);
+      border-radius: 3px; padding: 10px;
+      overflow-x: auto; white-space: pre;
+      display: none; margin-top: 4px; line-height: 1.7;
+    }
+    .m-raw-pre.open { display: block; }
+
+    #footer {
+      text-align: center; padding: 10px;
+      font-size: 9px; color: var(--text-dim);
+      letter-spacing: 2px;
+      border-top: 1px solid rgba(255,255,255,0.03);
+    }
+    #footer a { color: var(--lcars-blue); text-decoration: none; margin-left: 16px; }
+    #footer a:hover { color: var(--lcars-tan); }
+
+    #loading {
+      display: flex; align-items: center; justify-content: center;
+      height: 300px; font-size: 12px; color: var(--text-dim);
+      letter-spacing: 3px; text-transform: uppercase;
+    }
+    #loading::after { content: '█'; margin-left: 4px; animation: blink 1s infinite; color: var(--up); }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    #error-msg {
+      display: none; text-align: center; padding: 40px;
+      font-size: 11px; color: var(--down); letter-spacing: 1px;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="header">
+    <div class="hdr-row1">
+      <div class="hdr-elbow">
+        <div class="hdr-elbow-top"></div>
+        <div class="hdr-elbow-bot"></div>
+      </div>
+      <div class="hdr-title-block">
+        <div class="hdr-title">FLEET_OPS</div>
+        <div class="hdr-subtitle">LCARS INTERFACE</div>
+      </div>
+      <div class="hdr-elbow-right">
+        <div class="hdr-elbow-right-top"></div>
+        <div class="hdr-elbow-right-bot"></div>
+      </div>
+    </div>
+    <div class="hdr-row2">
+      <div class="hdr-stats">
+        <div class="hdr-stat"><div class="hdr-stat-val" id="h-hosts">–/–</div><div class="hdr-stat-lbl">HOSTS</div></div>
+        <div class="hdr-stat"><div class="hdr-stat-val" id="h-svc">–/–</div><div class="hdr-stat-lbl">SERVICES</div></div>
+        <div class="hdr-stat"><div class="hdr-stat-val" id="h-pub">–/–</div><div class="hdr-stat-lbl">PUBLIC</div></div>
+      </div>
+      <div class="hdr-right">
+        <span>SRC: <span class="src" id="h-src">–</span></span>
+        <span>T: <span id="h-time">–</span></span>
+        <span id="sync-age">–</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="alert-strip">
+    <span class="alert-label">⚠ SYSTEM ALERT</span>
+  </div>
+
+  <div id="grid">
+    <div id="loading">INITIALIZING LCARS</div>
+  </div>
+  <div id="error-msg"></div>
+
+  <div id="footer">
+    FLEET_OPS // LCARS INTERFACE
+    <span style="color:var(--text-dim);margin-left:16px;font-size:9px">v2026-06-17 07:21 UTC</span>
+    <a id="altFeedLink" href="#">BACKUP FEED</a>
+  </div>
+
+  <div id="overlay"></div>
+
+  <div id="modal">
+    <div id="modal-topbar">
+      <div class="modal-tb-pill">
+        <div class="modal-tb-pill-top"></div>
+        <div class="modal-tb-pill-bot"></div>
+      </div>
+      <div class="modal-tb-center">
+        <div id="modal-title">–</div>
+        <div id="modal-status-badge" class="unknown">UNKNOWN</div>
+        <div id="modal-role"></div>
+      </div>
+      <div class="modal-tb-close-wrap">
+        <div class="modal-tb-close-top" id="modal-close">CLOSE</div>
+        <div class="modal-tb-close-bot"></div>
+      </div>
+    </div>
+    <div id="modal-alert">
+      <span class="modal-alert-label">⚠ ALERT</span>
+    </div>
+    <div id="modal-body"></div>
+    <div id="modal-bottombar">
+      <div class="mbb-seg"></div>
+      <div class="mbb-seg" style="width:40px;background:var(--lcars-pink)"></div>
+      <div class="mbb-seg" style="width:60px;background:var(--lcars-coral)"></div>
+      <div class="mbb-seg"></div>
+    </div>
+  </div>
+
+  <script>
+    const WARN_MS  = 3500;
+    const STALE_MS = 3 * 60 * 1000;
+    const params   = new URLSearchParams(window.location.search);
+    const isBkp    = params.has('bkp');
+    const API_URL  = isBkp
+      ? 'https://fleet-bkp.ldmathes.cc/api/status'
+      : 'https://fleet.ldmathes.cc/api/status';
+
+    document.getElementById('altFeedLink').href = isBkp
+      ? 'https://fleet.ldmathes.cc/ST/tiles.html'
+      : 'https://fleet-bkp.ldmathes.cc/ST/tiles.html?bkp';
+
+    let lastData = null, lastTimestamp = null, ageTimer = null;
+
+    // ── PARSERS ──────────────────────────────────────
+    function parseVRAM(d) {
+      if (!d) return null;
+      const m = d.match(/VRAM:\s*([\d.]+)GB\s*\/\s*([\d.]+)GB/);
+      return m ? { used: parseFloat(m[1]), total: parseFloat(m[2]) } : null;
+    }
+    function parseGPU(d) {
+      if (!d) return null;
+      const m = d.match(/GPU:\s*cuda:\d+\s+(.+?)\s*(?::|·|\u00b7|$)/);
+      return m ? m[1].trim() : null;
+    }
+    function parseQueue(d) {
+      if (!d) return null;
+      const m = d.match(/Queue:\s*(.+?)(?:\s*·|\s*$)/);
+      return m ? m[1].trim() : null;
+    }
+    function parseOllama(d) {
+      if (!d) return null;
+      const m = d.match(/(\d+)\s+models?\s+available\s*[·\u00b7]\s*(.+)/);
+      return m ? { count: parseInt(m[1]), active: m[2].trim() } : null;
+    }
+    function parsePlex(d) {
+      if (!d) return null;
+      const streams = d.match(/(\d+)\s+active\s+streams?/i);
+      const remote  = d.match(/Remote:\s*(\w+)/i);
+      const libs    = d.match(/(\d+)\s+libraries?/i);
+      return { streams: streams ? parseInt(streams[1]) : 0, remote: remote ? remote[1] : null, libs: libs ? parseInt(libs[1]) : null };
+    }
+    function parseSyncthing(d) {
+      if (!d) return null;
+      const folders = d.match(/(\d+)\s+folders?/i);
+      const state   = d.match(/^(\w+)/);
+      return { state: state ? state[1] : null, folders: folders ? parseInt(folders[1]) : null };
+    }
+    function parseHeartbeat(d) {
+      if (!d) return null;
+      const m = d.match(/(\d+)\s+sec\s+old/);
+      return m ? parseInt(m[1]) : null;
+    }
+
+    // ── STATUS ───────────────────────────────────────
+    function hostStatus(machine) {
+      if (machine.host?.status !== 'up') return 'down';
+      const anyDown = (machine.services || []).some(s =>
+        s.priority === 'P' && s.tailscale_check?.status !== 'up'
+      );
+      return anyDown ? 'down' : 'up';
+    }
+    function svcStatus(svc) { return svc.tailscale_check?.status || 'unknown'; }
+
+    // ── TILE PRIMARY METRIC ──────────────────────────
+    function renderPrimaryMetric(svc) {
+      const status = svcStatus(svc);
+      const ct     = svc.check_type || '';
+      const detail = svc.tailscale_check?.detail || '';
+      let html = '';
+
+      if (svc.name === 'ComfyUI' || ct === 'comfyui') {
+        const vram = parseVRAM(detail), queue = parseQueue(detail);
+        if (vram) {
+          const pct = Math.round(vram.used / vram.total * 100);
+          const bc  = pct > 85 ? 'crit' : pct > 60 ? 'warn' : '';
+          html += `<div class="p-svc-metric"><span class="val">${vram.used}/${vram.total}GB</span><span style="color:var(--text-dim)"> VRAM</span></div>
+            <div class="vram-bar-wrap"><div class="vram-bar-fill ${bc}" style="width:${pct}%"></div></div>`;
+        }
+        if (queue) html += `<div class="p-svc-metric"><span class="${queue==='idle'?'ok':'warn'}">${queue.toUpperCase()}</span></div>`;
+
+      } else if (svc.name === 'Ollama' || ct === 'ollama') {
+        const ol = parseOllama(detail);
+        if (ol) html += `<div class="p-svc-metric"><span class="val">${ol.count}</span><span style="color:var(--text-dim)"> models</span></div>
+          <div class="p-svc-metric"><span class="${ol.active==='none active'?'ok':'warn'}">${ol.active}</span></div>`;
+
+      } else if (svc.name === 'Plex' || ct === 'plex') {
+        const pl = parsePlex(detail);
+        if (pl) {
+          html += `<div class="p-svc-metric"><span class="${pl.streams>0?'warn':'ok'} val">${pl.streams}</span><span style="color:var(--text-dim)"> streams</span>${pl.remote?`<span style="color:var(--text-dim)"> · </span><span class="ok">${pl.remote}</span>`:''}</div>`;
+          if (pl.libs !== null) html += `<div class="p-svc-metric"><span style="color:var(--text-dim)">${pl.libs} libraries</span></div>`;
+        }
+
+      } else if (ct === 'openwebui') {
+        const ms = svc.tailscale_check?.response_time_ms;
+        html += `<div class="p-svc-metric"><span class="${status==='up'?'ok':'err'}">${status.toUpperCase()}</span>${ms?`<span style="color:var(--text-dim)"> · ${ms}ms</span>`:''}</div>`;
+
+      } else if (ct === 'flask') {
+        const ms = svc.tailscale_check?.response_time_ms;
+        html += `<div class="p-svc-metric"><span class="${status==='up'?'ok':'err'}">${detail||status.toUpperCase()}</span>${ms?`<span style="color:var(--text-dim)"> · ${ms}ms</span>`:''}</div>`;
+
+      } else {
+        const age = parseHeartbeat(detail);
+        if (age !== null) {
+          const ac = age > 180 ? 'err' : age > 90 ? 'warn' : 'ok';
+          html += `<div class="p-svc-metric"><span class="${ac}">${age}s AGO</span></div>`;
+        } else {
+          html += `<div class="p-svc-metric"><span class="${status==='up'?'ok':'err'}">${status.toUpperCase()}</span></div>`;
+        }
+      }
+      return html;
+    }
+
+    // ── HISTORY CACHE ────────────────────────────────
+    // Keyed by tailscale_name. Each entry: array of {ts,ram_pct,cpu_pct,vram_pct,gpu_pct}
+    const historyCache = {};
+
+    // ── SPARKLINE BUILDER ────────────────────────────
+    // Returns an inline SVG polyline string (width=100%, height=12px, viewBox auto-fit).
+    // values: array of numbers (nulls skipped). color: CSS color string.
+    function buildSparklineSVG(values, color) {
+      const pts = values.filter(v => v !== null && v !== undefined);
+      if (pts.length < 2) return null;
+
+      const W = 200, H = 12;   // internal viewBox units; scales to container width
+      const min = 0, max = 100; // metrics are always percentages
+      const xStep = W / (pts.length - 1);
+
+      const points = pts.map((v, i) => {
+        const x = Math.round(i * xStep);
+        const y = Math.round(H - ((v - min) / (max - min)) * H);
+        return `${x},${Math.max(0, Math.min(H, y))}`;
+      }).join(' ');
+
+      return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">` +
+        `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>` +
+        `</svg>`;
+    }
+
+    // Resolve the CSS color for a metric class (up/warn/crit)
+    function metricColor(cls) {
+      if (cls === 'crit') return 'var(--down)';
+      if (cls === 'warn') return 'var(--warn)';
+      return 'var(--up)';
+    }
+
+    // ── APPLY SPARKLINES TO A RENDERED TILE ──────────
+    // Called after history fetch completes. Updates .si-spark-wrap elements in-place.
+    function applySparklines(host, entries) {
+      const tile = document.querySelector(`.tile[data-host="${host}"]`);
+      if (!tile) return;
+
+      const ramVals  = entries.map(e => e.ram_pct);
+      const cpuVals  = entries.map(e => e.cpu_pct);
+      const vramVals = entries.map(e => e.vram_pct);
+      const gpuVals  = entries.map(e => e.gpu_pct);
+
+      function injectSpark(metric, values) {
+        const wrap = tile.querySelector(`.si-spark-wrap[data-metric="${metric}"]`);
+        if (!wrap) return false;
+        const cls = wrap.dataset.cls || '';
+        const svg = buildSparklineSVG(values, metricColor(cls));
+        if (svg) {
+          wrap.innerHTML = svg;
+          return true;
+        }
+        return false;
+      }
+
+      injectSpark('ram',  ramVals);
+      injectSpark('cpu',  cpuVals);
+
+      // VRAM — only show row if at least one non-null value exists
+      const vramNonNull = vramVals.filter(v => v !== null && v !== undefined);
+      if (vramNonNull.length >= 2) {
+        const lastVram = vramNonNull[vramNonNull.length - 1];
+        const vramCls  = lastVram > 85 ? 'crit' : lastVram > 60 ? 'warn' : '';
+        const vramRow  = tile.querySelector('[data-sparkrow="vram"]');
+        const vramWrap = tile.querySelector('.si-spark-wrap[data-metric="vram"]');
+        if (vramWrap) vramWrap.dataset.cls = vramCls;
+        if (vramRow)  vramRow.style.display = '';
+        // Update current-value label
+        const vramValEl = tile.querySelector('[data-metric="vram-val"]');
+        const vramPctEl = tile.querySelector('[data-metric="vram-pct"]');
+        if (vramValEl) { vramValEl.textContent = lastVram + '%'; vramValEl.className = `si-val ${vramCls}`; }
+        if (vramPctEl)  vramPctEl.textContent  = lastVram + '%';
+        injectSpark('vram', vramVals);
+      }
+
+      // GPU — same pattern
+      const gpuNonNull = gpuVals.filter(v => v !== null && v !== undefined);
+      if (gpuNonNull.length >= 2) {
+        const lastGpu = gpuNonNull[gpuNonNull.length - 1];
+        const gpuCls  = lastGpu > 85 ? 'crit' : lastGpu > 60 ? 'warn' : '';
+        const gpuRow  = tile.querySelector('[data-sparkrow="gpu"]');
+        const gpuWrap = tile.querySelector('.si-spark-wrap[data-metric="gpu"]');
+        if (gpuWrap) gpuWrap.dataset.cls = gpuCls;
+        if (gpuRow)  gpuRow.style.display = '';
+        const gpuValEl = tile.querySelector('[data-metric="gpu-val"]');
+        const gpuPctEl = tile.querySelector('[data-metric="gpu-pct"]');
+        if (gpuValEl) { gpuValEl.textContent = lastGpu + '%'; gpuValEl.className = `si-val ${gpuCls}`; }
+        if (gpuPctEl)  gpuPctEl.textContent  = lastGpu + '%';
+        injectSpark('gpu', gpuVals);
+      }
+    }
+
+    // ── FETCH HISTORY FOR ALL MACHINES ───────────────
+    function fetchAllHistory(machines) {
+      for (const machine of machines) {
+        const host = machine.machine?.tailscale_name;
+        if (!host) continue;
+        fetchHistory(host);
+      }
+    }
+
+    async function fetchHistory(host) {
+      const API_BASE = isBkp
+        ? 'https://fleet-bkp.ldmathes.cc'
+        : 'https://fleet.ldmathes.cc';
+      try {
+        const res = await fetch(`${API_BASE}/api/history/${host}`);
+        if (!res.ok) return;
+        const entries = await res.json();
+        if (!Array.isArray(entries) || entries.length < 2) return;
+        historyCache[host] = entries;
+        applySparklines(host, entries);
+      } catch (e) {
+        // History unavailable — bars remain, no crash
+      }
+    }
+
+    // ── RENDER SYSINFO STRIP ─────────────────────────
+    function renderSysInfo(machine) {
+      try {
+        const mi = machine.machine_info;
+        if (!mi) {
+          if (machine.machine?.tailscale_name?.includes('-mac')) {
+            return '<div class="tile-sysinfo"><div class="si-no-stats">⚠ OPEN A TERMINAL TO ACTIVATE STATS</div></div>';
+          }
+          return '';
+        }
+
+        const ramUsed  = mi.ram_used_gb  ?? 0;
+        const ramTotal = mi.ram_total_gb ?? 0;
+        const ramPct   = ramTotal > 0 ? Math.round(ramUsed / ramTotal * 100) : 0;
+        const ramCls   = ramPct > 85 ? 'crit' : ramPct > 65 ? 'warn' : '';
+        const cpu      = mi.cpu_percent ?? 0;
+        const cpuCls   = cpu > 85 ? 'crit' : cpu > 65 ? 'warn' : '';
+
+        // Staleness check — warn if machine_info is older than 10 minutes
+        const STALE_SYSINFO_MS = 10 * 60 * 1000;
+        let staleHtml = '';
+        if (mi.timestamp_utc) {
+          const age = Date.now() - new Date(mi.timestamp_utc).getTime();
+          if (age > STALE_SYSINFO_MS) {
+            const ageMin = Math.round(age / 60000);
+            staleHtml = `<div class="si-stale">⚠ SYSINFO STALE — ${ageMin} MIN AGO</div>`;
+          }
+        }
+
+        let html = '<div class="tile-sysinfo">';
+
+        // RAM row — spark-wrap holds fallback bar; applySparklines replaces it with SVG
+        if (ramTotal > 0) {
+          html += `<div class="si-row">
+            <span class="si-lbl">RAM</span>
+            <span class="si-val ${ramCls}">${ramUsed}/${ramTotal}GB</span>
+            <div class="si-spark-wrap" data-metric="ram" data-cls="${ramCls}">
+              <div class="si-bar-wrap"><div class="si-bar-fill ${ramCls}" style="width:${ramPct}%"></div></div>
+            </div>
+            <span class="si-extra">${ramPct}%</span>
+          </div>`;
+        }
+
+        // CPU row
+        if (mi.cpu_percent != null) {
+          html += `<div class="si-row">
+            <span class="si-lbl">CPU</span>
+            <span class="si-val ${cpuCls}">${cpu}%</span>
+            <div class="si-spark-wrap" data-metric="cpu" data-cls="${cpuCls}">
+              <div class="si-bar-wrap"><div class="si-bar-fill ${cpuCls}" style="width:${cpu}%"></div></div>
+            </div>
+            <span class="si-extra">${cpu}%</span>
+          </div>`;
+        }
+
+        // VRAM sparkline row — placeholder rendered now; applySparklines fills it if data arrives
+        // Always render the row; applySparklines will only inject if vram_pct values are non-null
+        html += `<div class="si-row" data-sparkrow="vram" style="display:none">
+          <span class="si-lbl">VRAM</span>
+          <span class="si-val" data-metric="vram-val">–</span>
+          <div class="si-spark-wrap" data-metric="vram" data-cls="">
+            <div class="si-bar-wrap"><div class="si-bar-fill" style="width:0%"></div></div>
+          </div>
+          <span class="si-extra" data-metric="vram-pct">–</span>
+        </div>`;
+
+        // GPU sparkline row — same pattern
+        html += `<div class="si-row" data-sparkrow="gpu" style="display:none">
+          <span class="si-lbl">GPU</span>
+          <span class="si-val" data-metric="gpu-val">–</span>
+          <div class="si-spark-wrap" data-metric="gpu" data-cls="">
+            <div class="si-bar-wrap"><div class="si-bar-fill" style="width:0%"></div></div>
+          </div>
+          <span class="si-extra" data-metric="gpu-pct">–</span>
+        </div>`;
+
+        // Disk rows — bars only (changes too slowly for sparklines)
+        if (Array.isArray(mi.disks) && mi.disks.length) {
+          html += '<div class="si-sep"></div>';
+          for (const d of mi.disks) {
+            const used  = d.used_gb  ?? 0;
+            const total = d.total_gb ?? 0;
+            const pct   = total > 0 ? Math.round(used / total * 100) : 0;
+            const cls   = pct > 90 ? 'crit' : pct > 75 ? 'warn' : '';
+            html += `<div class="si-row">
+              <span class="si-lbl">${d.drive || '?'}</span>
+              <span class="si-val ${cls}">${used}/${total}GB</span>
+              <div class="si-bar-wrap"><div class="si-bar-fill ${cls}" style="width:${pct}%"></div></div>
+              <span class="si-extra">${pct}%</span>
+            </div>`;
+          }
+        }
+
+        // Separator
+        html += '<div class="si-sep"></div>';
+
+        // Reboot / WU meta row
+        html += '<div class="si-meta-row">';
+        if (mi.last_reboot)    html += `<div class="si-meta-item"><span class="si-meta-lbl">REBOOT</span><span class="si-meta-val">${mi.last_reboot}</span></div>`;
+        if (mi.last_wu_date)   html += `<div class="si-meta-item"><span class="si-meta-lbl">WU INST</span><span class="si-meta-val">${mi.last_wu_date}</span></div>`;
+        if (mi.last_wu_reboot) html += `<div class="si-meta-item"><span class="si-meta-lbl">WU REBOOT</span><span class="si-meta-val">${mi.last_wu_reboot}</span></div>`;
+        if (mi.os_build)       html += `<div class="si-meta-item"><span class="si-meta-lbl">OS</span><span class="si-meta-val">${mi.os_build}</span></div>`;
+        html += '</div>';
+
+        // Pending reboot badge
+        if (mi.pending_reboot) {
+          html += `<div class="si-pending">⚠ PENDING REBOOT</div>`;
+        }
+
+        html += staleHtml;
+        html += '</div>';
+        return html;
+      } catch(e) {
+        console.error('renderSysInfo error:', e, machine.machine?.tailscale_name);
+        return '';
+      }
+    }
+
+    // ── RENDER TILE ──────────────────────────────────
+    function renderTile(machine) {
+      const status = hostStatus(machine);
+      const ping   = machine.host?.response_time_ms;
+      const pSvcs  = (machine.services || []).filter(s => s.priority === 'P');
+      const sSvcs  = (machine.services || []).filter(s => s.priority === 'S');
+
+      let primaryHtml = '';
+      for (const svc of pSvcs) {
+        primaryHtml += `<div class="p-service">
+          <div class="p-svc-name">${svc.name}</div>
+          ${renderPrimaryMetric(svc)}
+        </div>`;
+      }
+      if (!primaryHtml) primaryHtml = `<div class="p-svc-metric" style="color:var(--text-dim)">NO PRIMARY SERVICES</div>`;
+
+      let secondaryHtml = '';
+      for (const svc of sSvcs) {
+        const ss = svcStatus(svc);
+        secondaryHtml += `<div class="s-dot-wrap" title="${svc.name}: ${ss}">
+          <div class="s-dot ${ss}"></div><span class="s-label">${svc.name}</span>
+        </div>`;
+      }
+
+      const tile = document.createElement('div');
+      tile.className = `tile status-${status}`;
+      tile.dataset.host = machine.machine.tailscale_name || '';
+      tile.innerHTML = `
+        <div class="tile-head">
+          <span class="tile-name">
+            <span class="tile-name-label">${machine.machine.display_name}</span>
+            ${machine.machine.primary_role ? `<span class="tile-role">${machine.machine.primary_role}</span>` : ''}
+          </span>
+          <span class="tile-ping">${ping != null ? ping+'ms' : '–'}</span>
+          <span class="tile-dot"></span>
+        </div>
+        <div class="tile-head-sep"></div>
+        <div class="tile-primary">${primaryHtml}</div>
+        ${secondaryHtml ? `<div class="tile-secondary">${secondaryHtml}</div>` : ''}
+        <div class="tile-spacer"></div>
+        ${renderSysInfo(machine)}
+      `;
+      tile.addEventListener('click', () => openModal(machine));
+      return tile;
+    }
+
+    // ── ALERT STRIP ──────────────────────────────────
+    function updateAlertStrip(machines) {
+      const strip = document.getElementById('alert-strip');
+      strip.querySelectorAll('.alert-item').forEach(el => el.remove());
+      const alerts = [];
+      for (const machine of machines) {
+        if (machine.host?.status !== 'up') {
+          alerts.push(machine.machine.display_name + ' HOST DOWN');
+          continue;
+        }
+        (machine.services || [])
+          .filter(s => s.priority === 'P' && s.tailscale_check?.status !== 'up')
+          .forEach(s => alerts.push(`${machine.machine.display_name} · ${s.name}`));
+      }
+      if (alerts.length) {
+        alerts.forEach(a => {
+          const el = document.createElement('span');
+          el.className = 'alert-item';
+          el.textContent = a;
+          strip.appendChild(el);
+        });
+        strip.classList.add('visible');
+      } else {
+        strip.classList.remove('visible');
+      }
+    }
+
+    // ── MODAL ────────────────────────────────────────
+    function openModal(machine) {
+      const status = hostStatus(machine);
+      const ping   = machine.host?.response_time_ms;
+      const ip     = machine.machine.tailscale_ip;
+      const dur    = machine.poll?.poll_duration_ms;
+
+      document.getElementById('modal-title').textContent = machine.machine.display_name.toUpperCase();
+      document.getElementById('modal-role').textContent  = machine.machine.primary_role || '';
+
+      const badge = document.getElementById('modal-status-badge');
+      badge.textContent = status.toUpperCase();
+      badge.className   = status;
+
+      const modal = document.getElementById('modal');
+      modal.className = `status-${status}`;
+
+      const statusColor = status==='up' ? 'var(--up)' : status==='down' ? 'var(--down)' : status==='warn' ? 'var(--warn)' : 'var(--unknown)';
+      document.querySelector('.modal-tb-pill-top').style.background = statusColor;
+      document.querySelector('.modal-tb-center').style.borderBottomColor = statusColor;
+
+      // modal alert
+      const modalAlert = document.getElementById('modal-alert');
+      modalAlert.querySelectorAll('.modal-alert-item').forEach(el => el.remove());
+      const failingSvcs = (machine.services || []).filter(s =>
+        s.priority === 'P' && s.tailscale_check?.status !== 'up'
+      );
+      if (machine.host?.status !== 'up' || failingSvcs.length) {
+        if (machine.host?.status !== 'up') {
+          const el = document.createElement('span');
+          el.className = 'modal-alert-item';
+          el.textContent = 'HOST UNREACHABLE';
+          modalAlert.appendChild(el);
+        }
+        failingSvcs.forEach(svc => {
+          const el = document.createElement('span');
+          el.className = 'modal-alert-item';
+          el.textContent = `${svc.name} · ${svcStatus(svc).toUpperCase()}`;
+          modalAlert.appendChild(el);
+        });
+        modalAlert.classList.add('visible');
+      } else {
+        modalAlert.classList.remove('visible');
+      }
+
+      const pSvcs = (machine.services || []).filter(s => s.priority === 'P');
+      const sSvcs = (machine.services || []).filter(s => s.priority === 'S');
+
+      let html = `<div class="m-section-title">HOST INFORMATION</div>
+        <div class="m-info-grid">
+          <div class="m-info-cell"><div class="m-info-lbl">STATUS</div><div class="m-info-val ${status}">${status.toUpperCase()}</div></div>
+          <div class="m-info-cell"><div class="m-info-lbl">LATENCY</div><div class="m-info-val">${ping != null ? ping+'ms' : '–'}</div></div>
+          <div class="m-info-cell"><div class="m-info-lbl">TAILSCALE IP</div><div class="m-info-val" style="font-size:11px">${ip || '–'}</div></div>
+          ${dur != null ? `<div class="m-info-cell"><div class="m-info-lbl">POLL DURATION</div><div class="m-info-val">${dur}ms</div></div>` : ''}
+          ${machine.host?.detail ? `<div class="m-info-cell" style="grid-column:1/-1"><div class="m-info-lbl">DETAIL</div><div class="m-info-val" style="font-size:10px;color:var(--text)">${machine.host.detail}</div></div>` : ''}
+        </div>`;
+
+      if (pSvcs.length) {
+        html += `<div><div class="m-section-title">PRIMARY SERVICES</div><div class="m-svc-grid">${pSvcs.map(renderModalService).join('')}</div></div>`;
+      }
+      if (sSvcs.length) {
+        html += `<div><div class="m-section-title">SECONDARY SERVICES</div><div class="m-svc-grid">${sSvcs.map(renderModalService).join('')}</div></div>`;
+      }
+
+      html += `<div><div class="m-section-title">RAW DATA</div>
+        <button class="m-raw-toggle" onclick="this.nextElementSibling.classList.toggle('open');this.textContent=this.nextElementSibling.classList.contains('open')?'▲ HIDE JSON':'▼ SHOW JSON'">▼ SHOW JSON</button>
+        <pre class="m-raw-pre">${JSON.stringify(machine, null, 2)}</pre>
+      </div>`;
+
+      document.getElementById('modal-body').innerHTML = html;
+      document.getElementById('modal').classList.add('open');
+      document.getElementById('overlay').classList.add('open');
+    }
+
+    function renderModalService(svc) {
+      const ss     = svcStatus(svc);
+      const detail = svc.tailscale_check?.detail || '';
+      const ms     = svc.tailscale_check?.response_time_ms;
+      const ct     = svc.check_type || '';
+
+      let rows = `
+        <div class="m-svc-row"><span class="lbl">STATUS</span><span class="val ${ss}">${ss.toUpperCase()}</span></div>
+        ${ms != null ? `<div class="m-svc-row"><span class="lbl">TS LATENCY</span><span class="val">${ms}ms</span></div>` : ''}`;
+
+      if (svc.name === 'ComfyUI' || ct === 'comfyui') {
+        const vram = parseVRAM(detail), gpu = parseGPU(detail), queue = parseQueue(detail);
+        if (gpu)   rows += `<div class="m-svc-row"><span class="lbl">GPU</span><span class="val">${gpu}</span></div>`;
+        if (vram) {
+          const pct = Math.round(vram.used / vram.total * 100);
+          const bc  = pct > 85 ? 'crit' : pct > 60 ? 'warn' : '';
+          rows += `<div class="m-svc-row"><span class="lbl">VRAM</span><span class="val">${vram.used}GB / ${vram.total}GB (${pct}%)</span></div>
+            <div class="m-vram-wrap"><div class="m-vram-fill ${bc}" style="width:${pct}%"></div></div>`;
+        }
+        if (queue) rows += `<div class="m-svc-row"><span class="lbl">QUEUE</span><span class="val">${queue}</span></div>`;
+
+      } else if (svc.name === 'Ollama' || ct === 'ollama') {
+        const ol = parseOllama(detail);
+        if (ol) rows += `<div class="m-svc-row"><span class="lbl">MODELS</span><span class="val">${ol.count} available</span></div>
+          <div class="m-svc-row"><span class="lbl">ACTIVE</span><span class="val">${ol.active}</span></div>`;
+
+      } else if (svc.name === 'Plex' || ct === 'plex') {
+        const pl = parsePlex(detail);
+        if (pl) {
+          rows += `<div class="m-svc-row"><span class="lbl">STREAMS</span><span class="val">${pl.streams} active</span></div>`;
+          if (pl.remote) rows += `<div class="m-svc-row"><span class="lbl">REMOTE</span><span class="val">${pl.remote}</span></div>`;
+          if (pl.libs)   rows += `<div class="m-svc-row"><span class="lbl">LIBRARIES</span><span class="val">${pl.libs}</span></div>`;
+          if (detail)    rows += `<div class="m-svc-row" style="flex-direction:column;gap:2px"><span class="lbl">DETAIL</span><span class="val" style="font-size:9px">${detail}</span></div>`;
+        }
+
+      } else if (svc.name === 'Syncthing' || ct === 'syncthing') {
+        const st = parseSyncthing(detail);
+        if (st) {
+          if (st.state)   rows += `<div class="m-svc-row"><span class="lbl">STATE</span><span class="val">${st.state}</span></div>`;
+          if (st.folders) rows += `<div class="m-svc-row"><span class="lbl">FOLDERS</span><span class="val">${st.folders}</span></div>`;
+        }
+        if (detail) rows += `<div class="m-svc-row" style="flex-direction:column;gap:2px"><span class="lbl">DETAIL</span><span class="val" style="font-size:9px">${detail}</span></div>`;
+
+      } else if (ct === 'onedrive_heartbeat') {
+        const age = parseHeartbeat(detail);
+        if (age != null) {
+          const ac = age > 180 ? 'down' : age > 90 ? 'warn' : 'up';
+          rows += `<div class="m-svc-row"><span class="lbl">AGE</span><span class="val ${ac}">${age}s</span></div>`;
+        }
+        if (detail) rows += `<div class="m-svc-row"><span class="lbl">DETAIL</span><span class="val">${detail}</span></div>`;
+
+      } else if (detail) {
+        rows += `<div class="m-svc-row"><span class="lbl">DETAIL</span><span class="val">${detail}</span></div>`;
+      }
+
+      if (svc.public_check) {
+        const pc = svc.public_check;
+        rows += `<div class="m-svc-row"><span class="lbl">PUBLIC</span><span class="val ${pc.status}">${pc.status.toUpperCase()} · ${pc.http_code} · ${pc.response_time_ms}ms</span></div>
+          <div class="m-svc-row"><span class="lbl">URL</span><span class="val" style="font-size:9px">${pc.url}</span></div>`;
+      }
+
+      return `<div class="m-svc-card ${ss}">
+        <div class="m-svc-head"><span class="m-svc-name">${svc.name}</span><span class="m-svc-badge ${svc.priority}">${svc.priority}</span></div>
+        ${rows}
+      </div>`;
+    }
+
+    function closeModal() {
+      document.getElementById('modal').classList.remove('open');
+      document.getElementById('overlay').classList.remove('open');
+    }
+    document.getElementById('modal-close').addEventListener('click', closeModal);
+    document.getElementById('overlay').addEventListener('click', closeModal);
+
+    // ── HEADER ───────────────────────────────────────
+    function updateHeader(data) {
+      const s = data.summary;
+      const setVal = (id, up, total) => {
+        const el = document.getElementById(id);
+        el.textContent = `${up}/${total}`;
+        el.className = 'hdr-stat-val' + (up < total ? (up===0 ? ' down' : ' warn') : '');
+      };
+      setVal('h-hosts', s.machines_up,        s.machines_total);
+      setVal('h-svc',   s.services_up,         s.services_total);
+      setVal('h-pub',   s.public_endpoints_up, s.public_endpoints_total);
+      document.getElementById('h-src').textContent  = data.meta.checker_host.toUpperCase();
+      lastTimestamp = new Date(data.meta.timestamp_utc);
+      document.getElementById('h-time').textContent = lastTimestamp.toLocaleTimeString();
+    }
+
+    function startAgeTimer() {
+      if (ageTimer) clearInterval(ageTimer);
+      ageTimer = setInterval(() => {
+        if (!lastTimestamp) return;
+        const age = Math.floor((Date.now() - lastTimestamp) / 1000);
+        const el  = document.getElementById('sync-age');
+        el.textContent = age + 's AGO';
+        if (age >= 180)    el.className = 'stale';
+        else if (age < 60) el.className = 'fresh';
+        else               el.className = '';
+      }, 1000);
+    }
+
+    // ── RENDER ───────────────────────────────────────
+    function render(data) {
+      updateHeader(data);
+      const grid = document.getElementById('grid');
+      grid.innerHTML = '';
+      const machines = [...(data.machines || [])].sort((a,b) =>
+        a.machine.display_name.localeCompare(b.machine.display_name)
+      );
+      updateAlertStrip(machines);
+      for (const machine of machines) grid.appendChild(renderTile(machine));
+    }
+
+    async function refresh() {
+      try {
+        const res = await fetch(API_URL);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        lastData = data;
+        const loading = document.getElementById('loading');
+        if (loading) loading.style.display = 'none';
+        document.getElementById('error-msg').style.display = 'none';
+        render(data);
+        fetchAllHistory(data.machines || []);
+      } catch (err) {
+        const loading = document.getElementById('loading');
+        if (loading) loading.style.display = 'none';
+        const em = document.getElementById('error-msg');
+        if (em) { em.style.display = 'block'; em.textContent = `FETCH ERROR: ${err.message}`; }
+      }
+    }
+
+    refresh();
+    startAgeTimer();
+    setInterval(refresh, 30000);
+  </script>
+</body>
+</html>

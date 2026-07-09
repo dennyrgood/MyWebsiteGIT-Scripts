@@ -1,0 +1,2457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>FLEET_OPS | TACTICAL COMMAND</title>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════
+   TOKENS
+═══════════════════════════════════════════════════════ */
+:root {
+  --lc-orange:     #ff9900;
+  --lc-gold:       #ffcc00;
+  --lc-blue:       #99ccff;
+  --lc-periwinkle: #9999ff;
+  --lc-pink:       #cc99cc;
+  --lc-red:        #cc0000;
+  --lc-red-bright: #ff3333;
+  --lc-amber:      #e3b341;
+  --lc-green:      #00ff88;
+  --lc-bg:         #030508;
+  --lc-bg2:        #070b10;
+  --lc-bg3:        #0c1018;
+  --lc-border:     #1a1f2e;
+  --lc-border2:    #222840;
+
+  --font-main: 'Antonio', sans-serif;
+  --font-data: 'Share Tech Mono', monospace;
+
+  /* priority colours */
+  --pri-P:   #00ff88;
+  --pri-B2:  #99ccff;
+  --pri-B5:  #e3b341;
+  --pri-B9:  #ff9900;
+  --pri-B99: #555566;
+}
+
+/* ═══════════════════════════════════════════════════════
+   RESET + BASE
+═══════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%; overflow: hidden;
+  background: var(--lc-bg);
+  color: #e0e8f0;
+  font-family: var(--font-main);
+  text-transform: uppercase;
+  font-size: 13px;
+  user-select: none;
+}
+
+/* CRT scanline overlay */
+body::before {
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 9000;
+  background:
+    repeating-linear-gradient(0deg,
+      transparent, transparent 2px,
+      rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px),
+    linear-gradient(90deg,
+      rgba(255,0,0,0.02), rgba(0,255,0,0.01), rgba(0,0,255,0.02));
+}
+
+/* ═══════════════════════════════════════════════════════
+   ROOT LAYOUT  — left panel dominant (~60%), right minimap (~40%)
+═══════════════════════════════════════════════════════ */
+#app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ═══════════════════════════════════════════════════════
+   LEFT PANEL
+═══════════════════════════════════════════════════════ */
+#left-panel {
+  width: 33%;
+  min-width: 380px;
+  max-width: 520px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--lc-bg);
+  border-right: 2px solid #111;
+  position: relative;
+  z-index: 100;
+  padding: 10px;
+  gap: 5px;
+}
+
+/* LCARS elbow — top */
+.elbow-top {
+  flex-shrink: 0;
+  height: 58px;
+  background: var(--lc-periwinkle);
+  border-radius: 29px 0 0 29px;
+  display: flex;
+  align-items: center;
+  padding-left: 28px;
+  gap: 16px;
+  color: #000;
+  font-weight: 900;
+  font-size: 1.3rem;
+  letter-spacing: 3px;
+}
+
+.elbow-top-title { flex: 1; }
+
+.elbow-top-status {
+  font-size: 0.7rem;
+  padding: 3px 14px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.25);
+  letter-spacing: 2px;
+  margin-right: 10px;
+  font-weight: 700;
+}
+.elbow-top-status.nominal { color: #000; }
+.elbow-top-status.warning { background: var(--lc-gold); color: #000; }
+.elbow-top-status.alarm   { background: var(--lc-red-bright); color: #fff; animation: status-flash 0.8s infinite alternate; }
+@keyframes status-flash { from { opacity: 1; } to { opacity: 0.5; } }
+
+/* Main scrollable body */
+#panel-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 28px solid var(--lc-periwinkle);
+  background: rgba(153,153,255,0.02);
+}
+
+/* Sub-header — sticky data age + meta */
+#panel-subheader {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 14px;
+  background: #0a0d14;
+  border-bottom: 2px solid var(--lc-pink);
+  font-family: var(--font-data);
+  font-size: 0.72rem;
+  color: var(--lc-pink);
+  gap: 8px;
+}
+
+#panel-subheader .meta-left { display: flex; gap: 16px; align-items: center; }
+#panel-subheader .meta-right { display: flex; gap: 12px; align-items: center; }
+
+#data-age { font-weight: bold; }
+#data-age.fresh  { color: var(--lc-green); }
+#data-age.aging  { color: var(--lc-amber); }
+#data-age.stale  { color: var(--lc-red-bright); animation: status-flash 1s infinite alternate; }
+
+/* Stale / error banner */
+.alert-banner {
+  display: none;
+  flex-shrink: 0;
+  padding: 5px 14px;
+  font-family: var(--font-data);
+  font-size: 0.72rem;
+  font-weight: bold;
+  letter-spacing: 1px;
+  border-bottom: 1px solid;
+}
+.alert-banner.stale { display: flex; background: rgba(227,179,65,0.1); border-color: rgba(227,179,65,0.4); color: var(--lc-amber); }
+.alert-banner.error { display: flex; background: rgba(204,0,0,0.1);   border-color: rgba(204,0,0,0.4);   color: var(--lc-red-bright); }
+
+/* Scrollable content */
+#panel-scroll {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--lc-periwinkle) transparent;
+}
+
+/* ── SUMMARY SECTION ──────────────────────────────── */
+#summary-section {
+  padding: 18px 16px 10px;
+  border-bottom: 1px solid var(--lc-border);
+}
+
+.hero-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 20px;
+  margin-bottom: 14px;
+}
+
+.hero-pct {
+  font-size: 3.8rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -2px;
+  font-family: var(--font-main);
+  transition: color 0.5s;
+}
+
+.hero-right {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 6px;
+}
+
+.hero-label {
+  font-size: 0.75rem;
+  color: var(--lc-blue);
+  letter-spacing: 3px;
+  font-weight: 700;
+}
+
+.hero-trend {
+  font-family: var(--font-data);
+  font-size: 0.72rem;
+  color: var(--lc-amber);
+  letter-spacing: 1px;
+}
+
+/* Summary stat pills */
+.stat-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.stat-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--lc-bg3);
+  border: 1px solid var(--lc-border2);
+  border-top: 3px solid var(--lc-blue);
+  padding: 4px 8px;
+  min-width: 52px;
+  gap: 1px;
+}
+.stat-pill.ok   { border-top-color: var(--lc-green); }
+.stat-pill.warn { border-top-color: var(--lc-amber); }
+.stat-pill.err  { border-top-color: var(--lc-red-bright); }
+
+.pill-label {
+  font-size: 0.6rem;
+  color: var(--lc-periwinkle);
+  letter-spacing: 1px;
+  opacity: 0.8;
+}
+.pill-value {
+  font-family: var(--font-data);
+  font-size: 1.0rem;
+  font-weight: bold;
+  color: #fff;
+  letter-spacing: 1px;
+}
+.stat-pill.ok   .pill-value { color: var(--lc-green); }
+.stat-pill.warn .pill-value { color: var(--lc-amber); }
+.stat-pill.err  .pill-value { color: var(--lc-red-bright); }
+
+/* ── SECTION TITLE ────────────────────────────────── */
+.section-title {
+  padding: 7px 16px;
+  background: rgba(153,153,255,0.08);
+  color: var(--lc-periwinkle);
+  font-size: 0.75rem;
+  font-weight: bold;
+  letter-spacing: 2px;
+  border-bottom: 1px solid var(--lc-border);
+  border-top: 1px solid var(--lc-border);
+  margin-top: 4px;
+}
+
+/* ── MACHINE LIST ─────────────────────────────────── */
+#machine-list { padding: 4px 0; }
+
+.mrow {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--lc-border);
+  cursor: pointer;
+  transition: background 0.15s;
+  min-height: 52px;
+}
+.mrow:hover { background: rgba(153,153,255,0.06); }
+.mrow.selected { background: rgba(255,204,0,0.05); border-left: 3px solid var(--lc-gold); }
+
+/* Status strip on left */
+.mrow-strip {
+  width: 6px;
+  flex-shrink: 0;
+  background: var(--lc-border2);
+  transition: background 0.3s;
+}
+.mrow-strip.up      { background: var(--lc-green); }
+.mrow-strip.degraded { background: var(--lc-gold); }
+.mrow-strip.down    { background: var(--lc-red-bright); }
+
+/* Main content of row */
+.mrow-body {
+  flex: 1;
+  padding: 7px 14px 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.mrow-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mrow-name {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #e0e8f0;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mrow-latency {
+  font-family: var(--font-data);
+  font-size: 0.72rem;
+  color: var(--lc-blue);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.mrow-latency.slow { color: var(--lc-amber); }
+.mrow-latency.offline { color: var(--lc-red-bright); }
+
+.mrow-role {
+  font-size: 0.68rem;
+  color: var(--lc-periwinkle);
+  opacity: 0.7;
+  letter-spacing: 1px;
+}
+
+/* Service chips row */
+.mrow-chips {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.svc-chip {
+  font-family: var(--font-data);
+  font-size: 0.6rem;
+  padding: 1px 5px;
+  border-radius: 2px;
+  border: 1px solid;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.svc-chip.up   { color: var(--lc-green);  border-color: rgba(0,255,136,0.3);  background: rgba(0,255,136,0.06); }
+.svc-chip.down { color: var(--lc-red-bright); border-color: rgba(204,0,0,0.4);  background: rgba(204,0,0,0.08); }
+.svc-chip.pub  { color: var(--lc-orange); border-color: rgba(255,153,0,0.3);  background: rgba(255,153,0,0.06); }
+
+/* Priority badge */
+.pri-badge {
+  font-family: var(--font-data);
+  font-size: 0.58rem;
+  padding: 1px 4px;
+  border: 1px solid;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+.pri-badge.P   { color: var(--pri-P);   border-color: rgba(0,255,136,0.35);  background: rgba(0,255,136,0.07); }
+.pri-badge.B2  { color: var(--pri-B2);  border-color: rgba(153,204,255,0.35); background: rgba(153,204,255,0.07); }
+.pri-badge.B5  { color: var(--pri-B5);  border-color: rgba(227,179,65,0.35);  background: rgba(227,179,65,0.07); }
+.pri-badge.B9  { color: var(--pri-B9);  border-color: rgba(255,153,0,0.35);   background: rgba(255,153,0,0.07); }
+.pri-badge.B99 { color: var(--pri-B99); border-color: rgba(85,85,102,0.4);    background: rgba(85,85,102,0.07); }
+
+/* ── DETAIL DRILL-DOWN ────────────────────────────── */
+#detail-section { display: none; border-top: 2px solid var(--lc-periwinkle); }
+#detail-section.visible { display: block; }
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: rgba(153,153,255,0.06);
+  border-bottom: 1px solid var(--lc-border);
+}
+
+.detail-machine-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--lc-gold);
+  letter-spacing: 2px;
+}
+
+.detail-status-badge {
+  font-family: var(--font-data);
+  font-size: 0.72rem;
+  padding: 2px 10px;
+  border: 1px solid;
+  letter-spacing: 1px;
+}
+.detail-status-badge.active   { color: var(--lc-green);  border-color: rgba(0,255,136,0.5); }
+.detail-status-badge.degraded { color: var(--lc-gold);   border-color: rgba(255,204,0,0.5); }
+.detail-status-badge.offline  { color: var(--lc-red-bright); border-color: rgba(255,51,51,0.5); }
+
+.detail-close {
+  cursor: pointer;
+  color: var(--lc-pink);
+  font-size: 1rem;
+  padding: 0 6px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+.detail-close:hover { opacity: 1; }
+
+/* Machine identity rows */
+.ident-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--lc-border);
+  margin: 8px 16px;
+  border: 1px solid var(--lc-border);
+}
+.ident-cell {
+  background: var(--lc-bg2);
+  padding: 6px 10px;
+}
+.ident-label { font-size: 0.6rem; color: var(--lc-periwinkle); opacity: 0.8; letter-spacing: 1px; }
+.ident-val   { font-family: var(--font-data); font-size: 0.78rem; color: var(--lc-gold); word-break: break-all; margin-top: 1px; }
+
+/* Service rows in detail */
+.svc-detail-row {
+  margin: 4px 16px;
+  border-left: 5px solid var(--lc-border2);
+  background: rgba(255,255,255,0.02);
+  transition: border-color 0.3s;
+}
+.svc-detail-row.up   { border-left-color: var(--lc-green); }
+.svc-detail-row.down { border-left-color: var(--lc-red-bright); }
+
+.svc-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px 4px;
+  gap: 8px;
+}
+
+.svc-detail-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #e0e8f0;
+  letter-spacing: 1px;
+  flex: 1;
+}
+
+.svc-detail-badges {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.cbadge {
+  font-family: var(--font-data);
+  font-size: 0.6rem;
+  padding: 1px 5px;
+  border: 1px solid;
+  letter-spacing: 0.5px;
+}
+.cbadge.ok  { color: var(--lc-green);      border-color: rgba(0,255,136,0.4);   background: rgba(0,255,136,0.06); }
+.cbadge.err { color: var(--lc-red-bright); border-color: rgba(255,51,51,0.4);   background: rgba(255,51,51,0.06); }
+.cbadge.unk { color: #666;                 border-color: rgba(100,100,100,0.3); background: transparent; }
+
+.svc-detail-meta {
+  padding: 2px 10px 6px;
+  font-family: var(--font-data);
+  font-size: 0.68rem;
+  color: rgba(224,232,240,0.6);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.svc-detail-meta .meta-item { display: flex; gap: 5px; }
+.svc-detail-meta .mk { color: var(--lc-periwinkle); opacity: 0.7; }
+.svc-detail-meta .mv { color: var(--lc-gold); }
+.svc-detail-meta .mv.err { color: var(--lc-red-bright); }
+
+.svc-pub-block {
+  margin: 2px 10px 6px;
+  padding: 5px 8px;
+  background: rgba(255,153,0,0.05);
+  border: 1px solid rgba(255,153,0,0.2);
+  font-family: var(--font-data);
+  font-size: 0.66rem;
+  color: var(--lc-orange);
+}
+.svc-pub-block .pub-url {
+  color: var(--lc-blue);
+  text-decoration: none;
+  text-transform: lowercase;
+  word-break: break-all;
+}
+.svc-pub-block .pub-url:hover { color: #fff; }
+.svc-pub-block .pub-ok  { color: var(--lc-green); }
+.svc-pub-block .pub-err { color: var(--lc-red-bright); }
+
+/* Poll metadata strip */
+.poll-strip {
+  margin: 8px 16px 4px;
+  padding: 5px 10px;
+  background: var(--lc-bg2);
+  border: 1px solid var(--lc-border);
+  font-family: var(--font-data);
+  font-size: 0.65rem;
+  color: rgba(153,153,255,0.6);
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.poll-strip span { color: rgba(224,232,240,0.5); }
+.poll-strip strong { color: var(--lc-blue); }
+
+/* Raw JSON block */
+.raw-json {
+  margin: 6px 16px 12px;
+  padding: 10px;
+  background: #000;
+  border: 1px solid #222;
+  font-family: var(--font-data);
+  font-size: 0.66rem;
+  color: var(--lc-green);
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre;
+  scrollbar-width: thin;
+  scrollbar-color: #333 transparent;
+}
+
+/* LCARS elbow — bottom */
+.elbow-bottom {
+  flex-shrink: 0;
+  height: 38px;
+  background: var(--lc-blue);
+  border-radius: 0 0 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px 0 20px;
+  color: #000;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  gap: 8px;
+}
+
+/* Bottom button row */
+.btn-row {
+  flex-shrink: 0;
+  display: flex;
+  gap: 5px;
+  padding: 5px 0 0;
+}
+
+.lcars-btn {
+  height: 34px;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-main);
+  font-weight: 900;
+  font-size: 0.8rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: filter 0.2s;
+  color: #000;
+}
+.lcars-btn:hover { filter: brightness(1.15); }
+.lcars-btn:active { filter: brightness(0.85); }
+
+.btn-reset {
+  flex: 3;
+  background: var(--lc-orange);
+  border-radius: 15px 0 0 15px;
+}
+.btn-b {
+  flex: 1;
+  background: var(--lc-pink);
+  font-size: 0.65rem;
+}
+.btn-c {
+  flex: 1;
+  background: var(--lc-periwinkle);
+  border-radius: 0 15px 15px 0;
+  font-size: 0.65rem;
+}
+
+/* ═══════════════════════════════════════════════════════
+   RIGHT PANEL — SCHEMATIC MINIMAP
+═══════════════════════════════════════════════════════ */
+#right-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 10px 10px 0;
+  min-width: 300px;
+  position: relative;
+}
+
+/* Schematic header */
+.schematic-header {
+  flex-shrink: 0;
+  height: 58px;
+  background: var(--lc-orange);
+  border-radius: 0 29px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 36px;
+}
+.schematic-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #000;
+  letter-spacing: 4px;
+}
+
+/* SVG stage */
+#schematic-stage {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #000;
+  border-left: 18px solid var(--lc-orange);
+  margin-top: 5px;
+  cursor: grab;
+}
+#schematic-stage:active { cursor: grabbing; }
+
+#svg-canvas { width: 100%; height: 100%; display: block; }
+#viewport-group { transform-origin: 0 0; }
+
+/* SVG node styles (applied via setAttribute but mirrored here for reference) */
+.conduit {
+  fill: none;
+  stroke-width: 2;
+  opacity: 0.35;
+  transition: stroke 0.6s, opacity 0.4s, stroke-width 0.3s;
+}
+.conduit.active { opacity: 1; stroke-width: 4; filter: drop-shadow(0 0 8px currentColor); }
+
+.node-rect {
+  fill: rgba(8,14,24,0.95);
+  stroke-width: 2;
+  transition: stroke 0.3s;
+}
+.node-group.selected .node-rect {
+  stroke: var(--lc-gold) !important;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 6px rgba(255,204,0,0.4));
+}
+
+.node-alert-bar { opacity: 0; transition: opacity 0.3s; }
+.node-group.has-svc-failure .node-alert-bar { opacity: 1; }
+
+.label-main { fill: #e0e8f0; font-size: 13px; font-weight: 700; font-family: 'Share Tech Mono', monospace; }
+.label-sub  { fill: #9999ff; font-size: 10px; font-family: 'Share Tech Mono', monospace; }
+.label-meta { font-size: 9px;  font-family: 'Share Tech Mono', monospace; font-weight: bold; }
+
+/* Zoom controls */
+.zoom-controls {
+  position: absolute;
+  bottom: 28px;
+  right: 16px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.zoom-btn {
+  width: 52px; height: 36px;
+  background: var(--lc-periwinkle);
+  border: none;
+  color: #000;
+  font-family: var(--font-main);
+  font-weight: 900;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-radius: 12px 3px 3px 12px;
+  transition: filter 0.15s;
+}
+.zoom-btn:hover { filter: brightness(1.2); }
+
+/* Schematic footer */
+.schematic-footer {
+  flex-shrink: 0;
+  height: 38px;
+  background: var(--lc-blue);
+  margin-top: 5px;
+  border-radius: 0 0 29px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 36px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #000;
+  letter-spacing: 1px;
+}
+
+.schematic-footer a {
+  color: #000;
+  text-decoration: none;
+  border: 1px solid rgba(0,0,0,0.4);
+  padding: 1px 10px;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  transition: background 0.2s;
+}
+.schematic-footer a:hover { background: rgba(0,0,0,0.15); }
+
+/* ═══════════════════════════════════════════════════════
+   PHASE 2 — MOTION + ORGANIC ENHANCEMENTS
+═══════════════════════════════════════════════════════ */
+
+.conduit { transition: stroke 0.8s ease, opacity 0.5s ease, stroke-width 0.4s ease; }
+.conduit.active { filter: drop-shadow(0 0 6px currentColor); }
+
+.node-group { transition: filter 0.2s; }
+.node-group:hover { filter: drop-shadow(0 0 8px rgba(153,153,255,0.6)); }
+.node-group.selected { filter: drop-shadow(0 0 10px rgba(255,204,0,0.5)); }
+
+@keyframes node-pulse { 0%,100%{opacity:1} 50%{opacity:0.7} }
+.node-group.selected .node-rect { animation: node-pulse 2.5s ease-in-out infinite; }
+
+@keyframes hub-glow-pulse { 0%,100%{opacity:0.85} 50%{opacity:1.0} }
+#hub-group { animation: hub-glow-pulse 3s ease-in-out infinite; }
+
+.mrow-vram { display:flex; align-items:center; gap:6px; margin-top:3px; }
+.vram-label { font-family:var(--font-data); font-size:0.58rem; color:var(--lc-periwinkle); opacity:0.7; width:28px; flex-shrink:0; }
+.vram-track { flex:1; height:3px; background:rgba(255,255,255,0.07); border-radius:2px; overflow:hidden; }
+.vram-fill  { height:100%; border-radius:2px; transition: width 0.8s ease, background 0.5s ease; }
+.vram-pct   { font-family:var(--font-data); font-size:0.58rem; width:28px; text-align:right; flex-shrink:0; }
+
+.mrow-ollama { font-family:var(--font-data); font-size:0.58rem; color:rgba(153,204,255,0.55); margin-top:1px; }
+
+/* Activity badges — Plex streams, ComfyUI queue, Syncthing transfers, heartbeat */
+.mrow-activity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+.act-badge {
+  font-family: var(--font-data);
+  font-size: 0.58rem;
+  padding: 1px 6px;
+  border: 1px solid;
+  border-radius: 2px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+/* Plex streaming — orange/active */
+.act-badge.plex-active  { color: var(--lc-orange); border-color: rgba(255,153,0,0.4); background: rgba(255,153,0,0.08); }
+.act-badge.plex-idle    { color: rgba(153,204,255,0.4); border-color: rgba(153,204,255,0.15); background: transparent; }
+/* ComfyUI queue */
+.act-badge.queue-active { color: var(--lc-gold);   border-color: rgba(255,204,0,0.4);  background: rgba(255,204,0,0.08); }
+.act-badge.queue-idle   { color: rgba(153,153,255,0.4); border-color: rgba(153,153,255,0.15); background: transparent; }
+/* Syncthing */
+.act-badge.sync-active  { color: var(--lc-green);  border-color: rgba(0,255,136,0.4);  background: rgba(0,255,136,0.07); }
+.act-badge.sync-idle    { color: rgba(153,204,255,0.4); border-color: rgba(153,204,255,0.15); background: transparent; }
+/* Heartbeat */
+.act-badge.hb-ok        { color: rgba(153,153,255,0.5); border-color: rgba(153,153,255,0.15); background: transparent; }
+.act-badge.hb-warn      { color: var(--lc-amber);  border-color: rgba(227,179,65,0.4);  background: rgba(227,179,65,0.07); }
+.act-badge.hb-stale     { color: var(--lc-red-bright); border-color: rgba(255,51,51,0.4); background: rgba(255,51,51,0.07);
+                          animation: strip-pulse 1.2s ease-in-out infinite; }
+
+@keyframes strip-pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+.mrow-strip.degraded { animation: strip-pulse 2s ease-in-out infinite; }
+.mrow-strip.down     { animation: strip-pulse 0.9s ease-in-out infinite; }
+
+.lcars-btn.btn-b.raw-active { background: var(--lc-gold); color: #000; }
+
+#schematic-stage::before {
+  content:''; position:absolute; inset:0; pointer-events:none; z-index:0;
+  background-image:
+    radial-gradient(1px 1px at 15% 20%,rgba(255,255,255,0.4) 0%,transparent 100%),
+    radial-gradient(1px 1px at 35% 65%,rgba(255,255,255,0.3) 0%,transparent 100%),
+    radial-gradient(1px 1px at 55% 10%,rgba(255,255,255,0.35) 0%,transparent 100%),
+    radial-gradient(1px 1px at 72% 42%,rgba(255,255,255,0.25) 0%,transparent 100%),
+    radial-gradient(1px 1px at 88% 78%,rgba(255,255,255,0.3) 0%,transparent 100%),
+    radial-gradient(1px 1px at 8%  55%,rgba(255,255,255,0.3) 0%,transparent 100%),
+    radial-gradient(1px 1px at 92% 25%,rgba(255,255,255,0.25) 0%,transparent 100%),
+    radial-gradient(1px 1px at 28% 38%,rgba(255,255,255,0.3) 0%,transparent 100%);
+}
+
+#hero-pct { transition: color 0.8s ease; }
+.stat-pill { transition: border-top-color 0.6s ease; }
+.pill-value { transition: color 0.6s ease; }
+
+/* ═══════════════════════════════════════════════════════
+   PHASE 3 — INTERACTION ENHANCEMENTS
+═══════════════════════════════════════════════════════ */
+
+/* When a node IS selected, dim all others in the schematic */
+#node-group.has-selection .node-group:not(.selected) {
+  opacity: 0.35;
+  transition: opacity 0.4s ease;
+}
+#node-group.has-selection .node-group.selected {
+  opacity: 1;
+  transition: opacity 0.4s ease;
+}
+#conduit-group.has-selection .conduit:not(.active) {
+  opacity: 0.1;
+  transition: opacity 0.4s ease;
+}
+
+/* Beacon pulse on degraded/down node rects */
+@keyframes beacon-degrade {
+  0%,100% { stroke-opacity: 1; }
+  50%      { stroke-opacity: 0.3; }
+}
+@keyframes beacon-down {
+  0%,100% { stroke-opacity: 1; filter: drop-shadow(0 0 4px var(--lc-red-bright)); }
+  50%      { stroke-opacity: 0.2; filter: none; }
+}
+.node-group.status-degraded .node-rect {
+  animation: beacon-degrade 2s ease-in-out infinite;
+}
+.node-group.status-down .node-rect {
+  animation: beacon-down 1s ease-in-out infinite;
+}
+
+/* Smooth animated pan transition */
+#viewport-group {
+  transition: none; /* we drive this manually with rAF */
+}
+
+/* Machine list row hover — subtle schematic highlight feedback */
+.mrow { transition: background 0.15s, border-left 0.15s; }
+.mrow.hover-hint { background: rgba(153,153,255,0.05); }
+
+/* Touch devices */
+@media (pointer: coarse) {
+  .mrow { min-height: 60px; }
+  .zoom-btn { width: 60px; height: 44px; }
+}
+
+/* Schematic node tooltip */
+.node-tooltip {
+  position: absolute;
+  background: rgba(7,11,16,0.95);
+  border: 1px solid var(--lc-periwinkle);
+  color: #e0e8f0;
+  font-family: var(--font-data);
+  font-size: 0.68rem;
+  padding: 5px 10px;
+  pointer-events: none;
+  z-index: 500;
+  white-space: nowrap;
+  letter-spacing: 1px;
+  display: none;
+}
+.node-tooltip.visible { display: block; }
+.node-tooltip .tt-status { font-weight: bold; margin-top: 2px; }
+.node-tooltip .tt-status.up       { color: var(--lc-green); }
+.node-tooltip .tt-status.degraded { color: var(--lc-gold); }
+.node-tooltip .tt-status.down     { color: var(--lc-red-bright); }
+
+/* Keyboard focus ring on list rows */
+.mrow:focus-visible {
+  outline: 1px solid var(--lc-periwinkle);
+  outline-offset: -1px;
+}
+
+/* Hub machine row — subtle gold top border to distinguish it */
+.mrow.hub-row { border-top: 1px solid rgba(255,204,0,0.2); }
+.mrow.hub-row .mrow-strip.up { background: var(--lc-gold); }
+
+/* ═══════════════════════════════════════════════════════
+   ALERT OVERLAYS
+═══════════════════════════════════════════════════════ */
+body.yellow-alert::after {
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 8000;
+  border: 8px solid var(--lc-gold);
+  animation: yellow-flash 1.8s infinite alternate;
+}
+body.red-alert::after {
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 8000;
+  border: 12px solid var(--lc-red-bright);
+  animation: red-flash 0.7s infinite alternate;
+}
+@keyframes yellow-flash { from { opacity: 0.2; } to { opacity: 0.8; } }
+@keyframes red-flash    { from { opacity: 0.3; } to { opacity: 1.0; } }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ═══════════ LEFT PANEL ═══════════ -->
+  <div id="left-panel">
+
+    <div class="elbow-top">
+      <span class="elbow-top-title">FLEET_TACTICAL_DATA</span>
+      <span class="elbow-top-status nominal" id="elbow-status">NOMINAL</span>
+    </div>
+
+    <div id="panel-body">
+
+      <div id="panel-subheader">
+        <div class="meta-left">
+          <span>STATUS: <span id="unit-status" style="color:var(--lc-green)">—</span></span>
+          <span id="stardate">SD 00000.0</span>
+        </div>
+        <div class="meta-right">
+          <span>SRC: <span id="meta-checker" style="color:var(--lc-blue)">—</span></span>
+          <span>T: <span id="meta-time" style="color:var(--lc-blue)">—</span></span>
+          <span id="data-age" class="">—</span>
+        </div>
+      </div>
+
+      <div class="alert-banner" id="stale-banner">⚠ DATA STALE — CHECKER MAY BE DOWN</div>
+      <div class="alert-banner" id="error-banner">✕ API UNREACHABLE</div>
+
+      <div id="panel-scroll">
+
+        <!-- SUMMARY -->
+        <div id="summary-section">
+          <div class="hero-row">
+            <div class="hero-pct" id="hero-pct" style="color:var(--lc-green)">—%</div>
+            <div class="hero-right">
+              <div class="hero-label">FLEET_OPERATIONAL_CAPACITY</div>
+              <div class="hero-trend" id="hero-trend">CYCLE: —MS</div>
+            </div>
+          </div>
+          <div class="stat-row" id="stat-row"></div>
+        </div>
+
+        <!-- MACHINE LIST -->
+        <div class="section-title">ACTIVE_NODE_MANIFEST</div>
+        <div id="machine-list"></div>
+
+        <!-- DETAIL PANEL -->
+        <div id="detail-section">
+          <div class="detail-header">
+            <span class="detail-machine-name" id="detail-name">—</span>
+            <span class="detail-status-badge active" id="detail-status-badge">ACTIVE</span>
+            <span class="detail-close" id="detail-close" title="Close">✕</span>
+          </div>
+          <div id="detail-content"></div>
+        </div>
+
+      </div><!-- /panel-scroll -->
+    </div><!-- /panel-body -->
+
+    <div class="elbow-bottom">
+      <span id="node-tag">FLEET_OVERVIEW</span>
+      <span id="footer-cycle" style="font-size:0.65rem;opacity:0.7">—</span>
+    </div>
+
+    <div class="btn-row">
+      <button class="lcars-btn btn-reset" onclick="resetToSummary()">GLOBAL_RESET</button>
+      <button class="lcars-btn btn-b" onclick="toggleRawJson()">RAW</button>
+      <button class="lcars-btn btn-c" onclick="autoFitFleet()">FIT</button>
+      <button class="lcars-btn" style="flex:1.5;background:var(--lc-pink);border-radius:0 15px 15px 0;font-size:0.7rem;" onclick="window.resetNodePositions && window.resetNodePositions()">RESET_LAYOUT</button>
+    </div>
+
+  </div><!-- /left-panel -->
+
+  <!-- ═══════════ RIGHT PANEL ═══════════ -->
+  <div id="right-panel">
+
+    <div class="schematic-header">
+      <div class="schematic-title">TACTICAL FLEET SCHEMATIC</div>
+    </div>
+
+    <div id="schematic-stage">
+      <div id="node-tooltip" class="node-tooltip"></div>
+      <div class="zoom-controls">
+        <button class="zoom-btn" onclick="adjustZoom(1.25)">IN</button>
+        <button class="zoom-btn" onclick="autoFitFleet()">FIT</button>
+        <button class="zoom-btn" onclick="adjustZoom(0.8)">OUT</button>
+      </div>
+      <svg id="svg-canvas">
+        <defs>
+          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="3" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="glow-strong" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="6" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <g id="viewport-group">
+          <g id="conduit-group"></g>
+          <g id="hub-group"></g>
+          <g id="node-group"></g>
+        </g>
+      </svg>
+    </div>
+
+    <div class="schematic-footer">
+      <span id="meta-info">INITIALIZING...</span>
+      <div style="display:flex;gap:16px;align-items:center;">
+        <a id="alt-feed-link" href="#">BKUP</a>
+        <span>LCARS_TACTICAL_V3.0</span>
+      </div>
+    </div>
+
+  </div><!-- /right-panel -->
+
+</div><!-- /app -->
+
+<script>
+/* ═══════════════════════════════════════════════════════
+   CONFIG
+═══════════════════════════════════════════════════════ */
+const params  = new URLSearchParams(window.location.search);
+const IS_BKP  = params.has('bkp') || location.hostname.includes('fleet-bkp');
+const API_URL = IS_BKP
+  ? 'https://fleet-bkp.ldmathes.cc/api/status'
+  : 'https://fleet.ldmathes.cc/api/status';
+const POLL_MS  = 30000;
+const STALE_S  = 300;
+
+/* Alt feed link */
+const altLink = document.getElementById('alt-feed-link');
+if (IS_BKP) {
+  altLink.href = 'https://fleet.ldmathes.cc/ST/index_LCARS.html';
+  altLink.textContent = 'PRI';
+} else {
+  altLink.href = 'https://fleet-bkp.ldmathes.cc/ST/index_LCARS.html?bkp';
+  altLink.textContent = 'BKUP';
+}
+
+/* ═══════════════════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════════════════ */
+let lastData            = null;
+let lastTimestamp       = null;
+let currentSelectedId   = null;
+let showRawJson         = false;
+
+/* Pan/zoom state */
+let scale = 1, tx = 0, ty = 0;
+let isDragging = false, dragStartX = 0, dragStartY = 0;
+
+/* Node coordinate registry — populated during renderSchematic */
+const nodeCoords = {};   /* id → { cx, cy } in SVG space */
+
+/* Pan animation */
+let panRaf = null;
+
+/* DOM refs — declared early so all code below can reference them safely */
+const stage    = document.getElementById('schematic-stage');
+const viewport = document.getElementById('viewport-group');
+const svgEl_   = document.getElementById('svg-canvas');
+
+/* ═══════════════════════════════════════════════════════
+   LIVE AGE COUNTER
+═══════════════════════════════════════════════════════ */
+setInterval(() => {
+  const el = document.getElementById('data-age');
+  if (!el || !lastTimestamp) return;
+  const s = Math.floor((Date.now() - new Date(lastTimestamp).getTime()) / 1000);
+  const staleBanner = document.getElementById('stale-banner');
+  if (s < 60) {
+    el.textContent = s + 'S AGO';
+    el.className   = s < 45 ? 'fresh' : 'aging';
+    staleBanner.className = 'alert-banner';
+  } else if (s < STALE_S) {
+    const m = Math.floor(s/60), sec = s % 60;
+    el.textContent = m + 'M ' + sec + 'S AGO';
+    el.className   = 'aging';
+    staleBanner.className = 'alert-banner';
+  } else {
+    const m = Math.floor(s/60);
+    el.textContent = m + 'M AGO — STALE';
+    el.className   = 'stale';
+    staleBanner.className = 'alert-banner stale';
+  }
+}, 1000);
+
+/* ═══════════════════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════════════════ */
+function fmtTime(u) {
+  if (!u) return '—';
+  try { return new Date(u).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}); }
+  catch { return u; }
+}
+
+function ageS(u) {
+  if (!u) return Infinity;
+  return (Date.now() - new Date(u).getTime()) / 1000;
+}
+
+/* Determine machine-level status from host + services */
+function machineStatus(m) {
+  if (m.host.status !== 'up') return 'down';
+  const hasSvcDown = m.services.some(s => s.tailscale_check?.status !== 'up');
+  return hasSvcDown ? 'degraded' : 'up';
+}
+
+/* Determine if ANY primary-priority service is down (for red-alert) */
+function hasPrimaryServiceDown(machines) {
+  return machines.some(m =>
+    m.services.some(s =>
+      s.priority === 'P' && s.tailscale_check?.status !== 'up'
+    )
+  );
+}
+
+function statColor(up, total) {
+  if (up === total) return 'ok';
+  if (up < total * 0.7) return 'err';
+  return 'warn';
+}
+
+function cbClass(s) {
+  return s === 'up' ? 'ok' : s === 'down' ? 'err' : 'unk';
+}
+
+function priClass(p) {
+  if (!p) return '';
+  return ['P','B2','B5','B9','B99'].includes(p) ? p : '';
+}
+
+/* Extract VRAM % from detail string e.g. "VRAM: 1.6GB / 31.8GB · GPU: ..." */
+function parseVram(detail) {
+  if (!detail) return null;
+  const m = detail.match(/VRAM:\s*([\d.]+)GB\s*\/\s*([\d.]+)GB/i);
+  if (!m) return null;
+  const used = parseFloat(m[1]), total = parseFloat(m[2]);
+  if (!total) return null;
+  return { used, total, pct: Math.round((used/total)*100) };
+}
+
+/* Extract Plex stream count from detail string
+   e.g. "GC_Plex_Server v1.42... • Remote: ACTIVE • 2 libraries • No active streams"
+   or   "...• dennyrood: Midsomer Murders... [playing]" */
+function parsePlexStreams(detail) {
+  if (!detail) return null;
+  const noMatch = /no active streams/i.test(detail);
+  if (noMatch) return { count: 0, active: false };
+  /* Try to find an explicit count */
+  const countMatch = detail.match(/(\d+)\s+active\s+stream/i);
+  if (countMatch) return { count: parseInt(countMatch[1]), active: true };
+  /* Presence of [playing] implies at least 1 stream */
+  if (/\[playing\]/i.test(detail)) return { count: 1, active: true };
+  return null;
+}
+
+/* Extract ComfyUI queue status from detail string
+   e.g. "...· Queue: idle" or "...· Queue: 3 jobs" */
+function parseComfyQueue(detail) {
+  if (!detail) return null;
+  const m = detail.match(/Queue:\s*([^\s·•]+(?:\s+\w+)?)/i);
+  if (!m) return null;
+  const raw = m[1].trim().toLowerCase();
+  const isIdle = raw === 'idle';
+  return { raw: m[1].trim(), idle: isIdle };
+}
+
+/* Extract Syncthing transfer rates from detail string
+   e.g. "Synced • 5 folders • v2.0.15 • ↑ 0 B/s ↓ 0 B/s" */
+function parseSyncthingRates(detail) {
+  if (!detail) return null;
+  const up   = detail.match(/↑\s*([\d.]+\s*[KMGT]?B\/s)/i);
+  const down = detail.match(/↓\s*([\d.]+\s*[KMGT]?B\/s)/i);
+  if (!up && !down) return null;
+  const upStr   = up   ? up[1].trim()   : '0 B/s';
+  const downStr = down ? down[1].trim() : '0 B/s';
+  const isActive = !/^0\s*B\/s$/.test(upStr) || !/^0\s*B\/s$/.test(downStr);
+  return { up: upStr, down: downStr, active: isActive };
+}
+
+/* Extract heartbeat age from detail string
+   e.g. "40 sec old on amsterdamdesktop" */
+function parseHeartbeat(detail) {
+  if (!detail) return null;
+  const m = detail.match(/(\d+)\s+sec\s+old\s+on\s+(\S+)/i);
+  if (!m) return null;
+  return { seconds: parseInt(m[1]), host: m[2] };
+}
+
+/* ═══════════════════════════════════════════════════════
+   DATA PROCESSING  (pure, no DOM)
+═══════════════════════════════════════════════════════ */
+function processData(data) {
+  const s = data.summary;
+  const machines = data.machines || [];
+
+  const actualMachinesUp   = machines.filter(n => n.host.status === 'up').length;
+  const actualServicesUp   = machines.reduce((a, n) =>
+    a + n.services.filter(sv => sv.tailscale_check?.status === 'up').length, 0);
+
+  const totalChecks  = s.machines_total + s.services_total;
+  const totalPassed  = actualMachinesUp + actualServicesUp;
+  const operPct      = totalChecks ? Math.round((totalPassed / totalChecks) * 100) : 0;
+
+  const isRedAlert    = hasPrimaryServiceDown(machines) ||
+                        machines.some(n => n.host.status !== 'up');
+  const isYellowAlert = !isRedAlert && (
+    actualMachinesUp < s.machines_total ||
+    actualServicesUp < s.services_total
+  );
+
+  return { s, machines, actualMachinesUp, actualServicesUp, operPct, isRedAlert, isYellowAlert };
+}
+
+/* ═══════════════════════════════════════════════════════
+   RENDER — SUMMARY + MACHINE LIST
+═══════════════════════════════════════════════════════ */
+function renderSummary(data, pd) {
+  const { s, machines, actualMachinesUp, actualServicesUp, operPct, isRedAlert, isYellowAlert } = pd;
+  const meta = data.meta || {};
+
+  /* Alert class on body */
+  document.body.classList.remove('red-alert', 'yellow-alert');
+  if (isRedAlert)    document.body.classList.add('red-alert');
+  else if (isYellowAlert) document.body.classList.add('yellow-alert');
+
+  /* Elbow status */
+  const elbowStatus = document.getElementById('elbow-status');
+  const unitStatus  = document.getElementById('unit-status');
+  const alertColor  = isRedAlert ? 'var(--lc-red-bright)' : isYellowAlert ? 'var(--lc-gold)' : 'var(--lc-green)';
+  const alertLabel  = isRedAlert ? 'ALARM' : isYellowAlert ? 'WARNING' : 'NOMINAL';
+  const alertClass  = isRedAlert ? 'alarm' : isYellowAlert ? 'warning' : 'nominal';
+
+  elbowStatus.textContent = alertLabel;
+  elbowStatus.className   = 'elbow-top-status ' + alertClass;
+  unitStatus.textContent  = alertLabel;
+  unitStatus.style.color  = alertColor;
+
+  /* Hero % */
+  const heroPct = document.getElementById('hero-pct');
+  heroPct.textContent   = operPct + '%';
+  heroPct.style.color   = alertColor;
+
+  /* Cycle time as trend line */
+  document.getElementById('hero-trend').textContent =
+    meta.cycle_duration_ms ? 'CYCLE: ' + meta.cycle_duration_ms + 'MS' : '';
+
+  /* Stat pills */
+  const svcDown = s.services_total - actualServicesUp;
+  const pubDown = s.public_endpoints_total - s.public_endpoints_up;
+
+  const pills = [
+    { label: 'HOSTS',    value: `${actualMachinesUp}/${s.machines_total}`,        cls: statColor(actualMachinesUp, s.machines_total) },
+    { label: 'SVC',      value: `${actualServicesUp}/${s.services_total}`,          cls: statColor(actualServicesUp, s.services_total) },
+    { label: 'PUB',      value: `${s.public_endpoints_up}/${s.public_endpoints_total}`, cls: statColor(s.public_endpoints_up, s.public_endpoints_total) },
+    { label: 'SVC_DOWN', value: svcDown,  cls: svcDown  > 0 ? 'err' : 'ok' },
+    { label: 'PUB_DOWN', value: pubDown,  cls: pubDown  > 0 ? 'err' : 'ok' },
+  ];
+
+  document.getElementById('stat-row').innerHTML = pills.map(p =>
+    `<div class="stat-pill ${p.cls}">
+      <span class="pill-label">${p.label}</span>
+      <span class="pill-value">${p.value}</span>
+    </div>`
+  ).join('');
+
+  /* Meta header */
+  document.getElementById('meta-checker').textContent = (meta.checker_host || '—').toUpperCase();
+  document.getElementById('meta-time').textContent    = fmtTime(meta.timestamp_utc);
+  document.getElementById('stardate').textContent     = `SD ${Math.floor(Date.now()/10000)}.${Math.floor(Date.now()%1000)}`;
+  document.getElementById('footer-cycle').textContent = meta.cycle_duration_ms ? `CYCLE: ${meta.cycle_duration_ms}MS` : '';
+  document.getElementById('node-tag').textContent     = 'FLEET_OVERVIEW';
+
+  /* Meta-info on schematic footer */
+  document.getElementById('meta-info').textContent = IS_BKP ? 'SYSTEM: BACKUP_FEED_ACTIVE' : 'SYSTEM: PRIMARY_FEED_ACTIVE';
+}
+
+function renderMachineList(machines, checkerName) {
+  const list = document.getElementById('machine-list');
+  list.innerHTML = machines.map(m => {
+    const st       = machineStatus(m);
+    const latency  = m.host.response_time_ms;
+    const latClass = !latency ? 'offline' : latency > 100 ? 'slow' : '';
+    const latText  = m.host.status !== 'up' ? 'OFFLINE' : (latency !== null && latency !== undefined ? latency + 'MS' : '0MS');
+
+    /* Is this the hub/checker machine? */
+    const isHub = checkerName && (
+      m.machine.tailscale_name.toLowerCase().includes(checkerName.toLowerCase()) ||
+      checkerName.toLowerCase().includes(m.machine.tailscale_name.toLowerCase())
+    );
+
+    /* VRAM bar — find first service with parseable VRAM detail */
+    let vramHtml = '';
+    for (const s of m.services) {
+      const vram = parseVram(s.tailscale_check?.detail);
+      if (vram) {
+        const col = vram.pct > 80 ? 'var(--lc-red-bright)' : vram.pct > 60 ? 'var(--lc-amber)' : 'var(--lc-green)';
+        vramHtml = `<div class="mrow-vram">
+          <span class="vram-label">VRAM</span>
+          <div class="vram-track"><div class="vram-fill" style="width:${Math.min(vram.pct,100)}%;background:${col}"></div></div>
+          <span class="vram-pct" style="color:${col}">${vram.pct}%</span>
+        </div>`;
+        break;
+      }
+    }
+
+    /* Ollama model count */
+    let ollamaHtml = '';
+    for (const s of m.services) {
+      if (s.name === 'Ollama' && s.tailscale_check?.detail) {
+        const mo = s.tailscale_check.detail.match(/(\d+)\s+model/i);
+        if (mo) { const mc = mo[1]; ollamaHtml = `<div class="mrow-ollama">OLLAMA: ${mc} MODEL${mc !== '1' ? 'S' : ''} LOADED</div>`; break; }
+      }
+    }
+
+    /* Activity badges — Plex streams, ComfyUI queue, Syncthing, heartbeat */
+    const actBadges = [];
+    for (const s of m.services) {
+      const detail = s.tailscale_check?.detail || '';
+
+      if (s.name === 'Plex') {
+        const plex = parsePlexStreams(detail);
+        if (plex) {
+          if (plex.active) {
+            actBadges.push(`<span class="act-badge plex-active">▶ ${plex.count} STREAM${plex.count !== 1 ? 'S' : ''}</span>`);
+          }
+          /* Don't show idle plex badge — too noisy, idle is the default */
+        }
+      }
+
+      if (s.name === 'ComfyUI') {
+        const queue = parseComfyQueue(detail);
+        if (queue && !queue.idle) {
+          actBadges.push(`<span class="act-badge queue-active">⚙ QUEUE: ${queue.raw.toUpperCase()}</span>`);
+        }
+      }
+
+      if (s.name === 'Syncthing') {
+        const sync = parseSyncthingRates(detail);
+        if (sync && sync.active) {
+          actBadges.push(`<span class="act-badge sync-active">⇅ ${sync.up} ↑ ${sync.down} ↓</span>`);
+        }
+      }
+
+      /* Heartbeat check — surface age with colour coding */
+      if (s.name.toLowerCase().includes('heartbeat')) {
+        const hb = parseHeartbeat(detail);
+        if (hb) {
+          const cls = hb.seconds > 300 ? 'hb-stale' : hb.seconds > 120 ? 'hb-warn' : 'hb-ok';
+          const label = hb.seconds > 60
+            ? `HB: ${Math.floor(hb.seconds/60)}M ${hb.seconds%60}S`
+            : `HB: ${hb.seconds}S`;
+          actBadges.push(`<span class="act-badge ${cls}" title="Heartbeat from ${hb.host}">${label}</span>`);
+        }
+      }
+    }
+    const activityHtml = actBadges.length
+      ? `<div class="mrow-activity">${actBadges.join('')}</div>`
+      : '';
+
+    const chips = m.services.slice(0, 5).map(s => {
+      const sUp  = s.tailscale_check?.status === 'up';
+      const hasPub = !!s.public_check;
+      const pubOk  = s.public_check?.status === 'up';
+      let chip = `<span class="svc-chip ${sUp ? 'up' : 'down'}">${s.name.toUpperCase()}</span>`;
+      if (hasPub) chip += `<span class="svc-chip pub">${pubOk ? 'PUB✓' : 'PUB✗'}</span>`;
+      return chip;
+    }).join('');
+
+    const isSelected = currentSelectedId === m.machine.tailscale_name;
+    const hubBadge  = isHub
+      ? `<span style="font-family:var(--font-data);font-size:0.58rem;padding:1px 5px;border:1px solid rgba(255,204,0,0.4);color:var(--lc-gold);background:rgba(255,204,0,0.07);margin-left:4px;">HUB</span>`
+      : '';
+
+    return `<div class="mrow${isSelected ? ' selected' : ''}${isHub ? ' hub-row' : ''}"
+                 data-id="${m.machine.tailscale_name}"
+                 tabindex="0"
+                 onclick="selectMachine('${m.machine.tailscale_name}')">
+      <div class="mrow-strip ${st}"></div>
+      <div class="mrow-body">
+        <div class="mrow-top">
+          <span class="mrow-name">${m.machine.display_name.toUpperCase()}${hubBadge}</span>
+          <span class="mrow-latency ${latClass}">${latText}</span>
+        </div>
+        <div class="mrow-role">${m.machine.primary_role.toUpperCase()}</div>
+        <div class="mrow-chips">${chips}</div>
+        ${vramHtml}
+        ${ollamaHtml}
+        ${activityHtml}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ═══════════════════════════════════════════════════════
+   RENDER — DETAIL DRILL-DOWN
+═══════════════════════════════════════════════════════ */
+function renderDetail(m) {
+  const isUp      = m.host.status === 'up';
+  const hasSvcDn  = m.services.some(s => s.tailscale_check?.status !== 'up');
+  const st        = machineStatus(m);
+  const stLabel   = !isUp ? 'OFFLINE' : hasSvcDn ? 'DEGRADED' : 'ACTIVE';
+  const stClass   = !isUp ? 'offline' : hasSvcDn ? 'degraded' : 'active';
+
+  /* Header */
+  document.getElementById('detail-name').textContent     = m.machine.display_name.toUpperCase();
+  document.getElementById('node-tag').textContent        = 'UNIT_ID_' + m.machine.tailscale_name.toUpperCase();
+  const badge = document.getElementById('detail-status-badge');
+  badge.textContent  = stLabel;
+  badge.className    = 'detail-status-badge ' + stClass;
+
+  /* Machine identity grid */
+  const identRows = [
+    { label: 'DISPLAY_NAME',   val: m.machine.display_name },
+    { label: 'TAILSCALE_NAME', val: m.machine.tailscale_name },
+    { label: 'TAILSCALE_IP',   val: m.machine.tailscale_ip },
+    { label: 'PRIMARY_ROLE',   val: m.machine.primary_role },
+    { label: 'HOST_STATUS',    val: m.host.status.toUpperCase() },
+    { label: 'RESPONSE_MS',    val: m.host.response_time_ms ? m.host.response_time_ms + 'MS' : '—' },
+  ];
+
+  /* Services */
+  const svcsHtml = m.services.map(s => {
+    const up         = s.tailscale_check?.status === 'up';
+    const tc         = s.tailscale_check || {};
+    const pc         = s.public_check;
+    const statusCol  = up ? 'var(--lc-green)' : 'var(--lc-red-bright)';
+    const vram       = parseVram(tc.detail);
+
+    /* TS badge */
+    const tsBadge = `<span class="cbadge ${cbClass(tc.status)}">${up ? 'OK' : 'ERR'}&nbsp;TS</span>`;
+    /* PUB badge */
+    const pubBadge = pc
+      ? `<span class="cbadge ${cbClass(pc.status)}">${pc.status==='up'?'OK':'ERR'}&nbsp;PUB</span>`
+      : '';
+    /* Priority badge */
+    const pBadge = s.priority
+      ? `<span class="pri-badge ${priClass(s.priority)}">${s.priority}</span>`
+      : '';
+
+    /* Meta items */
+    const metaItems = [];
+    if (s.port) metaItems.push({ k: 'PORT', v: ':' + s.port });
+    if (tc.response_time_ms) metaItems.push({ k: 'TS_MS', v: tc.response_time_ms + 'MS' });
+    if (pc?.response_time_ms) metaItems.push({ k: 'PUB_MS', v: pc.response_time_ms + 'MS' });
+    if (pc?.http_code) metaItems.push({ k: 'HTTP', v: pc.http_code, err: pc.http_code >= 500 });
+    if (tc.detail) metaItems.push({ k: 'DETAIL', v: tc.detail });
+
+    const metaHtml = metaItems.map(mi =>
+      `<span class="meta-item"><span class="mk">${mi.k}:</span><span class="mv${mi.err?' err':''}">${mi.v}</span></span>`
+    ).join('');
+
+    /* Parsed activity blocks for specific service types */
+    let actBlock = '';
+
+    if (s.name === 'Plex') {
+      const plex = parsePlexStreams(tc.detail);
+      if (plex) {
+        const streamColor = plex.active ? 'var(--lc-orange)' : 'rgba(153,204,255,0.4)';
+        const streamText  = plex.active
+          ? `▶ ${plex.count} ACTIVE STREAM${plex.count !== 1 ? 'S' : ''}`
+          : 'NO ACTIVE STREAMS';
+        /* Extract server name and library count */
+        const serverMatch = tc.detail?.match(/^(\S+)\s+v[\d.]+/);
+        const libMatch    = tc.detail?.match(/(\d+)\s+librar/i);
+        const serverName  = serverMatch ? serverMatch[1] : '';
+        const libCount    = libMatch    ? libMatch[1]    : '';
+        actBlock = `<div style="margin:2px 10px 6px;padding:5px 8px;background:rgba(255,153,0,0.04);border:1px solid rgba(255,153,0,0.15);font-family:var(--font-data);font-size:0.66rem;display:flex;gap:16px;flex-wrap:wrap;">
+          ${serverName ? `<span><span style="color:var(--lc-periwinkle);opacity:0.7">SERVER:</span> <span style="color:var(--lc-blue)">${serverName}</span></span>` : ''}
+          ${libCount   ? `<span><span style="color:var(--lc-periwinkle);opacity:0.7">LIBS:</span> <span style="color:var(--lc-gold)">${libCount}</span></span>` : ''}
+          <span style="color:${streamColor}">${streamText}</span>
+        </div>`;
+      }
+    }
+
+    if (s.name === 'ComfyUI') {
+      const queue = parseComfyQueue(tc.detail);
+      const vramInfo = parseVram(tc.detail);
+      if (queue || vramInfo) {
+        const queueColor = queue && !queue.idle ? 'var(--lc-gold)' : 'rgba(153,153,255,0.5)';
+        const queueText  = queue ? queue.raw.toUpperCase() : '—';
+        const gpuMatch   = tc.detail?.match(/GPU:\s*[^·•]+?([^:·•]+?)\s*(?::|·|•|$)/);
+        actBlock = `<div style="margin:2px 10px 6px;padding:5px 8px;background:rgba(255,204,0,0.03);border:1px solid rgba(255,204,0,0.12);font-family:var(--font-data);font-size:0.66rem;display:flex;gap:16px;flex-wrap:wrap;">
+          <span><span style="color:var(--lc-periwinkle);opacity:0.7">QUEUE:</span> <span style="color:${queueColor}">${queueText}</span></span>
+          ${vramInfo ? `<span><span style="color:var(--lc-periwinkle);opacity:0.7">VRAM:</span> <span style="color:var(--lc-green)">${vramInfo.used}/${vramInfo.total}GB (${vramInfo.pct}%)</span></span>` : ''}
+        </div>`;
+      }
+    }
+
+    if (s.name === 'Syncthing') {
+      const sync = parseSyncthingRates(tc.detail);
+      const folderMatch = tc.detail?.match(/(\d+)\s+folder/i);
+      const versionMatch = tc.detail?.match(/v([\d.]+)/);
+      if (sync || folderMatch) {
+        const syncColor = sync?.active ? 'var(--lc-green)' : 'rgba(153,204,255,0.4)';
+        actBlock = `<div style="margin:2px 10px 6px;padding:5px 8px;background:rgba(0,255,136,0.03);border:1px solid rgba(0,255,136,0.12);font-family:var(--font-data);font-size:0.66rem;display:flex;gap:16px;flex-wrap:wrap;">
+          ${folderMatch  ? `<span><span style="color:var(--lc-periwinkle);opacity:0.7">FOLDERS:</span> <span style="color:var(--lc-blue)">${folderMatch[1]}</span></span>` : ''}
+          ${versionMatch ? `<span><span style="color:var(--lc-periwinkle);opacity:0.7">VER:</span> <span style="color:var(--lc-periwinkle)">v${versionMatch[1]}</span></span>` : ''}
+          ${sync ? `<span style="color:${syncColor}">↑ ${sync.up} ↓ ${sync.down}</span>` : ''}
+        </div>`;
+      }
+    }
+
+    if (s.name.toLowerCase().includes('heartbeat')) {
+      const hb = parseHeartbeat(tc.detail);
+      if (hb) {
+        const hbColor = hb.seconds > 300 ? 'var(--lc-red-bright)' : hb.seconds > 120 ? 'var(--lc-amber)' : 'var(--lc-green)';
+        const hbAge   = hb.seconds > 60
+          ? `${Math.floor(hb.seconds/60)}M ${hb.seconds%60}S`
+          : `${hb.seconds}S`;
+        const hbWarn  = hb.seconds > 120 ? (hb.seconds > 300 ? ' — STALE' : ' — AGING') : '';
+        actBlock = `<div style="margin:2px 10px 6px;padding:5px 8px;background:rgba(153,153,255,0.03);border:1px solid rgba(153,153,255,0.15);font-family:var(--font-data);font-size:0.66rem;display:flex;gap:16px;">
+          <span><span style="color:var(--lc-periwinkle);opacity:0.7">SOURCE:</span> <span style="color:var(--lc-blue)">${hb.host.toUpperCase()}</span></span>
+          <span><span style="color:var(--lc-periwinkle);opacity:0.7">AGE:</span> <span style="color:${hbColor}">${hbAge}${hbWarn}</span></span>
+        </div>`;
+      }
+    }
+
+    /* Public block */
+    let pubBlock = '';
+    if (pc) {
+      const pubStatus = pc.status === 'up'
+        ? `<span class="pub-ok">ONLINE</span>`
+        : `<span class="pub-err">DEGRADED</span>`;
+      pubBlock = `<div class="svc-pub-block">
+        PUB_ENDPOINT: <a class="pub-url" href="${pc.url}" target="_blank" rel="noopener">${pc.url}</a>
+        &nbsp;·&nbsp; ${pubStatus} &nbsp;·&nbsp; HTTP&nbsp;${pc.http_code || '—'}
+        ${pc.response_time_ms ? '&nbsp;·&nbsp; ' + pc.response_time_ms + 'MS' : ''}
+      </div>`;
+    }
+
+    /* VRAM bar (if parseable) */
+    let vramBar = '';
+    if (vram) {
+      const pct = Math.min(vram.pct, 100);
+      const col = pct > 80 ? 'var(--lc-red-bright)' : pct > 60 ? 'var(--lc-amber)' : 'var(--lc-green)';
+      vramBar = `<div style="margin:2px 10px 6px;display:flex;align-items:center;gap:8px;font-family:var(--font-data);font-size:0.65rem;color:var(--lc-periwinkle)">
+        <span>VRAM</span>
+        <div style="flex:1;height:4px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${col};transition:width 0.5s;border-radius:2px"></div>
+        </div>
+        <span style="color:${col}">${vram.used}/${vram.total}GB</span>
+      </div>`;
+    }
+
+    return `<div class="svc-detail-row ${up?'up':'down'}">
+      <div class="svc-detail-head">
+        <span class="svc-detail-name">${s.name.toUpperCase()}</span>
+        <div class="svc-detail-badges">${pBadge}${tsBadge}${pubBadge}</div>
+      </div>
+      ${metaHtml ? `<div class="svc-detail-meta">${metaHtml}</div>` : ''}
+      ${actBlock}
+      ${vramBar}
+      ${pubBlock}
+    </div>`;
+  }).join('');
+
+  /* Poll strip */
+  const pollStrip = m.poll ? `<div class="poll-strip">
+    <span><strong>POLLED:</strong> ${fmtTime(m.poll.timestamp_utc)}</span>
+    <span><strong>DURATION:</strong> ${m.poll.poll_duration_ms}MS</span>
+    <span><strong>CHECKER:</strong> ${(m.poll.checker_host||'—').toUpperCase()}</span>
+  </div>` : '';
+
+  /* Raw JSON (conditionally shown) */
+  const rawHtml = showRawJson
+    ? `<div class="section-title" style="margin-top:8px">RAW_DATA_MANIFEST</div>
+       <div class="raw-json">${JSON.stringify(m, null, 2)}</div>`
+    : '';
+
+  document.getElementById('detail-content').innerHTML = `
+    <div class="section-title" style="margin-top:8px">CORE_MACHINE_IDENTITY</div>
+    <div class="ident-grid">
+      ${identRows.map(r => `<div class="ident-cell">
+        <div class="ident-label">${r.label}</div>
+        <div class="ident-val">${r.val}</div>
+      </div>`).join('')}
+    </div>
+    <div class="section-title">SUBSYSTEM_ANALYSIS (${m.services.length})</div>
+    ${svcsHtml}
+    ${pollStrip}
+    ${rawHtml}
+  `;
+
+  /* Show detail section, scroll into view */
+  const ds = document.getElementById('detail-section');
+  ds.classList.add('visible');
+  setTimeout(() => ds.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+}
+
+/* ═══════════════════════════════════════════════════════
+   RENDER — SCHEMATIC
+═══════════════════════════════════════════════════════ */
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
+}
+
+function renderHub(cx, cy, isStale, operPct, hubMachine) {
+  const g = svgEl('g', { transform: `translate(${cx},${cy})` });
+
+  /* Clickable — loads hub machine detail via mousedown/mouseup (matches node pattern) */
+  if (hubMachine) {
+    g.style.cursor = 'pointer';
+    g.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      window._drag = { active: true, id: hubMachine.machine.tailscale_name, moved: false, offsetX: 0, offsetY: 0 };
+    });
+  }
+
+  /* ── Outer rotating dashed ring (sync status) */
+  const outerRing = svgEl('circle', {
+    r: 80, fill: 'none',
+    stroke: isStale ? 'var(--lc-amber)' : 'var(--lc-gold)',
+    'stroke-width': 1, 'stroke-dasharray': '6 16', opacity: 0.25
+  });
+  const outerAnim = document.createElementNS(SVG_NS, 'animateTransform');
+  Object.entries({ attributeName:'transform', type:'rotate', from:'0', to:'360', dur:'70s', repeatCount:'indefinite' })
+    .forEach(([k,v]) => outerAnim.setAttribute(k, v));
+  outerRing.appendChild(outerAnim);
+  g.appendChild(outerRing);
+
+  /* ── Counter-rotating inner ring */
+  const innerRing = svgEl('circle', {
+    r: 55, fill: 'none',
+    stroke: 'var(--lc-periwinkle)',
+    'stroke-width': 1, 'stroke-dasharray': '3 9', opacity: 0.3
+  });
+  const innerAnim = document.createElementNS(SVG_NS, 'animateTransform');
+  Object.entries({ attributeName:'transform', type:'rotate', from:'0', to:'-360', dur:'40s', repeatCount:'indefinite' })
+    .forEach(([k,v]) => innerAnim.setAttribute(k, v));
+  innerRing.appendChild(innerAnim);
+  g.appendChild(innerRing);
+
+  /* ── Health arc (progress ring at r=42, represents operPct) */
+  const arcR   = 42;
+  const arcC   = 2 * Math.PI * arcR;
+  const filled = arcC * (operPct / 100);
+  const gap    = arcC - filled;
+  const arcColor = operPct >= 90 ? 'var(--lc-green)'
+                 : operPct >= 70 ? 'var(--lc-amber)'
+                 : 'var(--lc-red-bright)';
+
+  /* Background arc */
+  g.appendChild(svgEl('circle', {
+    r: arcR, fill: 'none',
+    stroke: 'rgba(255,255,255,0.07)', 'stroke-width': 4,
+    'stroke-dasharray': `${arcC}`, transform: 'rotate(-90)'
+  }));
+  /* Filled arc */
+  g.appendChild(svgEl('circle', {
+    r: arcR, fill: 'none',
+    stroke: arcColor, 'stroke-width': 4, 'stroke-linecap': 'round',
+    'stroke-dasharray': `${filled} ${gap}`,
+    transform: 'rotate(-90)',
+    filter: 'url(#glow)', opacity: '0.8'
+  }));
+
+  /* ── Radial tick marks at r=68 */
+  for (let t = 0; t < 24; t++) {
+    const angle  = (t / 24) * 2 * Math.PI;
+    const r1 = 70, r2 = t % 6 === 0 ? 78 : 74;
+    const x1 = Math.cos(angle) * r1, y1 = Math.sin(angle) * r1;
+    const x2 = Math.cos(angle) * r2, y2 = Math.sin(angle) * r2;
+    g.appendChild(svgEl('line', {
+      x1, y1, x2, y2,
+      stroke: t % 6 === 0 ? 'var(--lc-gold)' : 'rgba(153,153,255,0.3)',
+      'stroke-width': t % 6 === 0 ? 1.5 : 0.8,
+      opacity: t % 6 === 0 ? '0.6' : '0.4'
+    }));
+  }
+
+  /* ── Core glow circle */
+  g.appendChild(svgEl('circle', {
+    r: 26, fill: 'var(--lc-gold)', filter: 'url(#glow-strong)', opacity: '0.9'
+  }));
+  g.appendChild(svgEl('circle', { r: 14, fill: '#000' }));
+
+  /* ── Pct text inside hub */
+  const pctTxt = svgEl('text', {
+    y: 5, 'text-anchor': 'middle',
+    fill: arcColor,
+    style: 'font-size:10px;font-weight:bold;font-family:Share Tech Mono,monospace'
+  });
+  pctTxt.textContent = operPct + '%';
+  g.appendChild(pctTxt);
+
+  /* ── Info box ABOVE hub circle ──
+     Box sits above the hub rings, conduit paths originate
+     from the hub circle center (cx,cy) below it.
+     Uses same LCARS rounded-left style as arc nodes.
+  */
+  const hubName   = hubMachine ? hubMachine.machine.display_name.toUpperCase() : 'FLEET_HUB_ALPHA';
+  const hubRole   = hubMachine ? hubMachine.machine.primary_role.toUpperCase() : 'CHECKER HOST';
+  const hubSt     = hubMachine ? machineStatus(hubMachine) : 'up';
+  const hubLat    = hubMachine ? (hubMachine.host.response_time_ms || 0) : 0;
+
+  /* Box geometry — centered above hub, bottom edge at y=-95 */
+  const boxW  = 220, boxH = 76;
+  const boxX  = -(boxW / 2);
+  const boxY  = -(boxH + 98);   /* sits above the outer ring */
+  const rl    = 12, hh = 22;
+
+  const hubHeaderColor = hubSt === 'down'     ? 'var(--lc-red-bright)'
+                       : hubSt === 'degraded' ? 'var(--lc-gold)'
+                       : 'var(--lc-gold)';
+  const hubBg = hubSt === 'down'     ? 'rgba(255,51,51,0.05)'
+              : hubSt === 'degraded' ? 'rgba(255,204,0,0.05)'
+              : 'rgba(8,14,24,0.95)';
+
+  /* Rounded-left LCARS box path */
+  const bp = `M ${boxX+rl} ${boxY} L ${boxX+boxW} ${boxY} L ${boxX+boxW} ${boxY+boxH}
+    L ${boxX+rl} ${boxY+boxH} Q ${boxX} ${boxY+boxH} ${boxX} ${boxY+boxH-rl}
+    L ${boxX} ${boxY+rl} Q ${boxX} ${boxY} ${boxX+rl} ${boxY} Z`;
+  g.appendChild(svgEl('path', { d: bp, fill: hubBg, stroke: hubHeaderColor, 'stroke-width': '2', opacity: '0.95' }));
+
+  /* Header band */
+  const hp = `M ${boxX+rl} ${boxY} L ${boxX+boxW} ${boxY} L ${boxX+boxW} ${boxY+hh}
+    L ${boxX+rl} ${boxY+hh} Q ${boxX} ${boxY+hh} ${boxX} ${boxY+hh-rl}
+    L ${boxX} ${boxY+rl} Q ${boxX} ${boxY} ${boxX+rl} ${boxY} Z`;
+  g.appendChild(svgEl('path', { d: hp, fill: hubHeaderColor, opacity: '0.9' }));
+
+  /* Machine name in header */
+  const nt1 = svgEl('text', {
+    x: boxX + rl + 6, y: boxY + 15, fill: '#000',
+    style: 'font-size:12px;font-weight:700;font-family:Share Tech Mono,monospace;letter-spacing:1.5px'
+  });
+  nt1.textContent = hubName;
+  g.appendChild(nt1);
+
+  /* Role */
+  const nt2 = svgEl('text', {
+    x: boxX + rl + 6, y: boxY + hh + 16, fill: hubHeaderColor,
+    style: 'font-size:9px;font-family:Share Tech Mono,monospace;letter-spacing:1px;opacity:0.8'
+  });
+  nt2.textContent = hubRole;
+  g.appendChild(nt2);
+
+  /* Status line */
+  const nt3 = svgEl('text', {
+    x: boxX + rl + 6, y: boxY + hh + 34,
+    style: 'font-size:9px;font-family:Share Tech Mono,monospace;font-weight:bold'
+  });
+  if (hubSt === 'down')          { nt3.setAttribute('fill','var(--lc-red-bright)'); nt3.textContent = 'LINK_SEVERED'; }
+  else if (hubSt === 'degraded') { nt3.setAttribute('fill','var(--lc-gold)');       nt3.textContent = 'SERVICE_DEGRADED'; }
+  else                           { nt3.setAttribute('fill','var(--lc-green)');       nt3.textContent = `CHECKER // ${hubLat}MS`; }
+  g.appendChild(nt3);
+
+  /* Right accent bar */
+  g.appendChild(svgEl('rect', {
+    x: boxX + boxW - 4, y: boxY + hh, width: 4, height: boxH - hh,
+    fill: hubHeaderColor, opacity: '0.4'
+  }));
+
+  /* Selected highlight */
+  if (hubMachine && currentSelectedId === hubMachine.machine.tailscale_name) {
+    g.appendChild(svgEl('rect', {
+      x: boxX - 2, y: boxY - 2, width: boxW + 4, height: boxH + 4,
+      rx: 3, fill: 'none',
+      stroke: 'var(--lc-gold)', 'stroke-width': 2,
+      filter: 'url(#glow)', opacity: '0.7'
+    }));
+  }
+
+  /* Connecting stem: thin line from bottom-center of box down to hub circle */
+  g.appendChild(svgEl('line', {
+    x1: 0, y1: boxY + boxH,
+    x2: 0, y2: -28,
+    stroke: hubHeaderColor, 'stroke-width': '1.5', opacity: '0.4',
+    'stroke-dasharray': '3 4'
+  }));
+
+  return g;
+}
+
+function renderSchematic(data) {
+  lastData = data;
+  const pd       = processData(data);
+  const machines = pd.machines;
+  const isStale  = ageS(data.meta?.timestamp_utc) > STALE_S;
+
+  const conduitGroup = document.getElementById('conduit-group');
+  const nodeGroup    = document.getElementById('node-group');
+  const hubGroup     = document.getElementById('hub-group');
+  conduitGroup.innerHTML = '';
+  nodeGroup.innerHTML    = '';
+  hubGroup.innerHTML     = '';
+
+  /* ── Hub: separate path-origin coords from hub-visual coords ──
+     PATH coords: where conduit lines originate (mathematical center)
+     HUB coords:  where the hub circle is rendered (slightly offset
+                  so the circle visually centers on the converging lines) */
+  const cx = 700, cy = 720;        /* PATH origin — conduits start here */
+  const hubCx = cx + 22, hubCy = cy + 27;  /* HUB visual — circle center */
+
+  /* ── Identify hub machine (checker host) ── */
+  const checkerName = (data.meta?.checker_host || '').toLowerCase();
+  const hubMachine  = machines.find(m =>
+    m.machine.tailscale_name.toLowerCase().includes(checkerName) ||
+    checkerName.includes(m.machine.tailscale_name.toLowerCase())
+  ) || null;
+  const hubId = hubMachine?.machine.tailscale_name || null;
+
+  /* Render hub at visual center; conduits originate at cx/cy */
+  hubGroup.appendChild(renderHub(hubCx, hubCy, isStale, pd.operPct, hubMachine));
+  if (hubMachine) nodeCoords[hubId] = { cx: hubCx, cy: hubCy };
+
+  /* Non-hub machines */
+  const arcMachines = machines.filter(m => m.machine.tailscale_name !== hubId);
+
+
+
+
+
+  /* ── DEFAULT COLUMN LAYOUT ───────────────────────────────────────
+     Hub sits at bottom-center. Nodes arranged in columns above it,
+     sorted by latency band (LAN → WAN → REMOTE left to right).
+     Positions stored in localStorage — drag to reposition, persisted.
+     Conduits always redraw from hub to current node position.
+  ─────────────────────────────────────────────────────────────────── */
+
+  const BOX_W = 200, BOX_H = 72;
+  const COL_X_START = 80;    /* leftmost column x */
+  const COL_SPACING = 240;   /* horizontal gap between columns */
+  const ROW_SPACING = 110;   /* vertical gap between rows in a column */
+  const TOP_Y       = 60;    /* y of topmost node */
+
+  /* Latency band classification for default layout ordering */
+  function getBand(m) {
+    const lat = m.host.response_time_ms ?? 999;
+    const st  = machineStatus(m);
+    if (st === 'down') return 2;
+    if (lat <= 8)   return 0;
+    if (lat <= 250) return 1;
+    return 2;
+  }
+
+  /* Sort arc machines: band first, then latency within band */
+  const sorted = [...arcMachines].sort((a, b) => {
+    const ba = getBand(a), bb = getBand(b);
+    if (ba !== bb) return ba - bb;
+    return (a.host.response_time_ms ?? 999) - (b.host.response_time_ms ?? 999);
+  });
+
+  /* Compute default positions: distribute into columns of max 4 nodes */
+  const MAX_PER_COL = 4;
+  function defaultPositions(machines) {
+    const positions = {};
+    machines.forEach((m, i) => {
+      const col = Math.floor(i / MAX_PER_COL);
+      const row = i % MAX_PER_COL;
+      positions[m.machine.tailscale_name] = {
+        x: COL_X_START + col * COL_SPACING,
+        y: TOP_Y + row * ROW_SPACING
+      };
+    });
+    return positions;
+  }
+
+  /* ── localStorage position store ── */
+  const STORE_KEY = 'fleet_node_positions_v1';
+
+  function loadPositions() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+
+  function savePositions(positions) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(positions)); }
+    catch {}
+  }
+
+  function resetPositions() {
+    try { localStorage.removeItem(STORE_KEY); }
+    catch {}
+    window.initialFitDone = false;
+    if (lastData) renderSchematic(lastData);
+  }
+  window.resetNodePositions = resetPositions;
+
+  /* Merge saved over defaults — unknown machines get defaults */
+  const defaults = defaultPositions(sorted);
+  const saved    = loadPositions();
+  const nodePos  = {};
+  sorted.forEach(m => {
+    const id = m.machine.tailscale_name;
+    nodePos[id] = saved[id] ?? defaults[id];
+  });
+
+  /* ── DRAG STATE ── */
+  if (!window._drag) window._drag = { active: false, id: null, offsetX: 0, offsetY: 0 };
+
+  /* ── RENDER CONDUITS + NODES ── */
+
+  /* Draw conduit from hub to node center */
+  function drawConduit(id, nx, ny, m) {
+    const st        = machineStatus(m);
+    const latency   = m.host.response_time_ms ?? 0;
+    const bi        = getBand(m);
+    const smoothLat = window._latSmooth?.[id] ?? latency;
+
+    let conduitColor = 'var(--lc-blue)';
+    if (st === 'down')               conduitColor = 'var(--lc-red-bright)';
+    else if (st === 'degraded')      conduitColor = 'var(--lc-gold)';
+    else if (bi === 2)               conduitColor = 'var(--lc-amber)';
+    else if (bi === 1 && latency>80) conduitColor = 'var(--lc-amber)';
+
+    const hasPrimary = m.services.some(s => s.priority === 'P');
+    const hasB2      = m.services.some(s => s.priority === 'B2');
+    const base  = hasPrimary ? 3 : hasB2 ? 2 : 1.5;
+    const lmod  = bi === 2 ? 0.65 : (bi===1 && smoothLat>80) ? 0.85 : 1.0;
+    const strokeW = +(base * lmod).toFixed(2);
+
+    /* Gentle quadratic curve: control point halfway, offset slightly */
+    const seed = id.split('').reduce((a,c) => a + c.charCodeAt(0), 0);
+    const midX = (cx + nx) / 2 + ((seed % 60) - 30);
+    const midY = (cy + ny) / 2 - 20;
+    const pathD = `M ${cx} ${cy} Q ${midX} ${midY} ${nx} ${ny}`;
+
+    conduitGroup.appendChild(svgEl('path', {
+      id: 'path-' + id, d: pathD, class: 'conduit',
+      stroke: conduitColor, 'stroke-width': strokeW
+    }));
+
+    /* Particles */
+    if (st !== 'down') {
+      const numP = hasPrimary ? 2 : 1;
+      for (let p = 0; p < numP; p++) {
+        const dot  = svgEl('circle', { r: hasPrimary?'2.5':'1.8', fill: conduitColor, filter:'url(#glow)', opacity:'0.9' });
+        const anim = document.createElementNS(SVG_NS, 'animateMotion');
+        const dur  = Math.max(0.6, smoothLat / 45);
+        anim.setAttribute('dur', dur + 's');
+        anim.setAttribute('begin', p===1 ? (dur/2)+'s' : '0s');
+        anim.setAttribute('repeatCount', 'indefinite');
+        anim.setAttribute('path', pathD);
+        dot.appendChild(anim);
+        conduitGroup.appendChild(dot);
+      }
+    }
+  }
+
+  /* Draw LCARS node box at (nx, ny) */
+  function drawNodeBox(m, nx, ny) {
+    const id      = m.machine.tailscale_name;
+    const st      = machineStatus(m);
+    const latency = m.host.response_time_ms ?? 0;
+    const bi      = getBand(m);
+
+    const nodeG = svgEl('g', {
+      id: 'node-' + id,
+      class: 'node-group'
+        + (currentSelectedId === id ? ' selected' : '')
+        + (st === 'degraded' ? ' has-svc-failure status-degraded' : '')
+        + (st === 'down'     ? ' status-down' : '')
+    });
+    nodeG.style.cursor = 'grab';
+
+    /* Drag start — selection handled in onDragEnd when !moved */
+    nodeG.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const svgRect = document.getElementById('svg-canvas').getBoundingClientRect();
+      const curX = (e.clientX - svgRect.left - tx) / scale;
+      const curY = (e.clientY - svgRect.top  - ty) / scale;
+      window._drag = {
+        active: true, id, moved: false,
+        offsetX: curX - nx, offsetY: curY - ny
+      };
+      nodeG.style.cursor = 'grabbing';
+    });
+
+    const statusColor = st==='down' ? 'var(--lc-red-bright)' : st==='degraded' ? 'var(--lc-gold)' : 'var(--lc-green)';
+    const headerColor = st==='down' ? 'var(--lc-red-bright)' : st==='degraded' ? 'var(--lc-gold)'
+                      : bi===0 ? 'var(--lc-periwinkle)' : bi===1 ? 'var(--lc-blue)' : 'var(--lc-amber)';
+
+    const bx=nx-BOX_W/2, by=ny-BOX_H/2, bw=BOX_W, bh=BOX_H, hh=22, rl=12;
+    const bg = st==='down' ? 'rgba(255,51,51,0.05)' : st==='degraded' ? 'rgba(255,204,0,0.05)' : 'rgba(8,14,24,0.95)';
+
+    const bp = `M ${bx+rl} ${by} L ${bx+bw} ${by} L ${bx+bw} ${by+bh} L ${bx+rl} ${by+bh} Q ${bx} ${by+bh} ${bx} ${by+bh-rl} L ${bx} ${by+rl} Q ${bx} ${by} ${bx+rl} ${by} Z`;
+    nodeG.appendChild(svgEl('path', { d:bp, fill:bg, stroke:headerColor, 'stroke-width':'1.5', opacity:'0.9' }));
+
+    const hp = `M ${bx+rl} ${by} L ${bx+bw} ${by} L ${bx+bw} ${by+hh} L ${bx+rl} ${by+hh} Q ${bx} ${by+hh} ${bx} ${by+hh-rl} L ${bx} ${by+rl} Q ${bx} ${by} ${bx+rl} ${by} Z`;
+    nodeG.appendChild(svgEl('path', { d:hp, fill:headerColor, opacity:'0.85' }));
+
+    const nm = svgEl('text', { x:bx+rl+6, y:by+15, fill:'#000', style:'font-size:11px;font-weight:700;font-family:Share Tech Mono,monospace;letter-spacing:1.5px' });
+    nm.textContent = m.machine.display_name.toUpperCase();
+    nodeG.appendChild(nm);
+
+    const role = svgEl('text', { x:bx+rl+6, y:by+hh+16, fill:headerColor, style:'font-size:9px;font-family:Share Tech Mono,monospace;letter-spacing:1px;opacity:0.8' });
+    role.textContent = m.machine.primary_role.toUpperCase();
+    nodeG.appendChild(role);
+
+    const sl = svgEl('text', { x:bx+rl+6, y:by+hh+34, style:'font-size:9px;font-family:Share Tech Mono,monospace;font-weight:bold' });
+    if (st==='down')          { sl.setAttribute('fill','var(--lc-red-bright)'); sl.textContent='LINK_SEVERED'; }
+    else if (st==='degraded') { sl.setAttribute('fill','var(--lc-gold)');       sl.textContent='SERVICE_DEGRADED'; }
+    else                      { sl.setAttribute('fill','var(--lc-green)');       sl.textContent=`ONLINE // ${latency}MS`; }
+    nodeG.appendChild(sl);
+
+    nodeG.appendChild(svgEl('rect', { x:bx+bw-4, y:by+hh, width:4, height:bh-hh, fill:statusColor, opacity:'0.4' }));
+    nodeGroup.appendChild(nodeG);
+    nodeCoords[id] = { cx: nx, cy: ny };
+  }
+
+  /* Render all non-hub nodes */
+  sorted.forEach(m => {
+    const id  = m.machine.tailscale_name;
+    const pos = nodePos[id];
+    if (!pos) return;
+    drawConduit(id, pos.x, pos.y, m);
+    drawNodeBox(m, pos.x, pos.y);
+  });
+
+  /* ── DRAG MOVE — live update conduit + box ── */
+  /* Remove old listener and attach fresh one each render */
+  const svgCanvas = document.getElementById('svg-canvas');
+
+  function onDragMove(e) {
+    const drag = window._drag;
+    if (!drag.active || !drag.id) return;
+    const svgRect = svgCanvas.getBoundingClientRect();
+    const mx = (e.clientX - svgRect.left - tx) / scale;
+    const my = (e.clientY - svgRect.top  - ty) / scale;
+    const nx = mx - drag.offsetX;
+    const ny = my - drag.offsetY;
+    drag.moved = true;
+    drag.nx = nx; drag.ny = ny;
+
+    /* Live redraw: just this node's conduit + box */
+    const pathEl = document.getElementById('path-' + drag.id);
+    const nodeEl = document.getElementById('node-' + drag.id);
+    if (!pathEl || !nodeEl) return;
+
+    /* Update conduit path */
+    const seed  = drag.id.split('').reduce((a,c) => a + c.charCodeAt(0), 0);
+    const midX  = (cx + nx) / 2 + ((seed % 60) - 30);
+    const midY  = (cy + ny) / 2 - 20;
+    pathEl.setAttribute('d', `M ${cx} ${cy} Q ${midX} ${midY} ${nx} ${ny}`);
+
+    /* Move node group via transform */
+    const m   = lastData?.machines.find(m => m.machine.tailscale_name === drag.id);
+    const old = nodeCoords[drag.id] ?? { cx: nx, cy: ny };
+    const dx  = nx - old.cx, dy = ny - old.cy;
+    nodeEl.setAttribute('transform', `translate(${dx}, ${dy})`);
+  }
+
+  function onDragEnd(e) {
+    const drag = window._drag;
+    if (!drag.active) return;
+    if (!drag.moved && drag.id) {
+      /* It was a tap/click, not a drag — select the machine */
+      selectMachine(drag.id);
+    } else if (drag.moved && drag.id && drag.nx !== undefined) {
+      /* It was a genuine drag — persist the new position */
+      const current = loadPositions();
+      current[drag.id] = { x: drag.nx, y: drag.ny };
+      savePositions(current);
+      nodeCoords[drag.id] = { cx: drag.nx, cy: drag.ny };
+    }
+    window._drag = { active: false, id: null, moved: false };
+    /* Full re-render to clean up transform offsets */
+    if (lastData) renderSchematic(lastData);
+  }
+
+  /* Attach drag listeners to SVG canvas (replace previous) */
+  svgCanvas.removeEventListener('mousemove', svgCanvas._dragMove);
+  svgCanvas.removeEventListener('mouseup',   svgCanvas._dragEnd);
+  window.removeEventListener('mouseup',      svgCanvas._dragEnd);
+  svgCanvas._dragMove = onDragMove;
+  svgCanvas._dragEnd  = onDragEnd;
+  svgCanvas.addEventListener('mousemove', onDragMove);
+  window.addEventListener('mouseup', onDragEnd);
+
+  /* Initial auto-fit once */
+  if (!window.initialFitDone) {
+    setTimeout(autoFitFleet, 150);
+    window.initialFitDone = true;
+  }
+
+  syncConduitHighlight();
+}
+
+function syncConduitHighlight() {
+  document.querySelectorAll('.conduit').forEach(c => {
+    c.classList.toggle('active', c.id === 'path-' + currentSelectedId);
+  });
+  document.querySelectorAll('.node-group').forEach(n => {
+    n.classList.toggle('selected', n.id === 'node-' + currentSelectedId);
+  });
+  /* Re-render hub to update its selected outline — hub is SVG, not DOM class-driven */
+  if (lastData) {
+    const pd        = processData(lastData);
+    const isStale   = ageS(lastData.meta?.timestamp_utc) > STALE_S;
+    const checker   = (lastData.meta?.checker_host || '').toLowerCase();
+    const hubMachine = lastData.machines.find(m =>
+      m.machine.tailscale_name.toLowerCase().includes(checker) ||
+      checker.includes(m.machine.tailscale_name.toLowerCase())
+    ) || null;
+    const pathCx = 700, pathCy = 720;
+    const hubCx2 = pathCx + 22, hubCy2 = pathCy + 27;
+    const hubGroup = document.getElementById('hub-group');
+    hubGroup.innerHTML = '';
+    hubGroup.appendChild(renderHub(hubCx2, hubCy2, isStale, pd.operPct, hubMachine));
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   INTERACTION
+═══════════════════════════════════════════════════════ */
+
+/* ── Smooth animated pan to a node in SVG space ── */
+function panToNode(id) {
+  const coords = nodeCoords[id];
+  if (!coords) return;
+  const rect     = svgEl_.getBoundingClientRect();
+  const targetTx = rect.width  / 2 - coords.cx * scale;
+  const targetTy = rect.height / 2 - coords.cy * scale;
+
+  /* Cancel any in-flight animation */
+  if (panRaf) cancelAnimationFrame(panRaf);
+
+  const startTx = tx, startTy = ty;
+  const startTime = performance.now();
+  const duration  = 420; /* ms */
+
+  function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+  function step(now) {
+    const elapsed  = now - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const ease     = easeOutCubic(progress);
+    tx = startTx + (targetTx - startTx) * ease;
+    ty = startTy + (targetTy - startTy) * ease;
+    applyTransform();
+    if (progress < 1) panRaf = requestAnimationFrame(step);
+    else panRaf = null;
+  }
+  panRaf = requestAnimationFrame(step);
+}
+
+/* ── Dim/undim non-selected nodes ── */
+function applySelectionDim(id) {
+  const ng = document.getElementById('node-group');
+  const cg = document.getElementById('conduit-group');
+  if (id) {
+    ng.classList.add('has-selection');
+    cg.classList.add('has-selection');
+  } else {
+    ng.classList.remove('has-selection');
+    cg.classList.remove('has-selection');
+  }
+}
+
+/* ── Scroll list row into view ── */
+function scrollListRowIntoView(id) {
+  const row = document.querySelector(`.mrow[data-id="${id}"]`);
+  if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function selectMachine(id) {
+  currentSelectedId = id;
+  syncConduitHighlight();
+  applySelectionDim(id);
+
+  /* Update list highlight */
+  document.querySelectorAll('.mrow').forEach(r => {
+    r.classList.toggle('selected', r.dataset.id === id);
+  });
+
+  /* Pan schematic to node */
+  panToNode(id);
+
+  /* Render detail — scroll panel to show it */
+  if (lastData) {
+    const m = lastData.machines.find(m => m.machine.tailscale_name === id);
+    if (m) renderDetail(m);
+  }
+}
+
+function resetToSummary() {
+  currentSelectedId = null;
+  showRawJson = false;
+  document.querySelector('.btn-b')?.classList.remove('raw-active');
+  syncConduitHighlight();
+  applySelectionDim(null);
+  document.querySelectorAll('.mrow').forEach(r => r.classList.remove('selected'));
+  document.getElementById('detail-section').classList.remove('visible');
+  document.getElementById('node-tag').textContent = 'FLEET_OVERVIEW';
+  document.getElementById('panel-scroll').scrollTo({ top: 0, behavior: 'smooth' });
+  hideTooltip();
+  /* Restore full fleet view */
+  autoFitFleet();
+}
+
+function toggleRawJson() {
+  showRawJson = !showRawJson;
+  document.querySelector('.btn-b').classList.toggle('raw-active', showRawJson);
+  if (!lastData) return;
+  if (!currentSelectedId) {
+    const first = lastData.machines[0];
+    if (first) selectMachine(first.machine.tailscale_name);
+    return;
+  }
+  const m = lastData.machines.find(m => m.machine.tailscale_name === currentSelectedId);
+  if (m) renderDetail(m);
+}
+
+document.getElementById('detail-close').onclick = resetToSummary;
+
+/* Click on schematic background = deselect */
+document.getElementById('schematic-stage').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('schematic-stage') ||
+      e.target === document.getElementById('svg-canvas')) {
+    resetToSummary();
+  }
+});
+
+/* ── Tooltip ── */
+const tooltip = document.getElementById('node-tooltip');
+
+function showTooltip(e, m) {
+  const st = machineStatus(m);
+  const svcCount = m.services.length;
+  const svcUp    = m.services.filter(s => s.tailscale_check?.status === 'up').length;
+  tooltip.innerHTML = `
+    <div>${m.machine.display_name.toUpperCase()}</div>
+    <div class="tt-status ${st}">${st.toUpperCase()} · ${m.host.response_time_ms || 0}MS</div>
+    <div style="opacity:0.6;margin-top:2px">SVC: ${svcUp}/${svcCount} UP</div>
+  `;
+  tooltip.classList.add('visible');
+  positionTooltip(e);
+}
+function hideTooltip() {
+  tooltip.classList.remove('visible');
+}
+function positionTooltip(e) {
+  const stageRect = stage.getBoundingClientRect();
+  let x = e.clientX - stageRect.left + 14;
+  let y = e.clientY - stageRect.top  - 10;
+  /* Keep within bounds */
+  if (x + 180 > stageRect.width)  x = e.clientX - stageRect.left - 190;
+  if (y + 70  > stageRect.height) y = e.clientY - stageRect.top  - 75;
+  tooltip.style.left = x + 'px';
+  tooltip.style.top  = y + 'px';
+}
+
+/* ── Machine list hover ↔ schematic highlight ── */
+document.getElementById('machine-list').addEventListener('mouseover', e => {
+  const row = e.target.closest('.mrow');
+  if (!row || !row.dataset.id) return;
+  /* Highlight corresponding node with a soft glow without selecting */
+  if (row.dataset.id !== currentSelectedId) {
+    const nodeEl = document.getElementById('node-' + row.dataset.id);
+    if (nodeEl) nodeEl.style.filter = 'drop-shadow(0 0 10px rgba(153,153,255,0.7))';
+  }
+});
+document.getElementById('machine-list').addEventListener('mouseout', e => {
+  const row = e.target.closest('.mrow');
+  if (!row || !row.dataset.id) return;
+  if (row.dataset.id !== currentSelectedId) {
+    const nodeEl = document.getElementById('node-' + row.dataset.id);
+    if (nodeEl) nodeEl.style.filter = '';
+  }
+});
+
+/* ── SVG node hover → show tooltip + highlight list row ── */
+document.getElementById('node-group').addEventListener('mouseover', e => {
+  const g = e.target.closest('.node-group');
+  if (!g) return;
+  const id = g.id.replace('node-', '');
+  if (!lastData) return;
+  const m = lastData.machines.find(m => m.machine.tailscale_name === id);
+  if (m) showTooltip(e, m);
+  /* Highlight list row */
+  const row = document.querySelector(`.mrow[data-id="${id}"]`);
+  if (row && id !== currentSelectedId) row.classList.add('hover-hint');
+});
+document.getElementById('node-group').addEventListener('mousemove', e => {
+  if (tooltip.classList.contains('visible')) positionTooltip(e);
+});
+document.getElementById('node-group').addEventListener('mouseout', e => {
+  const g = e.target.closest('.node-group');
+  if (!g) return;
+  const id = g.id.replace('node-', '');
+  hideTooltip();
+  const row = document.querySelector(`.mrow[data-id="${id}"]`);
+  if (row) row.classList.remove('hover-hint');
+});
+
+/* ── Keyboard navigation on list ── */
+document.getElementById('machine-list').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const row = e.target.closest('.mrow');
+  if (row?.dataset.id) { e.preventDefault(); selectMachine(row.dataset.id); }
+});
+
+/* ── Touch support — single tap on node ── */
+let touchStartX = 0, touchStartY = 0;
+stage.addEventListener('touchstart', e => {
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+}, { passive: true });
+stage.addEventListener('touchend', e => {
+  const dx = Math.abs(e.changedTouches[0].clientX - touchStartX);
+  const dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
+  if (dx < 8 && dy < 8) {
+    /* It was a tap, not a drag — find node under touch */
+    const touch  = e.changedTouches[0];
+    const el     = document.elementFromPoint(touch.clientX, touch.clientY);
+    const nodeEl = el?.closest('.node-group');
+    if (nodeEl) {
+      const id = nodeEl.id.replace('node-', '');
+      selectMachine(id);
+    } else {
+      resetToSummary();
+    }
+  }
+}, { passive: true });
+
+/* Touch pan */
+let touchPanX = 0, touchPanY = 0, isTouchPanning = false;
+stage.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) {
+    isTouchPanning = true;
+    touchPanX = e.touches[0].clientX - tx;
+    touchPanY = e.touches[0].clientY - ty;
+  }
+}, { passive: true });
+stage.addEventListener('touchmove', e => {
+  if (!isTouchPanning || e.touches.length !== 1) return;
+  tx = e.touches[0].clientX - touchPanX;
+  ty = e.touches[0].clientY - touchPanY;
+  applyTransform();
+}, { passive: true });
+stage.addEventListener('touchend', () => { isTouchPanning = false; }, { passive: true });
+
+/* ═══════════════════════════════════════════════════════
+   PAN + ZOOM
+═══════════════════════════════════════════════════════ */
+
+function applyTransform() {
+  viewport.setAttribute('transform', `translate(${tx},${ty}) scale(${scale})`);
+}
+
+stage.addEventListener('mousedown', e => {
+  if (e.target.closest('.node-group') || e.target.closest('.zoom-controls')) return;
+  if (window._drag?.active) return;
+  isDragging = true;
+  dragStartX = e.clientX - tx;
+  dragStartY = e.clientY - ty;
+  e.preventDefault();
+});
+window.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  if (window._drag?.active) { isDragging = false; return; }
+  tx = e.clientX - dragStartX;
+  ty = e.clientY - dragStartY;
+  applyTransform();
+});
+window.addEventListener('mouseup', () => { isDragging = false; });
+
+/* Mouse-wheel zoom */
+stage.addEventListener('wheel', e => {
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.1 : 0.9;
+  const rect = svgEl_.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const newScale = Math.max(0.2, Math.min(4, scale * factor));
+  tx = mx - (mx - tx) * (newScale / scale);
+  ty = my - (my - ty) * (newScale / scale);
+  scale = newScale;
+  applyTransform();
+}, { passive: false });
+
+function adjustZoom(factor) {
+  const rect    = svgEl_.getBoundingClientRect();
+  const midX = rect.width / 2, midY = rect.height / 2;
+  const newScale = Math.max(0.2, Math.min(4, scale * factor));
+  tx = midX - (midX - tx) * (newScale / scale);
+  ty = midY - (midY - ty) * (newScale / scale);
+  scale = newScale;
+  applyTransform();
+}
+
+function autoFitFleet() {
+  try {
+    const bbox = viewport.getBBox();
+    if (!bbox || bbox.width === 0) return;
+    const rect    = svgEl_.getBoundingClientRect();
+    const pad     = 60;
+    const newScale = Math.min(
+      rect.width  / (bbox.width  + pad * 2),
+      rect.height / (bbox.height + pad * 2),
+      1.0
+    );
+    tx = rect.width  / 2 - (bbox.x + bbox.width  / 2) * newScale;
+    ty = rect.height / 2 - (bbox.y + bbox.height / 2) * newScale;
+    scale = newScale;
+    applyTransform();
+  } catch(e) {}
+}
+
+/* ═══════════════════════════════════════════════════════
+   POLL
+═══════════════════════════════════════════════════════ */
+async function poll() {
+  try {
+    const res = await fetch(API_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    lastTimestamp = data.meta?.timestamp_utc || null;
+
+    /* Clear error banner */
+    document.getElementById('error-banner').className = 'alert-banner';
+
+    const pd = processData(data);
+    renderSummary(data, pd);
+    renderMachineList(pd.machines, data.meta?.checker_host || '');
+    renderSchematic(data);
+
+    /* If a machine was selected, re-render its detail with fresh data */
+    if (currentSelectedId) {
+      const m = data.machines.find(m => m.machine.tailscale_name === currentSelectedId);
+      if (m) renderDetail(m); else resetToSummary();
+    }
+
+  } catch(e) {
+    document.getElementById('error-banner').className  = 'alert-banner error';
+    document.getElementById('error-banner').textContent =
+      `✕ API UNREACHABLE — ${e.message}${lastData ? ' — SHOWING LAST STATE' : ''}`;
+    document.getElementById('meta-info').textContent = 'COMMS_INTERRUPTED';
+    document.body.classList.remove('red-alert', 'yellow-alert');
+  }
+}
+
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>

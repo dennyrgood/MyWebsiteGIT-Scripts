@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Fleet Status</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c10;
+    --bg2: #0f1217;
+    --bg3: #161b24;
+    --border: #1e2530;
+    --border2: #252d3a;
+    --text: #e2e8f0;
+    --text2: #8892a4;
+    --text3: #4a5568;
+    --up: #22c55e;
+    --up-bg: rgba(34,197,94,0.08);
+    --down: #ef4444;
+    --down-bg: rgba(239,68,68,0.08);
+    --unknown: #6b7280;
+    --unknown-bg: rgba(107,114,128,0.08);
+    --accent: #3b82f6;
+    --accent2: #60a5fa;
+    --warn: #f59e0b;
+    --p: #22c55e;
+    --b2: #3b82f6;
+    --b5: #f59e0b;
+    --b9: #f97316;
+    --b99: #6b7280;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-display: 'Syne', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 100vh;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* ── HEADER ─────────────────────────────────────────── */
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(10,12,16,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+  }
+
+  .header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .header-title {
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--text);
+  }
+
+  .header-title span {
+    color: var(--accent2);
+  }
+
+  .header-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .refresh-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--up);
+    animation: pulse 2s infinite;
+  }
+
+  .refresh-indicator.stale { background: var(--warn); animation: none; }
+  .refresh-indicator.error { background: var(--down); animation: none; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .last-updated {
+    font-size: 11px;
+    color: var(--text3);
+    font-family: var(--font-mono);
+  }
+
+  /* ── SUMMARY BAR ─────────────────────────────────────── */
+  .summary-bar {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .summary-pill {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+  }
+
+  .summary-pill .num {
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .summary-pill .label {
+    color: var(--text2);
+  }
+
+  .summary-pill.all-good { border-color: rgba(34,197,94,0.3); }
+  .summary-pill.has-issues { border-color: rgba(239,68,68,0.25); }
+
+  /* ── BANNER STATES ───────────────────────────────────── */
+  .banner {
+    margin: 12px 16px 0;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    display: none;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .banner.stale {
+    display: flex;
+    background: rgba(245,158,11,0.1);
+    border: 1px solid rgba(245,158,11,0.3);
+    color: var(--warn);
+  }
+
+  .banner.error {
+    display: flex;
+    background: rgba(239,68,68,0.1);
+    border: 1px solid rgba(239,68,68,0.3);
+    color: var(--down);
+  }
+
+  /* ── MACHINE GRID ────────────────────────────────────── */
+  .machines {
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 640px;
+    margin: 0 auto;
+  }
+
+  /* ── MACHINE CARD ────────────────────────────────────── */
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+
+  .card.secondary {
+    opacity: 0.7;
+  }
+
+  .card.host-down {
+    border-color: rgba(239,68,68,0.2);
+  }
+
+  .card.host-up {
+    border-color: var(--border);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg3);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .card-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .host-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .host-dot.up { background: var(--up); box-shadow: 0 0 6px rgba(34,197,94,0.4); }
+  .host-dot.down { background: var(--down); box-shadow: 0 0 6px rgba(239,68,68,0.4); }
+  .host-dot.unknown { background: var(--unknown); }
+
+  .card-name {
+    font-family: var(--font-display);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+
+  .card-role {
+    font-size: 11px;
+    color: var(--text3);
+    font-family: var(--font-mono);
+  }
+
+  .card-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .host-ms {
+    font-size: 11px;
+    color: var(--text3);
+    font-family: var(--font-mono);
+  }
+
+  .chevron {
+    color: var(--text3);
+    font-size: 10px;
+    transition: transform 0.2s;
+  }
+
+  .card.collapsed .chevron { transform: rotate(-90deg); }
+
+  .card-body { }
+  .card.collapsed .card-body { display: none; }
+
+  /* ── SERVICE ROWS ────────────────────────────────────── */
+  .service-row {
+    display: flex;
+    align-items: flex-start;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+    gap: 10px;
+  }
+
+  .service-row:last-child { border-bottom: none; }
+
+  .service-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .service-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+
+  .service-dot.up { background: var(--up); }
+  .service-dot.down { background: var(--down); }
+  .service-dot.unknown { background: var(--unknown); }
+
+  .service-info {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .service-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .service-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .priority-badge {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.05em;
+  }
+
+  .priority-badge.P   { background: rgba(34,197,94,0.15);  color: var(--p);   border: 1px solid rgba(34,197,94,0.25); }
+  .priority-badge.B2  { background: rgba(59,130,246,0.15); color: var(--b2);  border: 1px solid rgba(59,130,246,0.25); }
+  .priority-badge.B5  { background: rgba(245,158,11,0.15); color: var(--b5);  border: 1px solid rgba(245,158,11,0.25); }
+  .priority-badge.B9  { background: rgba(249,115,22,0.15); color: var(--b9);  border: 1px solid rgba(249,115,22,0.25); }
+  .priority-badge.B99 { background: rgba(107,114,128,0.1); color: var(--b99); border: 1px solid rgba(107,114,128,0.2); }
+
+  .service-detail {
+    font-size: 10px;
+    color: var(--text2);
+    font-family: var(--font-mono);
+    margin-top: 2px;
+    word-break: break-all;
+  }
+
+  .service-detail.down { color: var(--down); opacity: 0.8; }
+
+  .service-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+
+  .check-indicators {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+
+  .check-badge {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-weight: 500;
+  }
+
+  .check-badge.ts-up    { background: var(--up-bg);      color: var(--up);      border: 1px solid rgba(34,197,94,0.2); }
+  .check-badge.ts-down  { background: var(--down-bg);    color: var(--down);    border: 1px solid rgba(239,68,68,0.2); }
+  .check-badge.ts-unk   { background: var(--unknown-bg); color: var(--unknown); border: 1px solid rgba(107,114,128,0.2); }
+  .check-badge.pub-up   { background: var(--up-bg);      color: var(--up);      border: 1px solid rgba(34,197,94,0.2); }
+  .check-badge.pub-down { background: var(--down-bg);    color: var(--down);    border: 1px solid rgba(239,68,68,0.2); }
+
+  .response-time {
+    font-size: 10px;
+    color: var(--text3);
+    font-family: var(--font-mono);
+  }
+
+  /* ── LAST SEEN ───────────────────────────────────────── */
+  .last-seen {
+    padding: 8px 14px;
+    font-size: 10px;
+    color: var(--text3);
+    font-family: var(--font-mono);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* ── FOOTER ──────────────────────────────────────────── */
+  .footer {
+    text-align: center;
+    padding: 20px 16px;
+    font-size: 10px;
+    color: var(--text3);
+    font-family: var(--font-mono);
+    max-width: 640px;
+    margin: 0 auto;
+  }
+
+  .footer a { color: var(--text3); text-decoration: none; }
+
+  /* ── SKELETON ────────────────────────────────────────── */
+  .skeleton {
+    background: linear-gradient(90deg, var(--bg3) 25%, var(--border2) 50%, var(--bg3) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+    height: 12px;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .loading-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* ── PORT TAG ────────────────────────────────────────── */
+  .port-tag {
+    font-size: 9px;
+    color: var(--text3);
+    font-family: var(--font-mono);
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-top">
+    <div class="header-title">fleet<span>.</span>status</div>
+    <div class="header-meta">
+      <div class="refresh-indicator" id="refreshDot"></div>
+      <div class="last-updated" id="lastUpdated">connecting…</div>
+    </div>
+  </div>
+  <div class="summary-bar" id="summaryBar">
+    <div class="summary-pill"><span class="num">—</span><span class="label">loading</span></div>
+  </div>
+</div>
+
+<div class="banner stale" id="staleBanner">
+  ⚠ Data is stale — checker may be down
+</div>
+<div class="banner error" id="errorBanner">
+  ✕ API unreachable — showing last known state
+</div>
+
+<div class="machines" id="machinesContainer">
+  <div class="loading-card">
+    <div class="skeleton" style="width:40%;height:14px"></div>
+    <div class="skeleton" style="width:70%"></div>
+    <div class="skeleton" style="width:55%"></div>
+  </div>
+  <div class="loading-card">
+    <div class="skeleton" style="width:35%;height:14px"></div>
+    <div class="skeleton" style="width:65%"></div>
+    <div class="skeleton"></div>
+  </div>
+  <div class="loading-card">
+    <div class="skeleton" style="width:45%;height:14px"></div>
+    <div class="skeleton" style="width:60%"></div>
+  </div>
+</div>
+
+<div class="footer" id="footer"></div>
+
+<script>
+//const API_URL = 'https://fleet.ldmathes.cc/api/status';
+//const API_URL = 'https://fleet.ldmathes.cc/api/status';
+// Update this URL to your live endpoint or local JSON file
+//const API_URL = 'https://fleet.ldmathes.cc/api/status';
+const params = new URLSearchParams(window.location.search);
+const API_URL = params.has('bkp')
+  ? 'https://fleet-bkp.ldmathes.cc/api/status'
+  : 'https://fleet.ldmathes.cc/api/status'; 
+const POLL_INTERVAL = 30000;
+const STALE_THRESHOLD = 90; // seconds
+
+let lastData = null;
+let pollTimer = null;
+let collapsed = {};
+
+// ── SECONDARY MACHINES (visually lighter) ──────────────
+const SECONDARY = ['denniss-macbook-air', 'denniss-2nd-macbook-air'];
+
+// ── TIME FORMATTING ────────────────────────────────────
+function fmtTime(utcStr) {
+  if (!utcStr) return '—';
+  try {
+    const d = new Date(utcStr);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch { return utcStr; }
+}
+
+function fmtDateTime(utcStr) {
+  if (!utcStr) return '—';
+  try {
+    const d = new Date(utcStr);
+    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch { return utcStr; }
+}
+
+function dataAge(utcStr) {
+  if (!utcStr) return Infinity;
+  return (Date.now() - new Date(utcStr).getTime()) / 1000;
+}
+
+// ── STATUS DOT CLASS ───────────────────────────────────
+function dotClass(status) {
+  if (status === 'up') return 'up';
+  if (status === 'down') return 'down';
+  return 'unknown';
+}
+
+// ── PRIORITY BADGE ─────────────────────────────────────
+function priorityBadge(p) {
+  return `<span class="priority-badge ${p}">${p}</span>`;
+}
+
+// ── CHECK BADGE ────────────────────────────────────────
+function checkBadge(status, label) {
+  const cls = status === 'up' ? `${label}-up` : status === 'down' ? `${label}-down` : `${label}-unk`;
+  const text = label === 'ts' ? 'TS' : 'PUB';
+  return `<span class="check-badge ${cls}">${text}</span>`;
+}
+
+// ── RENDER SUMMARY BAR ─────────────────────────────────
+function renderSummary(summary) {
+  const bar = document.getElementById('summaryBar');
+  if (!summary) { bar.innerHTML = ''; return; }
+
+  const svcOk = summary.services_up === summary.services_total;
+  const pubOk = summary.public_endpoints_up === summary.public_endpoints_total;
+
+  bar.innerHTML = `
+    <div class="summary-pill ${svcOk ? 'all-good' : 'has-issues'}">
+      <span class="num">${summary.services_up}/${summary.services_total}</span>
+      <span class="label">services</span>
+    </div>
+    <div class="summary-pill ${pubOk ? 'all-good' : 'has-issues'}">
+      <span class="num">${summary.public_endpoints_up}/${summary.public_endpoints_total}</span>
+      <span class="label">public</span>
+    </div>
+    <div class="summary-pill">
+      <span class="num">${summary.machines_up}/${summary.machines_total}</span>
+      <span class="label">hosts</span>
+    </div>
+    ${summary.machines_unknown > 0 ? `<div class="summary-pill has-issues"><span class="num">${summary.machines_unknown}</span><span class="label">unknown</span></div>` : ''}
+  `;
+}
+
+// ── RENDER SERVICE ROW ─────────────────────────────────
+function renderService(svc) {
+  const tc = svc.tailscale_check || {};
+  const pc = svc.public_check;
+  const tcStatus = tc.status || 'unknown';
+  const detail = tc.detail || '';
+  const detailClass = tcStatus === 'down' ? 'down' : '';
+
+  const pubBadge = pc
+    ? checkBadge(pc.status, 'pub')
+    : '';
+
+  const pubMs = pc && pc.response_time_ms
+    ? `<div class="response-time">${pc.response_time_ms}ms pub</div>`
+    : '';
+
+  const tsMs = tc.response_time_ms
+    ? `<div class="response-time">${tc.response_time_ms}ms ts</div>`
+    : '';
+
+  return `
+    <div class="service-row">
+      <div class="service-left">
+        <div class="service-dot ${dotClass(tcStatus)}"></div>
+        <div class="service-info">
+          <div class="service-name-row">
+            <span class="service-name">${svc.name}</span>
+            ${priorityBadge(svc.priority)}
+            <span class="port-tag">:${svc.port}</span>
+          </div>
+          ${detail ? `<div class="service-detail ${detailClass}">${detail}</div>` : ''}
+        </div>
+      </div>
+      <div class="service-right">
+        <div class="check-indicators">
+          ${checkBadge(tcStatus, 'ts')}
+          ${pubBadge}
+        </div>
+        ${tsMs}
+        ${pubMs}
+      </div>
+    </div>
+  `;
+}
+
+// ── RENDER MACHINE CARD ────────────────────────────────
+function renderMachine(m) {
+  const host = m.host || {};
+  const hostStatus = host.status || 'unknown';
+  const isSecondary = SECONDARY.includes(m.machine.tailscale_name);
+  const isCollapsed = collapsed[m.machine.tailscale_name] !== false
+    ? (isSecondary || hostStatus === 'down')
+    : collapsed[m.machine.tailscale_name];
+
+  const collapsedClass = isCollapsed ? 'collapsed' : '';
+  const secondaryClass = isSecondary ? 'secondary' : '';
+  const hostClass = hostStatus === 'down' ? 'host-down' : 'host-up';
+
+  const hostMs = host.response_time_ms
+    ? `<span class="host-ms">${host.response_time_ms}ms</span>`
+    : '';
+
+  const services = (m.services || []).map(renderService).join('');
+
+  const pollTime = m.poll ? fmtTime(m.poll.timestamp_utc) : '—';
+  const lastSeen = `<div class="last-seen">⏱ checked ${pollTime} · via ${m.poll?.checker_host || '—'}</div>`;
+
+  const hostDetail = host.detail ? `<div class="card-role">${host.detail}</div>` : '';
+
+  return `
+    <div class="card ${collapsedClass} ${secondaryClass} ${hostClass}"
+         data-machine="${m.machine.tailscale_name}">
+      <div class="card-header" onclick="toggleCard('${m.machine.tailscale_name}')">
+        <div class="card-header-left">
+          <div class="host-dot ${dotClass(hostStatus)}"></div>
+          <div>
+            <div class="card-name">${m.machine.display_name}</div>
+            <div class="card-role">${m.machine.primary_role}</div>
+            ${hostDetail}
+          </div>
+        </div>
+        <div class="card-header-right">
+          ${hostMs}
+          <span class="chevron">▾</span>
+        </div>
+      </div>
+      <div class="card-body">
+        ${services}
+        ${lastSeen}
+      </div>
+    </div>
+  `;
+}
+
+// ── TOGGLE CARD ────────────────────────────────────────
+function toggleCard(name) {
+  const card = document.querySelector(`[data-machine="${name}"]`);
+  if (!card) return;
+  const isCollapsed = card.classList.contains('collapsed');
+  collapsed[name] = isCollapsed; // if currently collapsed, will expand (false = not collapsed)
+  card.classList.toggle('collapsed');
+}
+
+// ── RENDER ALL ─────────────────────────────────────────
+function render(data) {
+  lastData = data;
+  const container = document.getElementById('machinesContainer');
+  const footer = document.getElementById('footer');
+  const dot = document.getElementById('refreshDot');
+  const lastUpdated = document.getElementById('lastUpdated');
+  const staleBanner = document.getElementById('staleBanner');
+  const errorBanner = document.getElementById('errorBanner');
+
+  // Hide banners by default
+  staleBanner.style.display = 'none';
+  errorBanner.style.display = 'none';
+  dot.className = 'refresh-indicator';
+
+  // Check staleness
+  const age = dataAge(data.meta?.timestamp_utc);
+  if (age > STALE_THRESHOLD) {
+    staleBanner.style.display = 'flex';
+    dot.className = 'refresh-indicator stale';
+  }
+
+  lastUpdated.textContent = fmtTime(data.meta?.timestamp_utc);
+
+  renderSummary(data.summary);
+
+  container.innerHTML = (data.machines || []).map(renderMachine).join('');
+
+  // Footer
+  const checkerHost = data.meta?.checker_host || '—';
+  const cycleMs = data.meta?.cycle_duration_ms || '—';
+  footer.innerHTML = `
+    <div>checker: ${checkerHost} · cycle: ${cycleMs}ms · refreshes every 30s</div>
+    <div style="margin-top:4px"><a href="/status-bkp/">↗ backup feed</a></div>
+  `;
+}
+
+// ── FETCH ──────────────────────────────────────────────
+async function fetchStatus() {
+  const dot = document.getElementById('refreshDot');
+  const errorBanner = document.getElementById('errorBanner');
+
+  try {
+    const res = await fetch(API_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    errorBanner.style.display = 'none';
+    render(data);
+  } catch (err) {
+    console.error('Fleet API error:', err);
+    dot.className = 'refresh-indicator error';
+    errorBanner.style.display = 'flex';
+    errorBanner.textContent = `✕ API unreachable (${err.message}) — ${lastData ? 'showing last known state' : 'no data'}`;
+    document.getElementById('lastUpdated').textContent = 'error';
+    if (!lastData) {
+      document.getElementById('machinesContainer').innerHTML =
+        '<div style="padding:40px 16px;text-align:center;color:var(--text3);font-family:var(--font-mono);font-size:12px;">waiting for API…</div>';
+    }
+  }
+}
+
+// ── INIT ───────────────────────────────────────────────
+fetchStatus();
+pollTimer = setInterval(fetchStatus, POLL_INTERVAL);
+</script>
+</body>
+</html>

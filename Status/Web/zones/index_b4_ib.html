@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fleet Ops — Orbital View</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;600;700&family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:          #030508;
+    --bg2:         #070b12;
+    --green:       #00e887;
+    --blue:        #3cb4ff;
+    --amber:       #f5a623;
+    --red:         #ff3d3d;
+    --text:        #8ba0b4;
+    --text-bright: #d4e4f0;
+    --mono:        'JetBrains Mono', monospace;
+    --sans:        'Rajdhani', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  #header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 36px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    flex-shrink: 0; position: relative; z-index: 10;
+  }
+
+  #wordmark { display: flex; align-items: baseline; gap: 12px; }
+  #wordmark h1 { font-family: var(--sans); font-size: 26px; font-weight: 700; letter-spacing: 6px; color: #fff; text-transform: uppercase; }
+  #wordmark .sub { font-family: var(--mono); font-size: 10px; color: var(--green); letter-spacing: 3px; opacity: 0.7; }
+
+  #meta { font-family: var(--mono); font-size: 11px; text-align: right; line-height: 1.8; color: #4a5f72; }
+  #meta .checker { color: var(--blue); }
+  #meta .age { color: var(--amber); }
+  #meta .age.fresh { color: var(--green); }
+
+  #summary-bar { display: flex; gap: 28px; align-items: center; }
+  .sum-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .sum-item .val { font-family: var(--mono); font-size: 20px; font-weight: 700; line-height: 1; }
+  .sum-item .lbl { font-size: 9px; letter-spacing: 2px; color: #3a4f60; text-transform: uppercase; }
+  .sum-item.good .val    { color: var(--green); }
+  .sum-item.warn .val    { color: var(--red); }
+  .sum-item.neutral .val { color: var(--text); }
+  .sum-divider { width: 1px; height: 32px; background: rgba(255,255,255,0.06); }
+
+  #main { flex: 1; display: flex; overflow: hidden; }
+  #orbital { flex: 1; position: relative; overflow: hidden; }
+  #orbital svg { width: 100%; height: 100%; cursor: grab; }
+  #orbital svg:active { cursor: grabbing; }
+  #zoom-reset {
+    position: absolute; top: 16px; left: 16px; z-index: 20;
+    background: rgba(7,11,18,0.85); border: 1px solid rgba(255,255,255,0.08);
+    color: #4a6070; font-family: var(--mono); font-size: 10px;
+    padding: 5px 10px; cursor: pointer; border-radius: 3px; letter-spacing: 1px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  #zoom-reset:hover { color: var(--text-bright); border-color: rgba(255,255,255,0.2); }
+
+  .ring-label { font-family: var(--mono); font-size: 10px; fill: rgba(255,255,255,0.12); letter-spacing: 2px; }
+
+  .spoke { stroke-opacity: 0.25; stroke-width: 1; fill: none; }
+  .spoke.up      { stroke: var(--green); }
+  .spoke.down    { stroke: var(--red); }
+  .spoke.unknown { stroke: var(--amber); }
+
+  .host-group { cursor: pointer; }
+  .host-ring { fill: none; stroke-width: 1.5; opacity: 0.6; transition: opacity 0.2s; }
+  .host-ring.up      { stroke: var(--green); }
+  .host-ring.down    { stroke: var(--red); }
+  .host-ring.unknown { stroke: var(--amber); }
+  .host-group:hover .host-ring { opacity: 1; }
+
+  .host-dot.up      { fill: var(--green); }
+  .host-dot.down    { fill: var(--red); }
+  .host-dot.unknown { fill: var(--amber); }
+
+  .host-name { font-family: var(--sans); font-size: 13px; font-weight: 600; fill: var(--text-bright); letter-spacing: 1px; }
+  .host-ping { font-family: var(--mono); font-size: 10px; fill: var(--text); opacity: 0.6; }
+
+  .svc-dot { cursor: pointer; }
+  .svc-dot.up      { fill: var(--blue); }
+  .svc-dot.down    { fill: var(--red); }
+  .svc-dot.unknown { fill: var(--amber); }
+
+  .svc-line { stroke-width: 1; stroke-opacity: 0.3; fill: none; }
+  .svc-line.up      { stroke: var(--blue); }
+  .svc-line.down    { stroke: var(--red); }
+  .svc-line.unknown { stroke: var(--amber); }
+
+  .svc-label { font-family: var(--mono); font-size: 9px; fill: var(--text); opacity: 0.75; pointer-events: none; }
+
+  .center-pulse { fill: none; stroke: var(--green); stroke-width: 1; opacity: 0; animation: pulse-ring 3s ease-out infinite; }
+  @keyframes pulse-ring { 0% { r: 18px; opacity: 0.6; } 100% { r: 52px; opacity: 0; } }
+
+  /* ── DETAIL PANEL ─────────────────────────────── */
+  #detail {
+    width: 260px; min-width: 0; border-left: 1px solid rgba(255,255,255,0.05);
+    background: var(--bg2); display: flex; flex-direction: column;
+    overflow: hidden; flex-shrink: 0; transition: width 0.25s ease;
+  }
+  #detail.collapsed { width: 0; border-left: none; }
+  #detail-toggle {
+    position: absolute; right: 264px; top: 50%; transform: translateY(-50%);
+    z-index: 20; background: rgba(7,11,18,0.9); border: 1px solid rgba(255,255,255,0.08);
+    color: #4a6070; font-family: var(--mono); font-size: 10px; padding: 6px 5px;
+    cursor: pointer; border-radius: 3px 0 0 3px; line-height: 1; letter-spacing: 1px;
+    transition: right 0.25s ease, color 0.15s;
+  }
+  #detail-toggle:hover { color: var(--text-bright); }
+  #detail.collapsed ~ * { display: none; }
+  #main { position: relative; }
+  #detail.empty { align-items: center; justify-content: center; }
+  #detail-placeholder { text-align: center; font-family: var(--mono); font-size: 11px; color: #1e2d3a; line-height: 2; letter-spacing: 2px; text-transform: uppercase; }
+  #detail-inner { padding: 24px 20px; overflow-y: auto; overflow-x: hidden; flex: 1; }
+  #detail-inner::-webkit-scrollbar { width: 3px; }
+  #detail-inner::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+  #detail-inner * { word-break: break-word; }
+
+  .detail-host-name { font-family: var(--sans); font-size: 22px; font-weight: 700; color: #fff; letter-spacing: 2px; margin-bottom: 2px; }
+  .detail-host-role { font-family: var(--mono); font-size: 10px; color: var(--blue); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 16px; }
+
+  .detail-stat-row { display: flex; gap: 12px; margin-bottom: 16px; }
+  .detail-stat { flex: 1; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 8px 10px; }
+  .detail-stat .ds-label { font-family: var(--mono); font-size: 9px; color: #3a4f60; letter-spacing: 2px; margin-bottom: 4px; }
+  .detail-stat .ds-val   { font-family: var(--mono); font-size: 14px; color: var(--text-bright); font-weight: 700; }
+  .detail-stat .ds-val.up   { color: var(--green); }
+  .detail-stat .ds-val.down { color: var(--red); }
+
+  .detail-section-title { font-family: var(--mono); font-size: 9px; letter-spacing: 3px; color: #2a3f50; text-transform: uppercase; margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+
+  .svc-card { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 4px; padding: 10px 12px; margin-bottom: 8px; transition: border-color 0.15s; }
+  .svc-card:hover { border-color: rgba(255,255,255,0.1); }
+  .svc-card.up      { border-left: 2px solid var(--green); }
+  .svc-card.down    { border-left: 2px solid var(--red); }
+  .svc-card.unknown { border-left: 2px solid var(--amber); }
+
+  .svc-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .svc-card-name { font-family: var(--sans); font-size: 14px; font-weight: 600; color: var(--text-bright); letter-spacing: 1px; }
+  .svc-card-priority { font-family: var(--mono); font-size: 9px; padding: 2px 6px; border-radius: 2px; background: rgba(255,255,255,0.05); color: var(--amber); letter-spacing: 1px; }
+  .svc-card-priority.P { background: rgba(0,232,135,0.1); color: var(--green); }
+
+  .svc-detail-text { font-family: var(--mono); font-size: 10px; color: #4a6070; line-height: 1.6; margin-top: 4px; }
+  .svc-meta-row { display: flex; gap: 16px; margin-top: 6px; }
+  .svc-meta-item { font-family: var(--mono); font-size: 9px; color: #2a4050; }
+  .svc-meta-item span { color: var(--text); }
+
+  .vram-bar-wrap { margin-top: 8px; }
+  .vram-bar-label { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 9px; color: #3a5060; margin-bottom: 4px; }
+  .vram-bar-track { height: 3px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
+  .vram-bar-fill { height: 100%; border-radius: 2px; background: var(--blue); transition: width 0.5s ease; }
+  .vram-bar-fill.high     { background: var(--amber); }
+  .vram-bar-fill.critical { background: var(--red); }
+
+  .pub-badge { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 9px; padding: 2px 6px; border-radius: 2px; margin-top: 6px; }
+  .pub-badge.up   { background: rgba(0,232,135,0.08); color: var(--green); }
+  .pub-badge.down { background: rgba(255,61,61,0.08);  color: var(--red); }
+  .pub-badge::before { content: '●'; font-size: 7px; }
+
+  #tooltip { position: fixed; background: rgba(5,10,18,0.97); border: 1px solid rgba(60,180,255,0.3); padding: 8px 12px; font-family: var(--mono); font-size: 11px; color: var(--text-bright); border-radius: 3px; pointer-events: none; opacity: 0; transition: opacity 0.1s; z-index: 500; line-height: 1.7; max-width: 240px; }
+
+  #ring-legend { position: absolute; bottom: 20px; left: 24px; display: flex; flex-direction: column; gap: 6px; z-index: 10; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 9px; color: #2a4050; letter-spacing: 1px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid; flex-shrink: 0; }
+  .legend-dot.r0 { border-color: rgba(0,232,135,0.4);  background: rgba(0,232,135,0.1); }
+  .legend-dot.r1 { border-color: rgba(60,180,255,0.4); background: rgba(60,180,255,0.1); }
+  .legend-dot.r2 { border-color: rgba(245,166,35,0.4); background: rgba(245,166,35,0.1); }
+  .legend-dot.r3 { border-color: rgba(255,61,61,0.4);  background: rgba(255,61,61,0.1); }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div id="wordmark">
+    <h1>Fleet Ops</h1>
+    <span class="sub">Orbital View</span>
+  </div>
+  <div id="summary-bar"></div>
+  <div id="meta">
+    <div>SOURCE &nbsp;<span class="checker" id="meta-checker">—</span></div>
+    <div>SYNC &nbsp;<span class="age" id="meta-age">—</span></div>
+  </div>
+</div>
+
+<div id="main">
+  <div id="orbital">
+    <svg id="svg"></svg>
+    <button id="zoom-reset" onclick="resetZoom()">⊙ RESET</button>
+    <button id="detail-toggle" title="Toggle panel">◀</button>
+    <div id="ring-legend">
+      <div class="legend-item"><div class="legend-dot r0"></div> &lt;5ms — home LAN</div>
+      <div class="legend-item"><div class="legend-dot r1"></div> 5–200ms — WAN</div>
+      <div class="legend-item"><div class="legend-dot r3"></div> timeout / down</div>
+      <div class="legend-item" style="margin-top:4px;color:#1a3040;font-size:8px">piecewise · inner = 50% canvas</div>
+    </div>
+  </div>
+  <div id="detail" class="empty">
+    <div id="detail-placeholder">SELECT A HOST<br>TO INSPECT</div>
+    <div id="detail-inner" style="display:none"></div>
+  </div>
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+// ── CONFIG ────────────────────────────────────────────────────────
+const API_URL = (() => {
+  const p = new URLSearchParams(window.location.search);
+  return p.has('bkp')
+    ? 'https://fleet-bkp.ldmathes.cc/api/status'
+    : 'https://fleet.ldmathes.cc/api/status';
+})();
+
+const RINGS = [
+  { max: 5,     label: '<5ms',    color: 'rgba(0,232,135,0.06)',   stroke: 'rgba(0,232,135,0.15)'   },
+  { max: 200,   label: '200ms',   color: 'rgba(60,180,255,0.035)', stroke: 'rgba(60,180,255,0.08)'  },
+  { max: 99999, label: 'timeout', color: 'rgba(255,61,61,0.03)',   stroke: 'rgba(255,61,61,0.07)'   },
+];
+// Piecewise radius bands:
+//   0–5ms   → 0  … 0.50 of maxR  (home LAN — half the canvas)
+//   5–200ms → 0.50 … 0.78        (WAN)
+//   200ms+  → 0.78 … 0.95        (timeout / down)
+const RING_RADII = [0.50, 0.78, 0.95];
+const LOG_MAX_MS = 2000;
+
+let lastTimestamp = null;
+let currentData   = null;
+
+// ── UTILITIES ─────────────────────────────────────────────────────
+// Piecewise radius mapping — inner band gets half the canvas:
+//   0ms       → 0 (center/checker)
+//   0–5ms     → 0 … 50% maxR   (home LAN machines)
+//   5–200ms   → 50% … 78% maxR (WAN)
+//   200ms+    → 78% … 95% maxR (timeout / down)
+function pingToRadius(ping, maxR) {
+  if (ping == null || ping > LOG_MAX_MS) return maxR * RING_RADII[2];
+  if (ping === 0) return 0;
+  if (ping <= 5) {
+    // linear within home band: 1ms→near-0, 5ms→0.50
+    const t = ping / 5;
+    return maxR * t * RING_RADII[0];
+  }
+  if (ping <= 200) {
+    // log within WAN band: 5ms→0.50, 200ms→0.78
+    const t = Math.log(ping / 5) / Math.log(200 / 5);
+    return maxR * (RING_RADII[0] + t * (RING_RADII[1] - RING_RADII[0]));
+  }
+  // log within outer band: 200ms→0.78, 2000ms→0.95
+  const t = Math.log(ping / 200) / Math.log(LOG_MAX_MS / 200);
+  return maxR * (RING_RADII[1] + t * (RING_RADII[2] - RING_RADII[1]));
+}
+
+function polarToXY(cx, cy, r, angleDeg) {
+  const rad = (angleDeg - 90) * Math.PI / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function ns(tag) { return document.createElementNS('http://www.w3.org/2000/svg', tag); }
+function svgEl(tag, attrs) {
+  const el = ns(tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
+}
+
+function parseVRAM(detail) {
+  if (!detail) return null;
+  const m = detail.match(/VRAM:\s*([\d.]+)GB\s*\/\s*([\d.]+)GB/);
+  return m ? { used: parseFloat(m[1]), total: parseFloat(m[2]) } : null;
+}
+function parseModel(detail) {
+  if (!detail) return null;
+  const m = detail.match(/·\s*(.+?)\s+active in VRAM/);
+  return m ? m[1] : null;
+}
+
+// ── SERVICE ARC RENDERER ──────────────────────────────────────────
+// neighborAngle: angle toward the nearest neighboring host — services fan away from it
+// hostR: the host's radius from center — used to scale the service orbit proportionally
+function renderServices(parent, services, hx, hy, baseAngle, awayFromCenter, neighborAngle, hostR) {
+  const count        = services.length;
+  const svcArcSpread = Math.min(110, count * 24);
+  // Service orbit scales with host's distance from center:
+  // inner hosts (large r) get wider orbits; outer hosts get tighter ones
+  const orbitBase = awayFromCenter ? Math.max(65, (hostR || 80) * 0.38) : 70;
+  const sR        = count > 3 ? orbitBase * 1.3 : orbitBase;
+
+  // Fan direction:
+  // Center node: baseAngle is the explicit fan direction passed in (e.g. 180 = downward)
+  // Regular hosts: fan away from nearest neighbor, blended with radial outward
+  let fanBase;
+  if (!awayFromCenter) {
+    fanBase = baseAngle;
+  } else {
+    // Point away from the closest neighbor
+    const awayDeg = neighborAngle + 180;
+    // Blend with the radial outward direction so services don't flip to wrong side
+    const radialOut = baseAngle;
+    const diff = ((awayDeg - radialOut + 540) % 360) - 180;
+    fanBase = radialOut + Math.sign(diff) * Math.min(Math.abs(diff), 70);
+  }
+
+  services.forEach((s, si) => {
+    const sStatus = s.tailscale_check?.status || 'unknown';
+    const sOffset = count === 1 ? 0
+      : -svcArcSpread / 2 + si * (svcArcSpread / (count - 1));
+    const sAngle  = fanBase + sOffset;
+
+    const sPos = {
+      x: hx + Math.cos((sAngle - 90) * Math.PI / 180) * sR,
+      y: hy + Math.sin((sAngle - 90) * Math.PI / 180) * sR,
+    };
+
+    parent.appendChild(svgEl('line', { x1: hx, y1: hy, x2: sPos.x, y2: sPos.y, class: `svc-line ${sStatus}` }));
+
+    // Invisible hit area — much easier to hover than the 4px dot
+    const hitArea = svgEl('circle', { cx: sPos.x, cy: sPos.y, r: 10, fill: 'transparent', style: 'cursor:pointer' });
+    hitArea.addEventListener('mouseenter', (e) => showTooltip(e, s, sStatus));
+    hitArea.addEventListener('mousemove',  moveTooltip);
+    hitArea.addEventListener('mouseleave', hideTooltip);
+
+    const sDot = svgEl('circle', { cx: sPos.x, cy: sPos.y, r: 4, class: `svc-dot ${sStatus}`, style: 'pointer-events:none' });
+    parent.appendChild(hitArea);
+    parent.appendChild(sDot);
+
+    // Label continues outward from the dot in the same radial direction
+    const slx    = sPos.x + Math.cos((sAngle - 90) * Math.PI / 180) * 14;
+    const sly    = sPos.y + Math.sin((sAngle - 90) * Math.PI / 180) * 14;
+    const anchor = slx < hx ? 'end' : 'start';
+    const lbl    = svgEl('text', { x: slx, y: sly + 3, class: 'svc-label', 'text-anchor': anchor });
+    lbl.textContent = s.name;
+    parent.appendChild(lbl);
+  });
+}
+
+// ── RENDER ────────────────────────────────────────────────────────
+function render(data) {
+  currentData = data;
+  const svg = document.getElementById('svg');
+  svg.innerHTML = '';
+
+  const orbital = document.getElementById('orbital');
+  const W  = orbital.offsetWidth;
+  const H  = orbital.offsetHeight;
+  const cx = W / 2, cy = H / 2;
+  const maxR = Math.min((W - 180) / 2, (H - 120) / 2);
+
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  // All content goes into the zoom layer so pan/zoom doesn't affect the SVG element itself
+  const zl = svgEl('g', { id: 'zoom-layer' });
+  applyZoom(zl);
+  svg.appendChild(zl);
+
+  // Background rings
+  RING_RADII.forEach((frac, i) => {
+    const r = maxR * frac;
+    zl.appendChild(svgEl('circle', { cx, cy, r, fill: RINGS[i].color, stroke: RINGS[i].stroke, 'stroke-width': '1' }));
+    const lbl = svgEl('text', { x: cx + r - 6, y: cy - 6, class: 'ring-label', 'text-anchor': 'end' });
+    lbl.textContent = RINGS[i].label;
+    zl.appendChild(lbl);
+  });
+
+  // ── Host layout pre-computation (needed before center node for gap-finding) ──
+  const checkerName    = data.meta?.checker_host || 'fleet';
+  const machines       = data.machines || [];
+  const checkerMachine = machines.find(m =>
+    m.machine.tailscale_name === checkerName ||
+    checkerName.startsWith(m.machine.tailscale_name) ||
+    m.machine.tailscale_name.startsWith(checkerName)
+  );
+
+  const hostMachines = machines.filter(m =>
+    m.machine.tailscale_name !== checkerName &&
+    !checkerName.startsWith(m.machine.tailscale_name) &&
+    !m.machine.tailscale_name.startsWith(checkerName)
+  );
+
+  const MIN_R_FRAC     = 0.18;
+  const INNER_MS       = 5;
+  const innerHosts     = hostMachines.filter(m => (m.host?.response_time_ms ?? 9999) <= INNER_MS && m.host?.status === 'up');
+  const outerHosts     = hostMachines.filter(m => (m.host?.response_time_ms ?? 9999) >  INNER_MS || m.host?.status !== 'up');
+  const innerR         = maxR * RING_RADII[0] * 0.85;
+  const innerAngleStep = 360 / (innerHosts.length || 1);
+  const outerAngleStep = 360 / (outerHosts.length || 1);
+
+  const innerLayout = innerHosts.map((m, i) => ({
+    m,
+    angle: 180 + i * innerAngleStep,
+    r:     innerR,
+    ping:  m.host?.response_time_ms ?? null,
+  }));
+
+  const outerLayout = outerHosts.map((m, i) => {
+    const ping = m.host?.response_time_ms ?? null;
+    const rawR = (status !== 'up')
+      ? maxR * RING_RADII[2] * 0.92
+      : pingToRadius(ping, maxR);
+    return {
+      m,
+      angle: 180 + i * outerAngleStep,
+      r:     Math.max(rawR, maxR * MIN_R_FRAC),
+      ping,
+    };
+  });
+
+  const hostLayout = [...innerLayout, ...outerLayout];
+
+  // ── Center node ───────────────────────────────────
+
+  const centerG = ns('g');
+  centerG.style.cursor = 'pointer';
+  if (checkerMachine) centerG.addEventListener('click', () => showDetail(checkerMachine));
+
+  for (let i = 0; i < 3; i++) {
+    const c = svgEl('circle', { cx, cy, r: 18, class: 'center-pulse' });
+    c.style.animationDelay = `${i}s`;
+    centerG.appendChild(c);
+  }
+  centerG.appendChild(svgEl('circle', { cx, cy, r: 18, fill: 'rgba(0,232,135,0.08)', stroke: 'var(--green)', 'stroke-width': '1.5' }));
+  centerG.appendChild(svgEl('circle', { cx, cy, r: 6, fill: '#fff' }));
+
+  const cnLabel = svgEl('text', { x: cx, y: cy + 28, class: 'host-ping', 'text-anchor': 'middle' });
+  cnLabel.textContent = (checkerMachine?.machine.display_name || checkerName).toUpperCase();
+  centerG.appendChild(cnLabel);
+
+  // Center services always fan upward
+  if (checkerMachine?.services?.length) {
+    renderServices(centerG, checkerMachine.services, cx, cy, 0, false, 0, 0);
+  }
+
+  zl.appendChild(centerG);
+
+  // ── Host nodes ────────────────────────────────────
+
+  hostLayout.forEach(({ m, angle, r }, idx) => {
+    const ping   = m.host?.response_time_ms ?? null;
+    const status = m.host?.status || 'unknown';
+    const pos    = polarToXY(cx, cy, r, angle);
+
+    // Find angle to nearest neighbor for service fan direction
+    let nearestAngle = angle + 180; // default: point away from center
+    let nearestDist  = Infinity;
+    hostLayout.forEach((other, oi) => {
+      if (oi === idx) return;
+      const op   = polarToXY(cx, cy, other.r, other.angle);
+      const dist = Math.hypot(op.x - pos.x, op.y - pos.y);
+      if (dist < nearestDist) {
+        nearestDist  = dist;
+        nearestAngle = Math.atan2(op.y - pos.y, op.x - pos.x) * 180 / Math.PI + 90;
+      }
+    });
+
+    // Spoke from center
+    zl.appendChild(svgEl('line', { x1: cx, y1: cy, x2: pos.x, y2: pos.y, class: `spoke ${status}` }));
+
+    const g = ns('g');
+    g.setAttribute('class', 'host-group');
+    g.style.cursor = 'pointer';
+
+    g.appendChild(svgEl('circle', { cx: pos.x, cy: pos.y, r: 16, class: `host-ring ${status}` }));
+    g.appendChild(svgEl('circle', { cx: pos.x, cy: pos.y, r: 8,  class: `host-dot ${status}` }));
+
+    // Host name label — pushed outward, further from center to clear service dots
+    const services  = m.services || [];
+    const labelDist = 44;
+    const lAngle    = (angle - 90) * Math.PI / 180;
+    const lx        = pos.x + Math.cos(lAngle) * labelDist;
+    const ly        = pos.y + Math.sin(lAngle) * labelDist;
+    const anchor    = lx < cx - 10 ? 'end' : lx > cx + 10 ? 'start' : 'middle';
+
+    const nameEl = svgEl('text', { x: lx, y: ly, class: 'host-name', 'text-anchor': anchor });
+    nameEl.textContent = m.machine.display_name;
+    g.appendChild(nameEl);
+
+    if (ping != null) {
+      const pingEl = svgEl('text', { x: lx, y: ly + 14, class: 'host-ping', 'text-anchor': anchor });
+      pingEl.textContent = `${ping}ms`;
+      g.appendChild(pingEl);
+    }
+
+    if (services.length) renderServices(g, services, pos.x, pos.y, angle, true, nearestAngle, r);
+
+    g.addEventListener('click', () => showDetail(m));
+    zl.appendChild(g);
+  });
+}
+
+// ── TOOLTIP ───────────────────────────────────────────────────────
+function showTooltip(e, svc, status) {
+  const tt   = document.getElementById('tooltip');
+  const vram = parseVRAM(svc.tailscale_check?.detail);
+  let html   = `<strong style="color:#fff">${svc.name}</strong>`;
+  if (svc.priority) html += ` <span style="color:var(--amber);font-size:9px">${svc.priority}</span>`;
+  html += `<br><span style="color:${status === 'up' ? 'var(--green)' : 'var(--red)'}">${status.toUpperCase()}</span>`;
+  if (svc.port) html += ` · :${svc.port}`;
+  if (svc.tailscale_check?.response_time_ms != null) html += ` · ${svc.tailscale_check.response_time_ms}ms`;
+  if (vram) html += `<br><span style="color:var(--blue)">${vram.used}/${vram.total}GB VRAM</span>`;
+  else if (svc.tailscale_check?.detail) html += `<br><span style="color:#4a6070;font-size:10px">${svc.tailscale_check.detail.substring(0, 80)}</span>`;
+  tt.innerHTML     = html;
+  tt.style.opacity = '1';
+  moveTooltip(e);
+}
+function moveTooltip(e) {
+  const tt = document.getElementById('tooltip');
+  let x = e.clientX + 16, y = e.clientY - 10;
+  if (x + 250 > window.innerWidth)  x = e.clientX - 260;
+  if (y + 120 > window.innerHeight) y = e.clientY - 120;
+  tt.style.left = x + 'px';
+  tt.style.top  = y + 'px';
+}
+function hideTooltip() { document.getElementById('tooltip').style.opacity = '0'; }
+
+// ── DETAIL PANEL ──────────────────────────────────────────────────
+function showDetail(m) {
+  const panel       = document.getElementById('detail');
+  const placeholder = document.getElementById('detail-placeholder');
+  const inner       = document.getElementById('detail-inner');
+
+  panel.classList.remove('empty');
+  placeholder.style.display = 'none';
+  inner.style.display       = 'block';
+
+  const status = m.host?.status || 'unknown';
+  const ping   = m.host?.response_time_ms;
+
+  let html = `
+    <div class="detail-host-name">${m.machine.display_name}</div>
+    <div class="detail-host-role">${m.machine.primary_role || ''}</div>
+    <div class="detail-stat-row">
+      <div class="detail-stat">
+        <div class="ds-label">STATUS</div>
+        <div class="ds-val ${status}">${status.toUpperCase()}</div>
+      </div>
+      <div class="detail-stat">
+        <div class="ds-label">LATENCY</div>
+        <div class="ds-val">${ping != null ? ping + 'ms' : '—'}</div>
+      </div>
+      <div class="detail-stat">
+        <div class="ds-label">IP</div>
+        <div class="ds-val" style="font-size:11px">${m.machine.tailscale_ip || '—'}</div>
+      </div>
+    </div>`;
+
+  if (m.host?.detail) html += `<div class="svc-detail-text" style="margin-bottom:12px">${m.host.detail}</div>`;
+
+  html += `<div class="detail-section-title">Services</div>`;
+
+  (m.services || []).forEach(s => {
+    const ss     = s.tailscale_check?.status || 'unknown';
+    const vram   = parseVRAM(s.tailscale_check?.detail);
+    const model  = parseModel(s.tailscale_check?.detail);
+    const tsMs   = s.tailscale_check?.response_time_ms;
+    const detail = s.tailscale_check?.detail;
+    const pClass = s.priority === 'P' ? 'P' : '';
+
+    html += `<div class="svc-card ${ss}">
+      <div class="svc-card-header">
+        <span class="svc-card-name">${s.name}</span>
+        <span class="svc-card-priority ${pClass}">${s.priority || ''}</span>
+      </div>`;
+
+    if (vram) {
+      const pct      = (vram.used / vram.total * 100).toFixed(0);
+      const barClass = pct > 85 ? 'critical' : pct > 60 ? 'high' : '';
+      html += `<div class="vram-bar-wrap">
+        <div class="vram-bar-label">
+          <span>VRAM</span>
+          <span style="color:var(--text-bright)">${vram.used}GB / ${vram.total}GB &nbsp; ${pct}%</span>
+        </div>
+        <div class="vram-bar-track"><div class="vram-bar-fill ${barClass}" style="width:${pct}%"></div></div>
+      </div>`;
+    }
+
+    if (model) {
+      html += `<div class="svc-detail-text" style="margin-top:6px;color:var(--blue)">▸ ${model}</div>`;
+    } else if (detail && !vram) {
+      html += `<div class="svc-detail-text">${detail.substring(0, 120)}</div>`;
+    }
+
+    html += `<div class="svc-meta-row">`;
+    if (s.port)       html += `<div class="svc-meta-item">PORT <span>:${s.port}</span></div>`;
+    if (tsMs != null) html += `<div class="svc-meta-item">TS <span>${tsMs}ms</span></div>`;
+    html += `</div>`;
+
+    if (s.public_check) {
+      const pubStatus = s.public_check.status;
+      const pubUrl    = s.public_check.url?.replace('https://', '');
+      const pubMs     = s.public_check.response_time_ms;
+      html += `<div class="pub-badge ${pubStatus}">${pubUrl}${pubMs ? ' · ' + pubMs + 'ms' : ''}</div>`;
+    }
+
+    html += `</div>`;
+  });
+
+  inner.innerHTML = html;
+}
+
+// ── SUMMARY BAR ───────────────────────────────────────────────────
+function renderSummary(data) {
+  const s   = data.summary || {};
+  const bar = document.getElementById('summary-bar');
+  bar.innerHTML = `
+    <div class="sum-item ${s.machines_down > 0 ? 'warn' : 'neutral'}">
+      <span class="val">${s.machines_total ?? '—'}</span><span class="lbl">Hosts</span>
+    </div>
+    <div class="sum-divider"></div>
+    <div class="sum-item good"><span class="val">${s.machines_up ?? '—'}</span><span class="lbl">Up</span></div>
+    ${s.machines_down > 0 ? `<div class="sum-item warn"><span class="val">${s.machines_down}</span><span class="lbl">Down</span></div>` : ''}
+    <div class="sum-divider"></div>
+    <div class="sum-item neutral"><span class="val">${s.services_total ?? '—'}</span><span class="lbl">Services</span></div>
+    <div class="sum-item good"><span class="val">${s.services_up ?? '—'}</span><span class="lbl">Svc Up</span></div>
+    ${s.services_down > 0 ? `<div class="sum-item warn"><span class="val">${s.services_down}</span><span class="lbl">Svc Down</span></div>` : ''}
+    <div class="sum-divider"></div>
+    <div class="sum-item neutral"><span class="val">${s.public_endpoints_total ?? '—'}</span><span class="lbl">Public</span></div>
+    ${s.public_endpoints_down > 0 ? `<div class="sum-item warn"><span class="val">${s.public_endpoints_down}</span><span class="lbl">Pub Down</span></div>` : ''}
+  `;
+}
+
+// ── AGE COUNTER ───────────────────────────────────────────────────
+setInterval(() => {
+  if (!lastTimestamp) return;
+  const sec = Math.floor((Date.now() - lastTimestamp) / 1000);
+  const el  = document.getElementById('meta-age');
+  el.textContent = sec < 60 ? `${sec}s ago` : `${Math.floor(sec / 60)}m ${sec % 60}s ago`;
+  el.className   = 'age' + (sec < 45 ? ' fresh' : '');
+}, 1000);
+
+// ── FETCH & POLL ──────────────────────────────────────────────────
+async function refresh() {
+  try {
+    const res  = await fetch(API_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.meta) {
+      lastTimestamp = new Date(data.meta.timestamp_utc).getTime();
+      document.getElementById('meta-checker').textContent = (data.meta.checker_host || '—').toUpperCase();
+    }
+    renderSummary(data);
+    render(data);
+  } catch (e) {
+    console.warn('Fleet fetch error:', e.message);
+  }
+}
+
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (currentData) render(currentData); }, 150);
+});
+
+// ── ZOOM & PAN ────────────────────────────────────────────────────
+const zoom = { scale: 1, tx: 0, ty: 0 };
+const ZOOM_MIN = 0.4, ZOOM_MAX = 8;
+
+function applyZoom(el) {
+  el.setAttribute('transform', `translate(${zoom.tx},${zoom.ty}) scale(${zoom.scale})`);
+}
+
+function resetZoom() {
+  zoom.scale = 1; zoom.tx = 0; zoom.ty = 0;
+  const zl = document.getElementById('zoom-layer');
+  if (zl) applyZoom(zl);
+}
+
+// Wheel zoom — zoom toward cursor
+document.getElementById('svg').addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const svg   = document.getElementById('svg');
+  const rect  = svg.getBoundingClientRect();
+  const mx    = e.clientX - rect.left;
+  const my    = e.clientY - rect.top;
+  const delta = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  const newScale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom.scale * delta));
+  // Shift translate so the point under cursor stays fixed
+  zoom.tx = mx - (mx - zoom.tx) * (newScale / zoom.scale);
+  zoom.ty = my - (my - zoom.ty) * (newScale / zoom.scale);
+  zoom.scale = newScale;
+  const zl = document.getElementById('zoom-layer');
+  if (zl) applyZoom(zl);
+}, { passive: false });
+
+// Double-click reset
+document.getElementById('svg').addEventListener('dblclick', resetZoom);
+
+// Mouse drag pan
+let drag = null;
+document.getElementById('svg').addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  drag = { sx: e.clientX, sy: e.clientY, tx: zoom.tx, ty: zoom.ty };
+});
+window.addEventListener('mousemove', (e) => {
+  if (!drag) return;
+  zoom.tx = drag.tx + (e.clientX - drag.sx);
+  zoom.ty = drag.ty + (e.clientY - drag.sy);
+  const zl = document.getElementById('zoom-layer');
+  if (zl) applyZoom(zl);
+});
+window.addEventListener('mouseup', () => { drag = null; });
+
+// Touch pinch-zoom + pan
+let touches = {};
+document.getElementById('svg').addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) touches[t.identifier] = { x: t.clientX, y: t.clientY };
+}, { passive: false });
+
+document.getElementById('svg').addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const ids = Object.keys(touches);
+  if (e.touches.length === 1 && ids.length === 1) {
+    // Pan
+    const t   = e.touches[0];
+    const old = touches[t.identifier];
+    if (!old) return;
+    zoom.tx += t.clientX - old.x;
+    zoom.ty += t.clientY - old.y;
+    touches[t.identifier] = { x: t.clientX, y: t.clientY };
+  } else if (e.touches.length === 2) {
+    // Pinch
+    const [t1, t2] = [e.touches[0], e.touches[1]];
+    const o1 = touches[t1.identifier], o2 = touches[t2.identifier];
+    if (!o1 || !o2) return;
+    const prevDist = Math.hypot(o1.x - o2.x, o1.y - o2.y);
+    const newDist  = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+    if (prevDist === 0) return;
+    const delta    = newDist / prevDist;
+    const midX     = (t1.clientX + t2.clientX) / 2;
+    const midY     = (t1.clientY + t2.clientY) / 2;
+    const svg      = document.getElementById('svg');
+    const rect     = svg.getBoundingClientRect();
+    const mx = midX - rect.left, my = midY - rect.top;
+    const newScale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom.scale * delta));
+    zoom.tx = mx - (mx - zoom.tx) * (newScale / zoom.scale);
+    zoom.ty = my - (my - zoom.ty) * (newScale / zoom.scale);
+    zoom.scale = newScale;
+    touches[t1.identifier] = { x: t1.clientX, y: t1.clientY };
+    touches[t2.identifier] = { x: t2.clientX, y: t2.clientY };
+  }
+  const zl = document.getElementById('zoom-layer');
+  if (zl) applyZoom(zl);
+}, { passive: false });
+
+document.getElementById('svg').addEventListener('touchend', (e) => {
+  for (const t of e.changedTouches) delete touches[t.identifier];
+}, { passive: false });
+
+// Reset button hint in legend
+document.getElementById('ring-legend').insertAdjacentHTML('beforeend',
+  '<div class="legend-item" style="margin-top:8px;color:#1a3040">scroll/pinch · drag · dbl-click reset</div>'
+);
+
+// ── PANEL TOGGLE ──────────────────────────────────────────────────
+const toggleBtn = document.getElementById('detail-toggle');
+const detailPanel = document.getElementById('detail');
+toggleBtn.addEventListener('click', () => {
+  const collapsed = detailPanel.classList.toggle('collapsed');
+  toggleBtn.textContent = collapsed ? '▶' : '◀';
+  toggleBtn.style.right = collapsed ? '4px' : '264px';
+  setTimeout(() => { if (currentData) render(currentData); }, 260);
+});
+
+refresh();
+requestAnimationFrame(() => requestAnimationFrame(() => { if (currentData) render(currentData); }));
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
