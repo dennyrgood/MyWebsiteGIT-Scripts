@@ -99,9 +99,9 @@ function Get-MachineInfo {
         if ($c) { [math]::Round(($c | Measure-Object -Property LoadPercentage -Average).Average, 0) } else { $null }
     }
 
-    # Disks — all local fixed drives
+    # Disks — local fixed drives and removable drives (e.g. USB flash sticks)
     $disks = @()
-    $drives = Safe-Get { Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" }
+    $drives = Safe-Get { Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3 OR DriveType=2" }
     if ($drives) {
         foreach ($d in $drives) {
             $totalGB = [math]::Round($d.Size / 1GB, 1)
