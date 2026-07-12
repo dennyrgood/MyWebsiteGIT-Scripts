@@ -1,8 +1,13 @@
 #!/bin/bash
 # /srv/immich/scripts/wbu-health-monitor.sh
 # 2026-07-01 UTC
+# 2026-07-12 UTC: added docker container health checks (missing + unhealthy)
+#                 for all four Immich containers, with 2-consecutive-failure
+#                 anti-flap threshold.
+# 2026-07-12 UTC: converted D-state check to same 2-consecutive-failure streak
+#                 model to suppress transient jbd2/postgres COPY blips.
 # WBU system health monitor. Runs every 5 minutes via cron.
-# Checks: iowait, D-state processes, disk usage, missing mounts.
+# Checks: iowait, D-state processes, disk usage, missing mounts, docker containers.
 # Emails on first detection and every 30 minutes while condition persists.
 # Sends all-clear when condition resolves. No email if all healthy.
 
@@ -15,12 +20,21 @@ ALERT_INTERVAL=$((30 * 60))
 IOWAIT_THRESHOLD=20
 DISK_THRESHOLD=85
 BACKUP_C_MOUNT="/mnt/backup-c"
+DOCKER_CONTAINERS=(immich_machine_learning immich_server immich_postgres immich_redis)
+DOCKER_FAIL_THRESHOLD=2   # consecutive failures before alerting (anti-flap on restart)
+DSTATE_FAIL_THRESHOLD=2   # consecutive samples with D-state processes before alerting
 
 # --- Load state (defaults to zero/inactive if file absent) ---
 IOWAIT_LAST_ALERT=0; IOWAIT_ACTIVE=0
-DSTATE_LAST_ALERT=0; DSTATE_ACTIVE=0
+DSTATE_LAST_ALERT=0; DSTATE_ACTIVE=0; DSTATE_STREAK=0
 DISK_LAST_ALERT=0;   DISK_ACTIVE=0
 MOUNT_LAST_ALERT=0;  MOUNT_ACTIVE=0
+
+# Per-container state initialized dynamically below
+for c in "${DOCKER_CONTAINERS[@]}"; do
+    eval "MISSING_${c}_LAST_ALERT=0;   MISSING_${c}_ACTIVE=0;   MISSING_${c}_STREAK=0"
+    eval "UNHEALTHY_${c}_LAST_ALERT=0; UNHEALTHY_${c}_ACTIVE=0; UNHEALTHY_${c}_STREAK=0"
+done
 
 [ -f "$STATE_FILE" ] && source "$STATE_FILE"
 
@@ -47,6 +61,26 @@ DISK_TRIGGERED=0
 MOUNT_TRIGGERED=0
 grep -q " $BACKUP_C_MOUNT " /proc/mounts || MOUNT_TRIGGERED=1
 
+# --- Check 5: docker container health ---
+# For each container: check present, and if present check health status.
+# Streaks accumulate across cron runs; alert fires only after DOCKER_FAIL_THRESHOLD
+# consecutive failing samples (default: 2 = ~10 min) to ride out restarts.
+declare -A DOCKER_MISSING_TRIGGERED DOCKER_UNHEALTHY_TRIGGERED
+for c in "${DOCKER_CONTAINERS[@]}"; do
+    if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$c"; then
+        DOCKER_MISSING_TRIGGERED[$c]=1
+        DOCKER_UNHEALTHY_TRIGGERED[$c]=0
+    else
+        DOCKER_MISSING_TRIGGERED[$c]=0
+        HSTATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$c" 2>/dev/null)
+        if [ "$HSTATUS" = "unhealthy" ]; then
+            DOCKER_UNHEALTHY_TRIGGERED[$c]=1
+        else
+            DOCKER_UNHEALTHY_TRIGGERED[$c]=0
+        fi
+    fi
+done
+
 # --- Evaluate each condition: alert / suppress / clear / ok ---
 check_condition() {
     local triggered=$1 last_alert=$2 was_active=$3
@@ -61,6 +95,28 @@ check_condition() {
         echo "clear"
     else
         echo "ok"
+    fi
+}
+
+# --- Streak-aware condition helper (used by D-state and docker checks) ---
+check_condition_streak() {
+    local triggered=$1 last_alert=$2 was_active=$3 streak=$4 threshold=$5
+    if [ "$triggered" -eq 1 ]; then
+        streak=$(( streak + 1 ))
+        if [ "$streak" -ge "$threshold" ]; then
+            if [ "$was_active" -eq 0 ] || \
+               [ $(( NOW - last_alert )) -ge $ALERT_INTERVAL ]; then
+                echo "alert $streak"
+            else
+                echo "suppress $streak"
+            fi
+        else
+            echo "wait $streak"
+        fi
+    elif [ "$was_active" -eq 1 ]; then
+        echo "clear 0"
+    else
+        echo "ok 0"
     fi
 }
 
@@ -79,16 +135,20 @@ case "$(check_condition $IOWAIT_TRIGGERED $IOWAIT_LAST_ALERT $IOWAIT_ACTIVE)" in
     ok)       IOWAIT_ACTIVE=0 ;;
 esac
 
-# D-state
-case "$(check_condition $DSTATE_TRIGGERED $DSTATE_LAST_ALERT $DSTATE_ACTIVE)" in
+# D-state (streak-based: only alerts after DSTATE_FAIL_THRESHOLD consecutive samples
+# to suppress transient blips like jbd2/* or short-lived Postgres COPY backends)
+read verdict new_streak <<< "$(check_condition_streak $DSTATE_TRIGGERED $DSTATE_LAST_ALERT $DSTATE_ACTIVE $DSTATE_STREAK $DSTATE_FAIL_THRESHOLD)"
+DSTATE_STREAK=$new_streak
+case "$verdict" in
     alert)
         DSTATE_LAST_ALERT=$NOW; DSTATE_ACTIVE=1
         ALERT_BODY+="=== D-STATE PROCESSES ===\n"
+        ALERT_BODY+="Present for ${new_streak} consecutive checks (~$((new_streak * 5)) min).\n"
         ALERT_BODY+="$(echo "$DSTATE_PROCS" | head -10)\n\n"
         ;;
     clear)   DSTATE_ACTIVE=0; CLEAR_BODY+="  - D-state processes cleared\n" ;;
     suppress) DSTATE_ACTIVE=1 ;;
-    ok)       DSTATE_ACTIVE=0 ;;
+    wait|ok) DSTATE_ACTIVE=0 ;;
 esac
 
 # Disk
@@ -114,6 +174,49 @@ case "$(check_condition $MOUNT_TRIGGERED $MOUNT_LAST_ALERT $MOUNT_ACTIVE)" in
     ok)       MOUNT_ACTIVE=0 ;;
 esac
 
+# --- Evaluate each docker container ---
+for c in "${DOCKER_CONTAINERS[@]}"; do
+    # Missing check
+    trig=${DOCKER_MISSING_TRIGGERED[$c]}
+    last=$(eval echo \$MISSING_${c}_LAST_ALERT)
+    active=$(eval echo \$MISSING_${c}_ACTIVE)
+    streak=$(eval echo \$MISSING_${c}_STREAK)
+    read verdict new_streak <<< "$(check_condition_streak $trig $last $active $streak $DOCKER_FAIL_THRESHOLD)"
+    eval "MISSING_${c}_STREAK=$new_streak"
+    case "$verdict" in
+        alert)
+            eval "MISSING_${c}_LAST_ALERT=$NOW; MISSING_${c}_ACTIVE=1"
+            ALERT_BODY+="=== CONTAINER MISSING: ${c} ===\n"
+            ALERT_BODY+="Not present in docker ps for ${new_streak} consecutive checks.\n\n"
+            ;;
+        clear)   eval "MISSING_${c}_ACTIVE=0"
+                 CLEAR_BODY+="  - container ${c} is back\n" ;;
+        suppress) eval "MISSING_${c}_ACTIVE=1" ;;
+        wait|ok) eval "MISSING_${c}_ACTIVE=0" ;;
+    esac
+
+    # Unhealthy check
+    trig=${DOCKER_UNHEALTHY_TRIGGERED[$c]}
+    last=$(eval echo \$UNHEALTHY_${c}_LAST_ALERT)
+    active=$(eval echo \$UNHEALTHY_${c}_ACTIVE)
+    streak=$(eval echo \$UNHEALTHY_${c}_STREAK)
+    read verdict new_streak <<< "$(check_condition_streak $trig $last $active $streak $DOCKER_FAIL_THRESHOLD)"
+    eval "UNHEALTHY_${c}_STREAK=$new_streak"
+    case "$verdict" in
+        alert)
+            eval "UNHEALTHY_${c}_LAST_ALERT=$NOW; UNHEALTHY_${c}_ACTIVE=1"
+            ALERT_BODY+="=== CONTAINER UNHEALTHY: ${c} ===\n"
+            ALERT_BODY+="Docker health status = unhealthy for ${new_streak} consecutive checks.\n"
+            ALERT_BODY+="Recent health log:\n"
+            ALERT_BODY+="$(docker inspect --format='{{range .State.Health.Log}}{{.Start}}  exit={{.ExitCode}}  {{.Output}}{{end}}' $c 2>/dev/null | tail -c 800)\n\n"
+            ;;
+        clear)   eval "UNHEALTHY_${c}_ACTIVE=0"
+                 CLEAR_BODY+="  - container ${c} returned to healthy\n" ;;
+        suppress) eval "UNHEALTHY_${c}_ACTIVE=1" ;;
+        wait|ok) eval "UNHEALTHY_${c}_ACTIVE=0" ;;
+    esac
+done
+
 # --- Educational footer ---
 FOOTER="------------------------------------------------------------------------
 WHAT THESE ALERTS MEAN AND WHAT TO DO
@@ -136,10 +239,11 @@ What to do:
 D-STATE PROCESSES:
 A process in D-state (uninterruptible sleep) is blocked waiting for
 the kernel to complete an I/O operation. Normal processes pass through
-D-state for milliseconds. If a process is stuck long enough for this
-monitor to catch it, the block device it is waiting on is likely hung.
-Kernel threads jbd2/<dev> and flush-<dev> in D-state almost always
-mean the underlying block device is in trouble.
+D-state for milliseconds. This monitor now requires D-state processes
+to be present for ${DSTATE_FAIL_THRESHOLD} consecutive samples (~$((DSTATE_FAIL_THRESHOLD * 5)) min) before alerting,
+which filters out transient jbd2/* and short-lived Postgres COPY blips.
+If the alert fires, the block device is likely hung or a process is
+genuinely stuck.
 
 What to do:
   1. ps -eo pid,stat,comm,args | awk '\$2~/^D/'  -- see what is stuck
@@ -147,19 +251,40 @@ What to do:
   3. lsof /mnt/<mountpoint>     -- see what has files open on it
   4. If USB: unplug it -- the D-state process will unblock
   5. If it persists after unplug: a reboot may be required
+
+DOCKER CONTAINER MISSING / UNHEALTHY:
+A container is 'missing' when it is not present in 'docker ps' at all
+(crashed, removed, or docker daemon issue). 'Unhealthy' means the
+container is running but its healthcheck has failed repeatedly. Alerts
+require ${DOCKER_FAIL_THRESHOLD} consecutive failing samples (~10 min) to
+ride out normal restarts.
+
+What to do:
+  1. docker ps -a                                 -- see container state
+  2. docker inspect --format='{{.State.Health.Status}}' <name>
+  3. docker logs --tail 100 <name>                -- look for errors
+  4. docker inspect --format='{{json .State.Health}}' <name> | jq
+  5. If wedged: cd ~/immich-app && docker compose up -d --force-recreate <service>
 ------------------------------------------------------------------------"
 
 # --- Save state ---
-cat > "$STATE_FILE" <<STATEEOF
-IOWAIT_LAST_ALERT=$IOWAIT_LAST_ALERT
-IOWAIT_ACTIVE=$IOWAIT_ACTIVE
-DSTATE_LAST_ALERT=$DSTATE_LAST_ALERT
-DSTATE_ACTIVE=$DSTATE_ACTIVE
-DISK_LAST_ALERT=$DISK_LAST_ALERT
-DISK_ACTIVE=$DISK_ACTIVE
-MOUNT_LAST_ALERT=$MOUNT_LAST_ALERT
-MOUNT_ACTIVE=$MOUNT_ACTIVE
-STATEEOF
+{
+    echo "IOWAIT_LAST_ALERT=$IOWAIT_LAST_ALERT"
+    echo "IOWAIT_ACTIVE=$IOWAIT_ACTIVE"
+    echo "DSTATE_LAST_ALERT=$DSTATE_LAST_ALERT"
+    echo "DSTATE_ACTIVE=$DSTATE_ACTIVE"
+    echo "DSTATE_STREAK=$DSTATE_STREAK"
+    echo "DISK_LAST_ALERT=$DISK_LAST_ALERT"
+    echo "DISK_ACTIVE=$DISK_ACTIVE"
+    echo "MOUNT_LAST_ALERT=$MOUNT_LAST_ALERT"
+    echo "MOUNT_ACTIVE=$MOUNT_ACTIVE"
+    for c in "${DOCKER_CONTAINERS[@]}"; do
+        for k in MISSING_${c}_LAST_ALERT MISSING_${c}_ACTIVE MISSING_${c}_STREAK \
+                 UNHEALTHY_${c}_LAST_ALERT UNHEALTHY_${c}_ACTIVE UNHEALTHY_${c}_STREAK; do
+            echo "$k=$(eval echo \$$k)"
+        done
+    done
+} > "$STATE_FILE"
 
 # --- Send alert email ---
 if [ -n "$ALERT_BODY" ]; then
