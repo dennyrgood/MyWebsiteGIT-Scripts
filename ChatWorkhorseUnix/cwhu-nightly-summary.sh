@@ -24,6 +24,23 @@ for LOG in "${LOGS[@]}"; do
         TLDR+="  $(basename "$LOG"): (file not found)\n"
     fi
 done
+# --- Add health monitor watchdog to TLDR ---
+if [ -f "$MONITOR_STATE" ]; then
+    STATE_AGE=$(( $(date +%s) - $(stat -c %Y "$MONITOR_STATE") ))
+    if [ "$STATE_AGE" -gt 600 ]; then
+        TLDR+="  wbu-health-monitor: ⚠️ stale (${STATE_AGE}s)\n"
+    else
+        TLDR+="  cwhu-health-monitor: last-run $((STATE_AGE / 60))m ago ✓\n"
+    fi
+    ACTIVE=$(grep "_ACTIVE=1" "$MONITOR_STATE" 2>/dev/null)
+    if [ -n "$ACTIVE" ]; then
+        TLDR+="  cwhu-health-monitor: ⚠️ ACTIVE ALERTS\n"
+    else
+        TLDR+="  cwhu-health-monitor: no active alerts ✓\n"
+    fi
+else
+    TLDR+="  cwhu-health-monitor: ⚠️ state file missing\n"
+fi
 TLDR+="===================================================================\n\n"
 
 # --- Build log tails ---
