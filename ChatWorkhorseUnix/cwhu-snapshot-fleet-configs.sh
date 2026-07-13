@@ -10,6 +10,7 @@ cp -p /etc/fstab "$DEST/fstab.txt"
 cp -p ~/immich-app/docker-compose.yml "$DEST/docker-compose.yml"
 cp -p ~/immich-app/hwaccel.ml.yml "$DEST/hwaccel.ml.yml"
 cp -p ~/immich-app/.env "$DEST/.env"
-crontab -l > "$DEST/crontab-l.txt"
+crontab -l > "$DEST/crontab-l-dhm.txt"
+sudo crontab -l > "$DEST/crontab-l-root.txt"
 
 echo "Snapshot complete. Review with: cd $DEST && git status"
