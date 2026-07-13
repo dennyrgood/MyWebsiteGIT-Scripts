@@ -1,0 +1,74 @@
+%%{init: {"flowchart": {"defaultRenderer": "elk"}} }%%
+flowchart LR
+
+  %% 2026-07-08 ~22:20 UTC — created; CWHU 4am, PG node + PG->BC edge, backup-a/b disabled
+  %% 2026-07-08 ~22:35 UTC — removed %%{init ELK directive (parse error on Mac mmdc)
+  %% 2026-07-08 ~22:45 UTC — moved all %% comments after flowchart LR declaration
+  %% 2026-07-08 ~23:00 UTC — ELK directive restored as line 1 (mmdc 11.x supports it); edge labels shortened
+  %% 2026-07-11 ~14:00 UTC — node labels and edge labels restored to match flat version verbatim;
+  %%   edge order matches flat version so linkStyle indexes are identical
+
+  subgraph WBU["WBU — WorkBenchUnix"]
+    LIVE[("immich-data — WBU<br/>live images/ — Source")]
+    PG[("Postgres — live DB, WBU<br/>/srv/immich/postgres")]
+    DUMPS[("postgres-dumps-latest/<br/>on immich-data — pg_dumpall, kept-2")]
+    FLAT[("export_flat/ — WBU")]
+    MULTI[("export_multi/ — WBU")]
+    SMB["Samba guest shares, WBU:<br/>immich-flat + immich-multi<br/>live view in place — not a copy"]
+  end
+
+  subgraph DRIVES["Local backup drives"]
+    BC[("backup-c - local drive")]
+    BA[("backup-a — local drive<br/>disabled")]
+    BB[("backup-b — local drive<br/>disabled")]
+  end
+
+  subgraph REMOTE["Warm standby + remote copies"]
+    CWHU["CWHU — warm standby"]
+    MM["Mac Mini"]
+    AD["AmsterdamDesktop"]
+    GC["GC — not built"]
+    RW["RemoteWS — not built"]
+  end
+
+  %% edges — order matches flat version exactly so linkStyle indexes are identical
+  LIVE -->|"backup_immich.sh — hardlinked incremental, cron 1am daily"| BC
+  LIVE -.->|"disabled — was backup_immich.sh, 4am"| BA
+  LIVE -.->|"disabled — was backup_immich_snap.sh, 4:30am"| BB
+  PG -->|"dump_immich_db_for_cwhu.sh — cron 3:30am daily"| DUMPS
+  LIVE -->|"restore_from_wbu.sh — images, cron 4am daily, CWHU pulls"| CWHU
+  DUMPS -->|"DB dump — one hop"| CWHU
+  LIVE -->|"backup_immich_images_to_macmini.sh — images, Fri 5:05am"| MM
+  DUMPS -->|"backup_immich_db_to_macmini.sh — DB dump, Fri 5:00am, one hop"| MM
+  LIVE -->|"export_archive.py — manual, milestone-triggered"| FLAT
+  LIVE -->|"export_archive.py — manual, milestone-triggered"| MULTI
+  FLAT -->|"export_flat_to_macmini.sh — manual"| MM
+  MULTI -->|"export_multi_to_macmini.sh — manual"| MM
+  FLAT -->|"export_flat_to_amsterdamdesktop.sh — manual"| AD
+  MULTI -->|"export_multi_to_amsterdamdesktop.sh — manual"| AD
+  FLAT -.->|"push undecided"| GC
+  MULTI -.->|"push undecided"| GC
+  FLAT -.->|"push undecided"| RW
+  MULTI -.->|"push undecided"| RW
+  FLAT --- SMB
+  MULTI --- SMB
+  PG -->|"pg_dumpall runs inside backup_immich.sh — backup-c's own DB dump, 1am"| BC
+
+  %% indexes: 0=BC-img 1=BA 2=BB 3=DUMPS 4=CWHU-img 5=CWHU-db
+  %%          6=MM-img 7=MM-db 8=FLAT-build 9=MULTI-build
+  %%          10=FLAT-MM 11=MULTI-MM 12=FLAT-AD 13=MULTI-AD
+  %%          14=FLAT-GC 15=MULTI-GC 16=FLAT-RW 17=MULTI-RW
+  %%          18=FLAT-SMB 19=MULTI-SMB 20=BC-db(PG)
+  linkStyle 0,4,6 stroke:#2563b0,stroke-width:2px
+  linkStyle 1,2 stroke:#aaaaaa
+  linkStyle 3,5,7,20 stroke:#0e7c66,stroke-width:2px
+  linkStyle 8,10,12,14,16 stroke:#b45309,stroke-width:2px
+  linkStyle 9,11,13,15,17 stroke:#7e22ce,stroke-width:2px
+  linkStyle 18,19 stroke:#9db3cf,stroke-dasharray:2 3
+
+  classDef disabled fill:#fafafa,stroke:#bbbbbb,color:#999999
+  classDef ghost fill:#fafafa,stroke:#bbbbbb,color:#999999,stroke-dasharray:6 5
+  classDef smbnote fill:#f4f7fb,stroke:#9db3cf,color:#44597a
+  class BA,BB disabled
+  class GC,RW ghost
+  class SMB smbnote

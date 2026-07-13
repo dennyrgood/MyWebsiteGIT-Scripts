@@ -1,0 +1,81 @@
+```mermaid
+%%{init: {"flowchart": {"defaultRenderer": "elk"}} }%%
+%% Immich data flow — SUBGRAPH version (three cluster boxes: WBU / DRIVES / REMOTE)
+%% Sibling of immich_data_flow.mermaid (flat version); kept for mermaid.live experimentation.
+%% The flat version is the canonical working copy — edit that one for GitHub.
+%% This version uses ELK renderer (first line) which handles subgraph clusters better than dagre;
+%% try it at mermaid.live to see if layout is cleaner there than in the chat tile.
+%%
+%% 2026-07-08 ~22:20 UTC — reconstructed from conversation history with all current facts:
+%%   CWHU 4am (was 6am), PG node + PG->BC edge (backup-c's own pg_dumpall),
+%%   backup-a/b disabled, export logs not yet found, Samba shares noted.
+%% Edit rule: one edge per flow. If you add/remove an edge, renumber linkStyle indexes.
+
+flowchart LR
+
+  subgraph WBU["WBU — WorkBenchUnix"]
+    LIVE[("immich-data<br/>live images/ — Source")]
+    PG[("Postgres — live DB<br/>/srv/immich/postgres")]
+    DUMPS[("postgres-dumps-latest/<br/>pg_dumpall, kept-2")]
+    FLAT[("export_flat/")]
+    MULTI[("export_multi/")]
+    SMB["Samba guest shares:<br/>immich-flat + immich-multi<br/>live view in place — not a copy"]
+  end
+
+  subgraph DRIVES["Local backup drives"]
+    BC[("backup-c")]
+    BA[("backup-a<br/>disabled")]
+    BB[("backup-b<br/>disabled")]
+  end
+
+  subgraph REMOTE["Warm standby + remote copies"]
+    CWHU["CWHU — warm standby"]
+    MM["Mac Mini"]
+    AD["AmsterdamDesktop"]
+    GC["GC — not built"]
+    RW["RemoteWS — not built"]
+  end
+
+  LIVE -->|"backup_immich.sh — hardlinked incremental, cron 1am daily"| BC
+  LIVE -.->|"disabled — was backup_immich.sh, 4am"| BA
+  LIVE -.->|"disabled — was backup_immich_snap.sh, 4:30am"| BB
+  PG -->|"dump_immich_db_for_cwhu.sh — cron 3:30am daily"| DUMPS
+  LIVE -->|"restore_from_wbu.sh — images, cron 4am daily, CWHU pulls"| CWHU
+  DUMPS -->|"DB dump — one hop"| CWHU
+  LIVE -->|"backup_immich_images_to_macmini.sh — images, Fri 5:05am"| MM
+  DUMPS -->|"backup_immich_db_to_macmini.sh — DB dump, Fri 5:00am, one hop"| MM
+  LIVE -->|"export_archive.py — manual, milestone-triggered"| FLAT
+  LIVE -->|"export_archive.py — manual, milestone-triggered"| MULTI
+  FLAT -->|"export_flat_to_macmini.sh — manual"| MM
+  MULTI -->|"export_multi_to_macmini.sh — manual"| MM
+  FLAT -->|"export_flat_to_amsterdamdesktop.sh — manual"| AD
+  MULTI -->|"export_multi_to_amsterdamdesktop.sh — manual"| AD
+  FLAT -.->|"push undecided"| GC
+  MULTI -.->|"push undecided"| GC
+  FLAT -.->|"push undecided"| RW
+  MULTI -.->|"push undecided"| RW
+  FLAT --- SMB
+  MULTI --- SMB
+  PG -->|"pg_dumpall inside backup_immich.sh — backup-c's own DB dump, 1am"| BC
+
+  %% edge colors by index (declaration order above, 0-indexed):
+  %% 0,4,6   blue   = scheduled image backups
+  %% 1,2     grey   = disabled flows
+  %% 3,5,7,20 teal  = DB-dump chain (incl. backup-c's own pg_dumpall)
+  %% 8,10,12,14,16  orange = export_flat/ pushes
+  %% 9,11,13,15,17  purple = export_multi/ pushes
+  %% 18,19   steel  = Samba in-place links
+  linkStyle 0,4,6 stroke:#2563b0,stroke-width:2px
+  linkStyle 1,2 stroke:#aaaaaa
+  linkStyle 3,5,7,20 stroke:#0e7c66,stroke-width:2px
+  linkStyle 8,10,12,14,16 stroke:#b45309,stroke-width:2px
+  linkStyle 9,11,13,15,17 stroke:#7e22ce,stroke-width:2px
+  linkStyle 18,19 stroke:#9db3cf,stroke-dasharray:2 3
+
+  classDef disabled fill:#fafafa,stroke:#bbbbbb,color:#999999
+  classDef ghost fill:#fafafa,stroke:#bbbbbb,color:#999999,stroke-dasharray:6 5
+  classDef smbnote fill:#f4f7fb,stroke:#9db3cf,color:#44597a
+  class BA,BB disabled
+  class GC,RW ghost
+  class SMB smbnote
+```
