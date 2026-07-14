@@ -1,0 +1,14 @@
+[2026-07-14 12:17 UTC] ALL CLEAR
+[2026-07-14 12:19 UTC] Connectivity lost - toggling adapter
+[2026-07-14 12:19 UTC] Adapter toggled - connectivity still down after 26s
+[2026-07-14 12:22 UTC] Connectivity lost - toggling adapter
+[2026-07-14 12:22 UTC] Adapter toggled - connectivity still down after 25s
+[2026-07-14 12:23 UTC] Connectivity lost - toggling adapter
+[2026-07-14 12:23 UTC] Adapter toggled - connectivity still down after 18s
+[2026-07-14 12:27 UTC] Connectivity lost - toggling adapter
+[2026-07-14 12:28 UTC] Adapter toggled - connectivity still down after 18s
+[2026-07-14 12:35 UTC] Connectivity lost - toggling adapter
+[2026-07-14 12:36 UTC] Adapter toggled - connectivity still down after 18s
+[2026-07-14 12:40 UTC] Connectivity lost - toggling adapter
+[2026-07-14 12:41 UTC] Toggle did not restore - attempting reconnect to oLiFaNt_5G
+[2026-07-14 12:41 UTC] Restored after reconnect to oLiFaNt_5G
