@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- tiles.html — FLEET_OPS LCARS tiles view — Last updated: 2026-06-17 10:45 UTC — sparkline staleness: dim opacity + si-stale label when history > 10min old -->
 <!-- Updated: 2026-06-28 UTC — add Immich check_type handler to renderPrimaryMetric and renderModalService; thread machine param for machine_info access -->
+<!-- Updated: 2026-07-14 16:19 UTC — Syncthing tile: show state + items/MB remaining instead of UP -->
+<!-- Updated: 2026-07-14 16:45 UTC — replace U+00B7 middle dot with U+2022 bullet throughout (rendering as 250 in tile font) -->
+<!-- Updated: 2026-07-14 16:55 UTC — replace bullet separators in template literals with ASCII dash; restore data-parsing regexes to use unicode escapes -->
+<!-- Updated: 2026-07-14 17:40 UTC — Plex tile: show stream titles (username stripped) when streams active -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -717,7 +721,7 @@
 
   <div id="footer">
     FLEET_OPS // LCARS INTERFACE
-    <span style="color:var(--text-dim);margin-left:16px;font-size:9px">v2026-06-17 10:45 UTC</span>
+    <span style="color:var(--text-dim);margin-left:16px;font-size:9px">v2026-07-14 17:40 UTC</span>
     <a id="altFeedLink" href="#">BACKUP FEED</a>
   </div>
 
@@ -775,17 +779,17 @@
     }
     function parseGPU(d) {
       if (!d) return null;
-      const m = d.match(/GPU:\s*cuda:\d+\s+(.+?)\s*(?::|·|\u00b7|$)/);
+      const m = d.match(/GPU:\s*cuda:\d+\s+(.+?)\s*(?::|\u2022|\u00b7|$)/);
       return m ? m[1].trim() : null;
     }
     function parseQueue(d) {
       if (!d) return null;
-      const m = d.match(/Queue:\s*(.+?)(?:\s*·|\s*$)/);
+      const m = d.match(/Queue:\s*(.+?)(?:\s*\u2022|\s*$)/);
       return m ? m[1].trim() : null;
     }
     function parseOllama(d) {
       if (!d) return null;
-      const m = d.match(/(\d+)\s+models?\s+available\s*[·\u00b7]\s*(.+)/);
+      const m = d.match(/(\d+)\s+models?\s+available\s*[\u2022\u00b7]\s*(.+)/);
       return m ? { count: parseInt(m[1]), active: m[2].trim() } : null;
     }
     function parsePlex(d) {
@@ -793,13 +797,21 @@
       const streams = d.match(/(\d+)\s+active\s+streams?/i);
       const remote  = d.match(/Remote:\s*(\w+)/i);
       const libs    = d.match(/(\d+)\s+libraries?/i);
-      return { streams: streams ? parseInt(streams[1]) : 0, remote: remote ? remote[1] : null, libs: libs ? parseInt(libs[1]) : null };
+      const titles  = [...d.matchAll(/^\s*-\s*\w+:\s*(.+)$/gm)].map(m => m[1].trim());
+      return { streams: streams ? parseInt(streams[1]) : 0, remote: remote ? remote[1] : null, libs: libs ? parseInt(libs[1]) : null, titles };
     }
     function parseSyncthing(d) {
       if (!d) return null;
-      const folders = d.match(/(\d+)\s+folders?/i);
       const state   = d.match(/^(\w+)/);
-      return { state: state ? state[1] : null, folders: folders ? parseInt(folders[1]) : null };
+      const items   = d.match(/(\d+)\s+items?/i);
+      const mb      = d.match(/([\d.]+)\s+MB\s+remaining/i);
+      const folders = d.match(/(\d+)\s+folder/i);
+      return {
+        state:   state   ? state[1]             : null,
+        items:   items   ? parseInt(items[1])   : null,
+        mb:      mb      ? mb[1]                : null,
+        folders: folders ? parseInt(folders[1]) : null
+      };
     }
     function parseHeartbeat(d) {
       if (!d) return null;
@@ -842,17 +854,36 @@
       } else if (svc.name === 'Plex' || ct === 'plex') {
         const pl = parsePlex(detail);
         if (pl) {
-          html += `<div class="p-svc-metric"><span class="${pl.streams>0?'warn':'ok'} val">${pl.streams}</span><span style="color:var(--text-dim)"> streams</span>${pl.remote?`<span style="color:var(--text-dim)"> · </span><span class="ok">${pl.remote}</span>`:''}</div>`;
+          html += `<div class="p-svc-metric"><span class="${pl.streams>0?'warn':'ok'} val">${pl.streams}</span><span style="color:var(--text-dim)"> streams</span>${pl.remote?`<span style="color:var(--text-dim)">  -  </span><span class="ok">${pl.remote}</span>`:''}</div>`;
           if (pl.libs !== null) html += `<div class="p-svc-metric"><span style="color:var(--text-dim)">${pl.libs} libraries</span></div>`;
+          for (const title of pl.titles) {
+            html += `<div class="p-svc-metric"><span style="color:var(--text-dim)">${title}</span></div>`;
+          }
+        }
+
+      } else if (svc.name === 'Syncthing') {
+        const st = parseSyncthing(detail);
+        if (st) {
+          const syncing = st.state && st.state.toLowerCase() === 'syncing';
+          const stateColor = syncing ? 'warn' : 'ok';
+          if (syncing && st.items !== null && st.mb !== null) {
+            html += `<div class="p-svc-metric"><span class="${stateColor}">${st.state}:</span><span style="color:var(--text-dim)"> ${st.items} items / ${st.mb} MB remaining</span></div>`;
+          } else {
+            const label = st.state ? st.state.charAt(0).toUpperCase() + st.state.slice(1).toLowerCase() : status.toUpperCase();
+            const suffix = st.folders !== null ? `  -  ${st.folders} folder${st.folders !== 1 ? 's' : ''}` : '';
+            html += `<div class="p-svc-metric"><span class="${stateColor}">${label}</span><span style="color:var(--text-dim)">${suffix}</span></div>`;
+          }
+        } else {
+          html += `<div class="p-svc-metric"><span class="${status==='up'?'ok':'err'}">${status.toUpperCase()}</span></div>`;
         }
 
       } else if (ct === 'openwebui') {
         const ms = svc.tailscale_check?.response_time_ms;
-        html += `<div class="p-svc-metric"><span class="${status==='up'?'ok':'err'}">${status.toUpperCase()}</span>${ms?`<span style="color:var(--text-dim)"> · ${ms}ms</span>`:''}</div>`;
+        html += `<div class="p-svc-metric"><span class="${status==='up'?'ok':'err'}">${status.toUpperCase()}</span>${ms?`<span style="color:var(--text-dim)">  -  ${ms}ms</span>`:''}</div>`;
 
       } else if (ct === 'flask') {
         const ms = svc.tailscale_check?.response_time_ms;
-        html += `<div class="p-svc-metric"><span class="${status==='up'?'ok':'err'}">${detail||status.toUpperCase()}</span>${ms?`<span style="color:var(--text-dim)"> · ${ms}ms</span>`:''}</div>`;
+        html += `<div class="p-svc-metric"><span class="${status==='up'?'ok':'err'}">${detail||status.toUpperCase()}</span>${ms?`<span style="color:var(--text-dim)">  -  ${ms}ms</span>`:''}</div>`;
 
       } else if (svc.name === 'Immich' || ct === 'immich') {
         html += `<div class="p-svc-metric"><span class="${status==='up'?'ok':'err'}">${status.toUpperCase()}</span></div>`;
@@ -860,7 +891,7 @@
         const photos = mi?.immich_photos;
         const videos = mi?.immich_videos;
         if (photos != null || videos != null) {
-          html += `<div class="p-svc-metric"><span class="val">${photos != null ? photos.toLocaleString() : '–'}</span><span style="color:var(--text-dim)"> photos · </span><span class="val">${videos != null ? videos.toLocaleString() : '–'}</span><span style="color:var(--text-dim)"> videos</span></div>`;
+          html += `<div class="p-svc-metric"><span class="val">${photos != null ? photos.toLocaleString() : '–'}</span><span style="color:var(--text-dim)"> photos  -  </span><span class="val">${videos != null ? videos.toLocaleString() : '–'}</span><span style="color:var(--text-dim)"> videos</span></div>`;
         }
 
       } else {
@@ -1198,7 +1229,7 @@
         }
         (machine.services || [])
           .filter(s => s.priority === 'P' && s.tailscale_check?.status !== 'up')
-          .forEach(s => alerts.push(`${machine.machine.display_name} · ${s.name}`));
+          .forEach(s => alerts.push(`${machine.machine.display_name}  -  ${s.name}`));
       }
       if (alerts.length) {
         alerts.forEach(a => {
@@ -1250,7 +1281,7 @@
         failingSvcs.forEach(svc => {
           const el = document.createElement('span');
           el.className = 'modal-alert-item';
-          el.textContent = `${svc.name} · ${svcStatus(svc).toUpperCase()}`;
+          el.textContent = `${svc.name}  -  ${svcStatus(svc).toUpperCase()}`;
           modalAlert.appendChild(el);
         });
         modalAlert.classList.add('visible');
@@ -1352,7 +1383,7 @@
 
       if (svc.public_check) {
         const pc = svc.public_check;
-        rows += `<div class="m-svc-row"><span class="lbl">PUBLIC</span><span class="val ${pc.status}">${pc.status.toUpperCase()} · ${pc.http_code} · ${pc.response_time_ms}ms</span></div>
+        rows += `<div class="m-svc-row"><span class="lbl">PUBLIC</span><span class="val ${pc.status}">${pc.status.toUpperCase()}  -  ${pc.http_code}  -  ${pc.response_time_ms}ms</span></div>
           <div class="m-svc-row"><span class="lbl">URL</span><span class="val" style="font-size:9px">${pc.url}</span></div>`;
       }
 
