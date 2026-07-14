@@ -4,6 +4,8 @@
 # 2026-07-12 21:00 UTC — rebuilt to match wbu-health-monitor.sh: added docker
 #                         container health checks (missing + unhealthy), streak-based
 #                         D-state check, check_condition_streak() helper.
+# 2026-07-14 21:00 UTC — updated footer: fixed compose path, added CWHU-specific
+#                         note on immich_machine_learning gunicorn hang / reboot fix.
 # CWHU system health monitor. Runs every 5 minutes via cron.
 # Checks: iowait, D-state processes, disk usage, docker containers.
 # Emails on first detection and every 30 minutes while condition persists.
@@ -230,7 +232,13 @@ What to do:
   2. docker inspect --format='{{.State.Health.Status}}' <name>
   3. docker logs --tail 100 <name>                -- look for errors
   4. docker inspect --format='{{json .State.Health}}' <name> | jq
-  5. If wedged: cd /home/dhm/repos/immich && docker compose up -d --force-recreate <service>
+  5. If wedged: cd /home/dhm/immich-app && docker compose up -d --force-recreate <service>
+
+NOTE: immich_machine_learning on CWHU (VirtualBox VM) can enter a state
+where gunicorn's worker hangs but the container stays 'running'.
+force-recreate does not always fix it. If unhealthy persists after
+force-recreate: sudo reboot. The VM reboots cleanly; the ChatWorkhorse
+host stays up.
 ------------------------------------------------------------------------"
 
 # --- Save state ---
