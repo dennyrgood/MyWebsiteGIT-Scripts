@@ -8,7 +8,8 @@
     Commit message used for every repo. Prompted for if omitted.
 
 .PARAMETER RepoRoot
-    Directory to search for repositories. Default: $HOME\repos
+    Directory to search for repositories. Defaults to the first of C:\repos,
+    D:\repos (amsterdamdesktop), or $HOME\repos that exists.
 
 .PARAMETER DryRun
     Show what would happen without committing, pulling, or pushing.
@@ -25,7 +26,7 @@
 param(
     [Parameter(Position = 0)]
     [string]$Message,
-    [string]$RepoRoot = (Join-Path $HOME 'repos'),
+    [string]$RepoRoot,
     [switch]$DryRun,
     [switch]$All
 )
@@ -37,6 +38,16 @@ $UseRebase     = $true
 $VerifyCommits = $true   # $false adds --no-verify (skip pre-commit hooks)
 $ShowCommands  = $true
 $SkipCleanRepos = -not $All
+
+# --- REPO ROOT: C:\repos everywhere except amsterdamdesktop, which uses D:\repos ---
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+    $candidates = @('C:\repos', 'D:\repos', (Join-Path $HOME 'repos'))
+    $RepoRoot = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Container } | Select-Object -First 1
+    if (-not $RepoRoot) {
+        Write-Error "No repo root found. Tried: $($candidates -join ', '). Pass -RepoRoot explicitly."
+        exit 1
+    }
+}
 
 $startDir  = Get-Location
 $errorCount = 0
