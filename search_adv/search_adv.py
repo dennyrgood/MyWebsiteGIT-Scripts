@@ -70,6 +70,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Actor lookup: 'Show S1E1 Character' or 'Actor Name'")
     p.add_argument("--cast", default=None, metavar="REF",
                    help="Cast list: 'Show S1E1' or 'Movie Title Year'")
+    p.add_argument("--validate", action="store_true",
+                   help="With --cast: resolve/parse the reference, print it, and exit (no search)")
     p.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
     p.add_argument("--debug", action="store_true", help="Debug logging (very chatty)")
     p.add_argument("--json", action="store_true", dest="output_json", help="Output JSON")
@@ -398,7 +400,7 @@ def main() -> None:
                 # Adopt the canonical name (also fixes casing, e.g. "hope street" →
                 # "Hope Street"); announce it whenever it differs from what was typed.
                 if match.name != cref.title:
-                    console.print(f'[dim]Resolved show → "{match.name}"{yr} (TVmaze)[/dim]')
+                    console.print(f'[dim]Resolved show → "{match.name}"{yr} ({match.source})[/dim]')
                 cref.title = match.name
             elif match and not match.adopted:
                 # A weak match means TVmaze knows shows by this name but yours isn't a
@@ -420,6 +422,13 @@ def main() -> None:
                 return
 
         console.print(f"[dim]Interpreting → {cref.canonical()}[/dim]")
+
+        if args.validate:
+            # Resolution/parse check only — skip the search + Ollama pass.
+            console.print(f"[green]Would search for cast of:[/green] {cref.canonical()}")
+            cache.close()
+            return
+
         t0 = time.monotonic()
 
         with Progress(
