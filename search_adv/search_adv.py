@@ -72,6 +72,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Cast list: 'Show S1E1' or 'Movie Title Year'")
     p.add_argument("--validate", action="store_true",
                    help="With --cast: resolve/parse the reference, print it, and exit (no search)")
+    p.add_argument("--no-resolve", action="store_true", dest="no_resolve",
+                   help="With --cast: skip TVmaze/DDG show-name resolution (search the title as typed)")
     p.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
     p.add_argument("--debug", action="store_true", help="Debug logging (very chatty)")
     p.add_argument("--json", action="store_true", dest="output_json", help="Output JSON")
@@ -391,9 +393,9 @@ def main() -> None:
         # misparse is visible before the ~minute-long search rather than after.
         cref = parse_reference(ref)
 
-        # Resolve the show title against TVmaze (TV only). Adopt the canonical name
-        # on a close match; otherwise keep the typed title and surface a suggestion.
-        if cref.kind in ("episode", "series"):
+        # Resolve the show title against TVmaze/DDG (TV only). Adopt the canonical name
+        # on a confident match; if reachable but unresolved, stop; if offline, proceed.
+        if cref.kind in ("episode", "series") and not args.no_resolve:
             match = resolve_show(cref.title)
             if match and match.adopted:
                 yr = f" ({match.year})" if match.year else ""
@@ -403,21 +405,27 @@ def main() -> None:
                     console.print(f'[dim]Resolved show → "{match.name}"{yr} ({match.source})[/dim]')
                 cref.title = match.name
             elif match and not match.adopted:
-                # A weak match means TVmaze knows shows by this name but yours isn't a
-                # clean one — stop rather than burn a ~minute searching a fuzzy title.
-                # (A None result — offline / obscure / movie — falls through and proceeds.)
-                yr = f" ({match.year})" if match.year else ""
-                suggest = (
-                    f"{match.name} {cref.episode_phrase}".strip()
-                    if cref.episode_phrase else match.name
-                )
-                console.print(
-                    f'[yellow]No close show match for "{cref.title}".[/yellow] '
-                    f'Closest on TVmaze: "{match.name}"{yr}.'
-                )
-                console.print(
-                    f'[dim]Re-run with the exact show title, e.g. --cast "{suggest}".[/dim]'
-                )
+                # Reachable but no confident match — stop rather than burn a ~minute
+                # searching a title we couldn't validate. (None = offline → proceed.)
+                if match.name:
+                    yr = f" ({match.year})" if match.year else ""
+                    suggest = (
+                        f"{match.name} {cref.episode_phrase}".strip()
+                        if cref.episode_phrase else match.name
+                    )
+                    console.print(
+                        f'[yellow]No confident show match for "{cref.title}".[/yellow] '
+                        f'Closest: "{match.name}"{yr}.'
+                    )
+                    console.print(
+                        f'[dim]Re-run with the exact title (e.g. --cast "{suggest}") '
+                        f'or --no-resolve to search as-is.[/dim]'
+                    )
+                else:
+                    console.print(
+                        f'[yellow]Could not resolve show "{cref.title}".[/yellow] '
+                        f'Check the title, or use --no-resolve to search as-is.'
+                    )
                 cache.close()
                 return
 

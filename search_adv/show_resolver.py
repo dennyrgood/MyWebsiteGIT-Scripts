@@ -7,6 +7,9 @@
 # 2026-07-15 20:15 UTC — corroboration gate: adopt a DDG resolution only when >=2 top
 #                        results agree (else the top junk hit wins, e.g. hope st→Honest);
 #                        raised direct TVmaze adopt threshold to 0.85 (st-tng→Strong fluke)
+# 2026-07-15 20:40 UTC — track reachability: unresolved-but-reachable now stops
+#                        consistently (was proceeding when TVmaze returned no candidate);
+#                        None reserved for offline → caller proceeds
 
 from __future__ import annotations
 
@@ -65,15 +68,20 @@ def _sim(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, _norm(a), _norm(b)).ratio()
 
 
-def _tvmaze_best(title: str, timeout: int) -> ShowMatch | None:
-    """Best TVmaze /search hit by similarity to *title* (None on failure/no results)."""
+def _tvmaze_best(title: str, timeout: int) -> tuple[ShowMatch | None, bool]:
+    """
+    (best TVmaze /search hit by similarity, reachable).
+
+    reachable is False only when the network call itself failed — distinguishing
+    "offline" (proceed) from "reached TVmaze, no confident match" (stop).
+    """
     try:
         resp = requests.get(_TVMAZE_SEARCH, params={"q": title}, timeout=timeout)
         resp.raise_for_status()
         results = resp.json()
     except (requests.RequestException, ValueError) as exc:
         logger.debug("TVmaze search failed for %r: %s", title, exc)
-        return None
+        return None, False
     best: ShowMatch | None = None
     for item in results or []:
         show = item.get("show") or {}
@@ -85,7 +93,7 @@ def _tvmaze_best(title: str, timeout: int) -> ShowMatch | None:
             premiered = show.get("premiered") or ""
             # adopted decided by resolve_show (against ADOPT_DIRECT); placeholder here.
             best = ShowMatch(name, premiered[:4] or None, show.get("id"), sim, False)
-    return best
+    return best, True
 
 
 def _tvmaze_singlesearch(name: str, timeout: int) -> ShowMatch | None:
@@ -134,11 +142,11 @@ def _resolve_via_ddg(title: str) -> tuple[str, str | None] | None:
         results = search(f"{title} tv series", max_results=5)
     except Exception as exc:  # noqa: BLE001
         logger.debug("DDG resolution search failed for %r: %s", title, exc)
-        return None
+        return None, False
 
     cleaned = [c for c in (_clean_show_title(r.title or "") for r in results) if c]
     if not cleaned:
-        return None
+        return None, True
 
     counts: dict[str, int] = {}
     display: dict[str, tuple[str, str | None]] = {}
@@ -152,9 +160,9 @@ def _resolve_via_ddg(title: str) -> tuple[str, str | None] | None:
     key, n = max(counts.items(), key=lambda kv: kv[1])
     if n < DDG_AGREEMENT:
         logger.debug("DDG resolution for %r not corroborated (best agree=%d)", title, n)
-        return None
+        return None, True
     logger.debug("DDG corroborated %r → %r (agree=%d)", title, display[key][0], n)
-    return display[key]
+    return display[key], True
 
 
 def resolve_show(title: str, timeout: int = _TIMEOUT) -> ShowMatch | None:
@@ -164,19 +172,21 @@ def resolve_show(title: str, timeout: int = _TIMEOUT) -> ShowMatch | None:
     1. TVmaze /search — adopt on a strong match (fast, authoritative for clean names).
     2. Otherwise a corroborated DDG lookup (forgiving of abbreviations/typos),
        re-validated against TVmaze for the canonical name + year.
-    3. Otherwise return the best weak TVmaze match (or None) for the caller to
-       surface as a suggestion / stop.
+    3. Otherwise a non-adopted match for the caller to surface as suggestion / stop:
+       - a weak candidate name if we have one, else an empty-name "unresolved" marker.
+    4. None ONLY when the resolution services were unreachable (offline) — the caller
+       then proceeds with the typed title rather than blocking.
     """
     title = (title or "").strip()
     if not title:
         return None
 
-    tv = _tvmaze_best(title, timeout)
+    tv, tv_ok = _tvmaze_best(title, timeout)
     if tv and tv.similarity >= ADOPT_DIRECT:
         tv.adopted = True
         return tv
 
-    ddg = _resolve_via_ddg(title)
+    ddg, ddg_ok = _resolve_via_ddg(title)
     if ddg:
         ddg_name, ddg_year = ddg
         canon = _tvmaze_singlesearch(ddg_name, timeout)
@@ -187,7 +197,12 @@ def resolve_show(title: str, timeout: int = _TIMEOUT) -> ShowMatch | None:
         # TVmaze doesn't know it (obscure/movie-ish) — trust the corroborated DDG name.
         return ShowMatch(ddg_name, ddg_year, None, _sim(title, ddg_name), True, source="DDG")
 
-    # Weak or no match → not adopted; caller suggests / stops.
+    # Nothing confident. If we never reached the network, don't block (offline).
+    if not (tv_ok or ddg_ok):
+        return None
+    # Reachable but unresolved → non-adopted so the caller stops. Suggest the weak
+    # candidate if we have one; otherwise an empty-name marker ("couldn't resolve").
     if tv:
         tv.adopted = False
-    return tv
+        return tv
+    return ShowMatch("", None, None, 0.0, False, source="unresolved")
