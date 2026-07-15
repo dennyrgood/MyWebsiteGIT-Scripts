@@ -240,6 +240,23 @@ python search_adv.py "my question" --timeout 30 --ollama-timeout 300
 
 ---
 
+## Web GUI
+
+A thin local front-end for the CLI — the server just runs `search_adv.py` as a
+subprocess and renders its `--json` output (no pipeline code is imported).
+Requires `flask` in the venv (`.venv/bin/pip install flask`).
+
+```bash
+.venv/bin/python search_adv_web.py
+```
+
+Then open <http://127.0.0.1:5025> (port 5000 is taken by macOS AirPlay).
+Supports plain query / `--cast` / `--actor` modes, all CLI options, and a
+**Validate** button that shows the cast-mode "Interpreting →" echo before a
+full run. Binds to 127.0.0.1 only.
+
+---
+
 ## CLI Reference
 
 | Flag | Default | Description |

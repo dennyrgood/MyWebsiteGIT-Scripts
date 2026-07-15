@@ -15,6 +15,9 @@ rich>=13.7.0
 diskcache>=5.6.0
 tqdm>=4.66.0
 
+# Web GUI (search_adv_web.py)
+flask>=3.0.0
+
 # Optional — enables browser fetch for IMDB, Fandom, Reddit, etc.
 # Install with:
 #   pip install playwright && playwright install chromium
