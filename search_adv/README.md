@@ -3,6 +3,7 @@
 Created: 2025-07-15 14:00 UTC
 Updated: 2026-07-15 21:00 UTC — documented --cast / --actor modes, --validate, --no-resolve
 Updated: 2026-07-15 21:15 UTC — documented cast/actor pipeline modules (actor, castref, show_resolver, structured_cast, browser, utils)
+Updated: 2026-07-15 22:30 UTC — documented --quiet, --ollama-timeout, parallel downloads
 
 **Local RAG search tool — DuckDuckGo + full web retrieval + Ollama**
 
@@ -218,6 +219,25 @@ python search_adv.py "my question" --verbose
 python search_adv.py "my question" --debug
 ```
 
+### Quiet mode
+
+Prints only the answer text — no spinners, status lines, sources, or confidence.
+Warnings are suppressed too (errors still go to stderr). Overrides `--json`/`--markdown`.
+
+```bash
+python search_adv.py "my question" -q
+python search_adv.py --actor "house s1e1 house" -q
+```
+
+### Timeouts
+
+`--timeout` covers page downloads; `--ollama-timeout` covers generation
+(no hidden buffer — the value you pass is the real limit).
+
+```bash
+python search_adv.py "my question" --timeout 30 --ollama-timeout 300
+```
+
 ---
 
 ## CLI Reference
@@ -234,8 +254,10 @@ python search_adv.py "my question" --debug
 | `--chunks` | `5` | Top chunks sent to the LLM |
 | `--site` | — | Restrict search to one domain |
 | `--exclude` | — | Domains to exclude |
-| `--timeout` | `15` | HTTP timeout (seconds) |
+| `--timeout` | `15` | HTTP timeout for page downloads (seconds) |
+| `--ollama-timeout` | `135` | Timeout for Ollama generation requests (seconds) |
 | `--no-cache` | off | Disable 24-hour page cache |
+| `--quiet`, `-q` | off | Print only the answer text; suppress status lines, warnings, sources, confidence (overrides `--json`/`--markdown`) |
 | `--verbose` | off | Show pipeline stage progress |
 | `--debug` | off | Full debug logging to stderr |
 | `--json` | off | Print JSON to stdout |
@@ -284,7 +306,7 @@ scikit-learn's TF-IDF vectoriser fits a vocabulary on first use — normal.
 
 ## Performance Notes
 
-- Downloading 8 pages in series typically takes 5–15 seconds depending on server latency.
+- Pages download in parallel (up to 8 at a time); browser-based fetches (IMDB etc.) stay sequential since each launches a headless Chromium.
 - TF-IDF ranking over ~100 chunks completes in under 1 second on any modern CPU.
 - Ollama generation time depends entirely on your hardware and the chosen model.
 - Use `--no-cache` only when you need fresh data; cached runs are significantly faster.
