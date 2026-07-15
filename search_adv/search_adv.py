@@ -36,6 +36,7 @@ from search import SearchResult, search
 from utils import DEFAULT_MAX_RESULTS, DEFAULT_OLLAMA_ENDPOINT, DEFAULT_MODEL, DEFAULT_TOP_CHUNKS
 
 console = Console()
+err_console = Console(stderr=True)  # failure messages; never silenced by --quiet
 logger = logging.getLogger(__name__)
 
 
@@ -75,6 +76,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="With --cast: resolve/parse the reference, print it, and exit (no search)")
     p.add_argument("--no-resolve", action="store_true", dest="no_resolve",
                    help="With --cast: skip TVmaze/DDG show-name resolution (search the title as typed)")
+    p.add_argument("--quiet", "-q", action="store_true",
+                   help="Print only the answer text — no status, sources, or confidence "
+                        "(overrides --json/--markdown)")
     p.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
     p.add_argument("--debug", action="store_true", help="Debug logging (very chatty)")
     p.add_argument("--json", action="store_true", dest="output_json", help="Output JSON")
@@ -226,7 +230,7 @@ def run_batch(
         if line.strip() and not line.startswith("#")
     ]
     if not queries:
-        console.print("[red]Input file is empty or contains only comments.[/red]")
+        err_console.print("[red]Input file is empty or contains only comments.[/red]")
         sys.exit(1)
 
     console.print(f"Batch mode: {len(queries)} queries → {output_path}")
@@ -287,6 +291,11 @@ def run_batch(
 
 def _emit(record: AnswerRecord, args: argparse.Namespace) -> None:
     """Print *record* in the selected format and optionally write the HTML report."""
+    if args.quiet:
+        print(record.answer)
+        if args.html:
+            Path(args.html).write_text(to_html(record), encoding="utf-8")
+        return
     if args.output_json:
         print(to_json(record))
     elif args.markdown:
@@ -306,12 +315,14 @@ def _log_stage(verbose: bool, message: str) -> None:
     logger.debug(message)
 
 
-def _configure_logging(verbose: bool, debug: bool) -> None:
+def _configure_logging(verbose: bool, debug: bool, quiet: bool = False) -> None:
     level = logging.WARNING
     if debug:
         level = logging.DEBUG
     elif verbose:
         level = logging.INFO
+    elif quiet:
+        level = logging.ERROR
     logging.basicConfig(
         level=level,
         format="%(levelname)s %(name)s: %(message)s",
@@ -328,7 +339,10 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    _configure_logging(verbose=args.verbose, debug=args.debug)
+    _configure_logging(verbose=args.verbose, debug=args.debug, quiet=args.quiet)
+
+    if args.quiet:
+        console.quiet = True  # silences status lines and Progress spinners
 
     # Initialise cache
     cache.configure(enabled=not args.no_cache)
@@ -360,7 +374,7 @@ def main() -> None:
                 )
                 progress.remove_task(task)
                 if not actor_name:
-                    console.print(f"[red]Could not identify actor from: {ref}[/red]")
+                    err_console.print(f"[red]Could not identify actor from: {ref}[/red]")
                     cache.close()
                     sys.exit(1)
                 identified_from = ref
@@ -420,16 +434,16 @@ def main() -> None:
                         f"{match.name} {cref.episode_phrase}".strip()
                         if cref.episode_phrase else match.name
                     )
-                    console.print(
+                    err_console.print(
                         f'[yellow]No confident show match for "{cref.title}".[/yellow] '
                         f'Closest: "{match.name}"{yr}.'
                     )
-                    console.print(
+                    err_console.print(
                         f'[dim]Re-run with the exact title (e.g. --cast "{suggest}") '
                         f'or --no-resolve to search as-is.[/dim]'
                     )
                 else:
-                    console.print(
+                    err_console.print(
                         f'[yellow]Could not resolve show "{cref.title}".[/yellow] '
                         f'Check the title, or use --no-resolve to search as-is.'
                     )
