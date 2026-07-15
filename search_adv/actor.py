@@ -28,6 +28,13 @@
 #                        imdb/tvmaze/rt/tmdb cast pages lead the context regardless of
 #                        DDG order/TF-IDF; _MAX_CONTEXT_WORDS 600→1500 (was truncating
 #                        mid-chunk); num_ctx 4096→OLLAMA_NUM_CTX (8192)
+# 2026-07-15 18:00 UTC — Part A input cleaner: parse via castref.CastRef; stage_cast
+#                        builds queries from structured fields (clean title + qualifier);
+#                        _filter_chunks_for_episode reads cref.season/episode; removed the
+#                        duplicate shorthand/split regexes (moved to castref)
+# 2026-07-15 18:40 UTC — Part B: _cast_prompt treats a STRUCTURED CAST block (from
+#                        structured_cast/browser IMDB extraction) as authoritative;
+#                        slimmed the undelimited-run pairing rules to a fallback
 
 from __future__ import annotations
 
@@ -42,6 +49,7 @@ from confidence import compute_confidence
 from downloader import download
 from extractor import extract
 from output import AnswerRecord
+from castref import CastRef, expand_shorthand, parse_reference
 from ranker import rank_chunks
 from search import SearchResult, search
 from utils import OLLAMA_NUM_CTX
@@ -57,17 +65,8 @@ _EPISODE_KEYWORDS = re.compile(
 # A person name: 2-3 capitalised words, no digits
 _NAME_RE = re.compile(r"^[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+){1,2}$")
 
-# Shorthand episode pattern: S4E10, s04e10, S4 E10, etc.
-_SHORTHAND_RE = re.compile(r"\bS(\d{1,2})\s*E(\d{1,2})\b", re.IGNORECASE)
-
-# Compact episode notation with no E separator: s0101 → S01E01 (two-digit season, two-digit episode).
-_COMPACT_RE = re.compile(r"\bS(\d{2})(\d{2})\b", re.IGNORECASE)
-
-# Matches the start of an episode identifier within a cast ref string
-_EPISODE_SPLIT_RE = re.compile(
-    r"\b(s\d{1,2}\s*e\d{1,2}|season\s*\d+|episode\s*\d+)\b",
-    re.IGNORECASE,
-)
+# Episode/shorthand/year parsing now lives in castref.parse_reference — the single
+# input-standardisation boundary. See normalize_episode_ref / stage_cast below.
 
 # Word budget for context passed to Ollama. Chunks are 1000 words each, so this
 # must exceed one chunk to fit a full cast page plus a corroborating chunk. The
@@ -114,15 +113,15 @@ def is_actor_name(text: str) -> bool:
 
 def normalize_episode_ref(text: str) -> str:
     """
-    Expand shorthand episode notation to natural language.
+    Expand shorthand episode notation to natural language, preserving surrounding text.
 
     "Medium S4E10 Cynthia" → "Medium season 4 episode 10 Cynthia"
+
+    Thin wrapper over castref.expand_shorthand — kept for the actor-identification
+    path (stage1_identify_actor), whose input carries an extra character name that
+    the structured CastRef split would drop.
     """
-    def _expand(m: re.Match) -> str:
-        return f"season {int(m.group(1))} episode {int(m.group(2))}"
-    # Expand compact sSSEE first (s0101) so the sN eM pass has nothing left to catch.
-    text = _COMPACT_RE.sub(_expand, text)
-    return _SHORTHAND_RE.sub(_expand, text)
+    return expand_shorthand(text)
 
 
 def parse_cast_ref(text: str) -> tuple[str, str | None]:
@@ -130,17 +129,12 @@ def parse_cast_ref(text: str) -> tuple[str, str | None]:
     Split a cast/show reference into (title, episode_ref).
 
     "Medium season 4 episode 10"                   → ("Medium", "season 4 episode 10")
-    "Star Trek The Next Generation season 2 episode 5" → ("Star Trek The Next Generation", "season 2 episode 5")
-    "The Godfather 1972"                           → ("The Godfather 1972", None)
+    "The Godfather 1972"                           → ("The Godfather", None)
 
-    Call after normalize_episode_ref so shorthand is already expanded.
+    Backward-compatible shim over castref.parse_reference.
     """
-    m = _EPISODE_SPLIT_RE.search(text)
-    if not m:
-        return text.strip(), None
-    title = text[: m.start()].strip().rstrip(",- ")
-    episode_part = text[m.start():].strip()
-    return title, episode_part
+    ref = parse_reference(text)
+    return ref.title, ref.episode_phrase
 
 
 # ---------------------------------------------------------------------------
@@ -277,29 +271,35 @@ def stage_cast(
     timeout: int,
     max_results: int = 8,
     top_chunks: int = 5,
+    cref: CastRef | None = None,
 ) -> AnswerRecord:
-    """Return a cast list (Character → Actor table) for a show/episode/movie reference."""
-    expanded = normalize_episode_ref(ref)
-    title, episode = parse_cast_ref(expanded)
+    """Return a cast list (Character → Actor table) for a show/episode/movie reference.
 
-    if episode:
-        priority_queries = [
-            f'"{title}" {episode} cast site:en.wikipedia.org',
-            f'"{title}" {episode} cast site:imdb.com',
-        ]
-        general_queries = [
-            f'"{title}" {episode} cast characters actors',
-            f'"{title}" {episode} cast rottentomatoes',
-        ]
-    else:
-        priority_queries = [
-            f'"{title}" cast site:en.wikipedia.org',
-            f'"{title}" cast site:imdb.com',
-        ]
-        general_queries = [
-            f'"{title}" cast characters actors',
-            f'"{title}" cast rottentomatoes',
-        ]
+    *cref* may be supplied by the caller (already parsed + echoed to the user);
+    otherwise it is parsed here from *ref*.
+    """
+    cref = cref or parse_reference(ref)
+    # Natural-language form used for ranking, prompting and display (keeps the year
+    # for movies, e.g. "The Godfather 1972"); queries use the structured fields.
+    expanded = expand_shorthand(ref)
+
+    # Search subject: quoted clean title plus the disambiguating qualifier
+    # (episode phrase for episodes, year for movies, nothing for a bare series).
+    qualifier = ""
+    if cref.kind == "episode" and cref.episode_phrase:
+        qualifier = cref.episode_phrase
+    elif cref.kind == "movie" and cref.year:
+        qualifier = str(cref.year)
+    subject = f'"{cref.title}" {qualifier}'.strip()
+
+    priority_queries = [
+        f"{subject} cast site:en.wikipedia.org",
+        f"{subject} cast site:imdb.com",
+    ]
+    general_queries = [
+        f"{subject} cast characters actors",
+        f"{subject} cast rottentomatoes",
+    ]
 
     all_results, all_chunks, successful_sources = _fetch_sources(
         name=expanded,
@@ -328,7 +328,7 @@ def stage_cast(
     if ep_title:
         logger.debug("Episode title (used for URL pinning, not rank text): %s", ep_title)
 
-    filtered_chunks = _filter_chunks_for_episode(all_chunks, expanded)
+    filtered_chunks = _filter_chunks_for_episode(all_chunks, cref)
 
     # Pin chunks from the episode-specific page to the top before TF-IDF ranking.
     if ep_title:
@@ -614,18 +614,18 @@ def _extract_episode_title(
     return None
 
 
-def _filter_chunks_for_episode(chunks: list, ref: str) -> list:
+def _filter_chunks_for_episode(chunks: list, cref: CastRef) -> list:
     """
     Pre-filter chunks to those that mention the specific season AND episode number.
 
     Requires chunks to contain both the season number and episode number
     adjacent to season/episode keywords. Falls back to all chunks if < 3 pass.
+    Uses the structured season/episode from *cref* (no re-parsing of strings).
     """
-    digits = re.findall(r"\d+", ref)
-    if len(digits) < 2:
+    if cref.season is None or cref.episode is None:
         return chunks
 
-    season_num, ep_num = digits[0], digits[1]
+    season_num, ep_num = str(cref.season), str(cref.episode)
 
     season_patterns = [
         rf"season\s*{season_num}\b",
@@ -734,19 +734,15 @@ def _cast_prompt(ref: str, ranked: list, all_results: list[SearchResult]) -> str
         f"Never invent cast members not in the context. {citation_instruction}\n\n"
         f"List the full cast for: {ref}\n"
         "Format as a two-column table with headers: Character | Actor\n\n"
-        "PAIRING RULES — the context may list cast as an undelimited run of "
-        "\"Actor Name Character Name Actor Name Character Name …\", which is easy to "
-        "misalign. Follow these exactly:\n"
-        "- Keep each actor paired with their OWN character. Never shift a character "
-        "onto the next actor's row.\n"
-        "- Keep full multi-word names intact. Never split one person's name across the "
-        "two columns (e.g. 'Ian Andrew Troi' is one character, 'David Keith Anderson' "
-        "is one actor).\n"
-        "- If you cannot confidently tell which actor plays which character for a given "
-        "entry, OMIT that row rather than guess a pairing.\n"
-        "- Skip uncredited background/extra roles (marked '(uncredited)'); include only "
-        "credited cast.\n"
-        "- One row per credited cast member.\n\n"
+        "If a 'STRUCTURED CAST' block is present, it is authoritative and already "
+        "correctly paired — use its actor—character pairs verbatim; do not re-pair "
+        "them from other passages.\n"
+        "Otherwise, when a passage lists cast as an undelimited run of "
+        "\"Actor Name Character Name Actor Name Character Name …\": keep each actor with "
+        "their OWN character, keep full multi-word names intact (never split one "
+        "person's name across columns), and OMIT any entry you cannot confidently pair "
+        "rather than guessing.\n"
+        "Skip uncredited background/extra roles; one row per credited cast member.\n\n"
         "After the table, note any recurring or guest cast if the context labels them so.\n\n"
         f"=== CONTEXT ===\n\n{context}\n\n=== ANSWER ===\n"
     )

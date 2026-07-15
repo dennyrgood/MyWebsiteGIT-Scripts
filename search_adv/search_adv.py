@@ -22,6 +22,8 @@ from tqdm import tqdm
 import cache
 import ollama
 from actor import is_actor_name, stage1_identify_actor, stage2_filmography, stage_cast
+from castref import is_bare_qualifier, parse_reference
+from show_resolver import resolve_show
 from chunker import chunk_text
 from confidence import compute_confidence
 from downloader import download
@@ -377,6 +379,47 @@ def main() -> None:
     # ---------------------------------------------------------------------------
     if args.cast:
         ref = args.cast.strip()
+        # Recover a stray episode qualifier the shell split off from --cast, e.g.
+        # `--cast "hope street" s01e01` (s01e01 lands on the positional arg).
+        stray = (args.query_or_input or "").strip()
+        if stray and is_bare_qualifier(stray):
+            ref = f"{ref} {stray}"
+            logger.debug("Merged stray qualifier %r into cast ref → %r", stray, ref)
+        # Standardise the input at the boundary and echo the interpretation, so a
+        # misparse is visible before the ~minute-long search rather than after.
+        cref = parse_reference(ref)
+
+        # Resolve the show title against TVmaze (TV only). Adopt the canonical name
+        # on a close match; otherwise keep the typed title and surface a suggestion.
+        if cref.kind in ("episode", "series"):
+            match = resolve_show(cref.title)
+            if match and match.adopted:
+                yr = f" ({match.year})" if match.year else ""
+                # Adopt the canonical name (also fixes casing, e.g. "hope street" →
+                # "Hope Street"); announce it whenever it differs from what was typed.
+                if match.name != cref.title:
+                    console.print(f'[dim]Resolved show → "{match.name}"{yr} (TVmaze)[/dim]')
+                cref.title = match.name
+            elif match and not match.adopted:
+                # A weak match means TVmaze knows shows by this name but yours isn't a
+                # clean one — stop rather than burn a ~minute searching a fuzzy title.
+                # (A None result — offline / obscure / movie — falls through and proceeds.)
+                yr = f" ({match.year})" if match.year else ""
+                suggest = (
+                    f"{match.name} {cref.episode_phrase}".strip()
+                    if cref.episode_phrase else match.name
+                )
+                console.print(
+                    f'[yellow]No close show match for "{cref.title}".[/yellow] '
+                    f'Closest on TVmaze: "{match.name}"{yr}.'
+                )
+                console.print(
+                    f'[dim]Re-run with the exact show title, e.g. --cast "{suggest}".[/dim]'
+                )
+                cache.close()
+                return
+
+        console.print(f"[dim]Interpreting → {cref.canonical()}[/dim]")
         t0 = time.monotonic()
 
         with Progress(
@@ -385,7 +428,7 @@ def main() -> None:
             transient=True,
             console=console,
         ) as progress:
-            progress.add_task(f"Fetching cast for {ref}…", total=None)
+            progress.add_task(f"Fetching cast for {cref.title}…", total=None)
             record = stage_cast(
                 ref,
                 model=args.model,
@@ -393,6 +436,7 @@ def main() -> None:
                 timeout=args.timeout,
                 max_results=args.results,
                 top_chunks=args.chunks,
+                cref=cref,
             )
 
         record.elapsed = time.monotonic() - t0

@@ -2,6 +2,8 @@
 # 2025-07-15 17:30 UTC
 # 2025-07-15 18:30 UTC — networkidle wait strategy with domcontentloaded fallback;
 #                        increased default timeouts (30s/3s)
+# 2026-07-15 18:40 UTC — Part B: prepend structured cast (IMDB __NEXT_DATA__) to the
+#                        returned text so the model gets clean actor—character pairs
 
 from __future__ import annotations
 
@@ -10,6 +12,7 @@ import re
 
 from bs4 import BeautifulSoup
 
+from structured_cast import structured_cast_prefix
 from utils import NOISE_TAGS, normalize_whitespace
 
 logger = logging.getLogger(__name__)
@@ -118,7 +121,13 @@ def fetch_with_browser(
             html = page.content()
             browser.close()
 
-        return _extract_text(html)
+        text = _extract_text(html)
+        # Prepend clean actor—character pairs from structured data (IMDB) so the
+        # model sees authoritative pairs first, ahead of the flattened page text.
+        prefix = structured_cast_prefix(url, html)
+        if prefix:
+            return f"{prefix}\n\n{text}"
+        return text
 
     except Exception as exc:  # noqa: BLE001
         logger.warning("Browser fetch failed for %s: %s", url, exc)
