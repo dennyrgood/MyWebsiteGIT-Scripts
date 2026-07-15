@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from concurrent.futures import ThreadPoolExecutor
 import io
 import logging
 import sys
@@ -115,38 +116,45 @@ def run_query(
     if not results:
         logger.warning("No search results returned for: %s", query)
 
-    # 2. Download pages
+    # 2. Download pages (in parallel; diskcache is thread-safe)
     _log_stage(verbose, f"Downloading {len(results)} pages…")
     all_chunks = []
     successful_sources: list[SearchResult] = []
 
-    for result in results:
-        # Check cache first
+    def _fetch(result: SearchResult) -> DownloadResult | None:
         cached = cache.get(result.url)
         if cached is not None:
             raw_content, ct_name = cached
             # Legacy entries predate cached content types; assume HTML.
             content_type = ContentType[ct_name] if ct_name else ContentType.HTML
-            dl_for_extract = DownloadResult(
+            return DownloadResult(
                 url=result.url,
                 content=raw_content,
                 content_type=content_type,
                 final_url=result.url,
                 status_code=200,
             )
-        else:
-            dl = download(result.url, timeout=timeout)
-            if dl is None:
-                # Fall back to DDG snippet if we have one
-                if result.snippet:
-                    logger.debug("Download failed, using snippet fallback: %s", result.url)
-                    chunks = chunk_text(result.snippet, source_url=result.url)
-                    if chunks:
-                        all_chunks.extend(chunks)
-                        successful_sources.append(result)
-                continue
+        dl = download(result.url, timeout=timeout)
+        if dl is not None:
             cache.put(result.url, dl.content, dl.content_type.name)
-            dl_for_extract = dl
+        return dl
+
+    fetched: list[DownloadResult | None] = []
+    if results:
+        with ThreadPoolExecutor(max_workers=min(8, len(results))) as pool:
+            fetched = list(pool.map(_fetch, results))
+
+    # Extract/chunk sequentially, in search-result order (keeps citations stable)
+    for result, dl_for_extract in zip(results, fetched):
+        if dl_for_extract is None:
+            # Fall back to DDG snippet if we have one
+            if result.snippet:
+                logger.debug("Download failed, using snippet fallback: %s", result.url)
+                chunks = chunk_text(result.snippet, source_url=result.url)
+                if chunks:
+                    all_chunks.extend(chunks)
+                    successful_sources.append(result)
+            continue
 
         # 3. Extract text
         _log_stage(verbose, f"  Extracting: {result.url}")

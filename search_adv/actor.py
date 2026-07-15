@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 
 import ollama as ollama_mod
@@ -481,13 +482,32 @@ def _rank_with_pins(
 def _download_and_chunk(results: list[SearchResult], timeout: int) -> list:
     """Download pages (with browser fallback) and return all chunks."""
     all_chunks = []
-    for result in results:
-        text = _fetch_text(result, timeout)
+    for result, text in zip(results, _fetch_texts(results, timeout)):
         if text:
             all_chunks.extend(chunk_text(text, source_url=result.url))
         elif result.snippet:
             all_chunks.extend(chunk_text(result.snippet, source_url=result.url))
     return all_chunks
+
+
+def _fetch_texts(results: list[SearchResult], timeout: int) -> list[str | None]:
+    """
+    Fetch text for every result, preserving order.
+
+    Plain-HTTP fetches run in a thread pool; browser-needing URLs (Playwright
+    launches a whole Chromium per call, sync API) stay sequential.
+    """
+    texts: list[str | None] = [None] * len(results)
+    plain_idx = [i for i, r in enumerate(results) if not needs_browser(r.url)]
+    if plain_idx:
+        with ThreadPoolExecutor(max_workers=min(8, len(plain_idx))) as pool:
+            fetched = pool.map(lambda i: _fetch_text(results[i], timeout), plain_idx)
+            for i, text in zip(plain_idx, fetched):
+                texts[i] = text
+    for i, result in enumerate(results):
+        if needs_browser(result.url):
+            texts[i] = _fetch_text(result, timeout)
+    return texts
 
 
 def _fetch_text(result: SearchResult, timeout: int) -> str | None:
@@ -566,11 +586,14 @@ def _fetch_sources(
     all_chunks = []
     successful_sources: list[SearchResult] = []
 
+    fetchable = []
     for result in all_results:
         if _is_junk_url(result.url):
             logger.debug("Skipping junk domain: %s", result.url)
             continue
-        text = _fetch_text(result, timeout)
+        fetchable.append(result)
+
+    for result, text in zip(fetchable, _fetch_texts(fetchable, timeout)):
         if text:
             chunks = chunk_text(text, source_url=result.url)
             if chunks:
