@@ -21,6 +21,13 @@
 #                        stage_cast: drop episode title from rank query (biased TF-IDF
 #                        toward plot pages over cast pages), rank on cast vocabulary,
 #                        keep episode-title URL pinning
+# 2026-07-15 17:10 UTC — _cast_prompt: explicit pairing rules to stop off-by-one
+#                        misalignment on undelimited IMDB cast runs; keep names intact;
+#                        omit ambiguous rows and uncredited extras
+# 2026-07-15 17:30 UTC — cast-source pin: _is_cast_source + _rank_with_pins guarantee
+#                        imdb/tvmaze/rt/tmdb cast pages lead the context regardless of
+#                        DDG order/TF-IDF; _MAX_CONTEXT_WORDS 600→1500 (was truncating
+#                        mid-chunk); num_ctx 4096→OLLAMA_NUM_CTX (8192)
 
 from __future__ import annotations
 
@@ -37,6 +44,7 @@ from extractor import extract
 from output import AnswerRecord
 from ranker import rank_chunks
 from search import SearchResult, search
+from utils import OLLAMA_NUM_CTX
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +69,11 @@ _EPISODE_SPLIT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Word budget for context passed to Ollama
-_MAX_CONTEXT_WORDS = 600
+# Word budget for context passed to Ollama. Chunks are 1000 words each, so this
+# must exceed one chunk to fit a full cast page plus a corroborating chunk. The
+# old value of 600 truncated mid-chunk (a leftover mitigation for what turned out
+# to be the thinking-model empty-response bug, not a context-length problem).
+_MAX_CONTEXT_WORDS = 1500
 
 # Streaming/piracy sites that never contain cast data
 _JUNK_DOMAINS: frozenset[str] = frozenset([
@@ -188,7 +199,7 @@ def stage1_identify_actor(
             endpoint=endpoint,
             timeout=timeout,
             temperature=0.0,
-            num_ctx=4096,
+            num_ctx=OLLAMA_NUM_CTX,
         )
         name = resp.answer.strip().strip(".,;:")
         if name.upper() == "UNKNOWN" or not name:
@@ -335,6 +346,14 @@ def stage_cast(
             reverse=True,
         )
 
+    # Pin chunks from reliable cast-listing pages so they always reach the model,
+    # regardless of DDG ordering / TF-IDF score (the main run-to-run flakiness).
+    pinned_chunks = [c for c in filtered_chunks if _is_cast_source(c.source_url)]
+    if pinned_chunks:
+        pinned_urls = {c.source_url for c in pinned_chunks}
+        logger.debug("Pinned %d cast-source chunks from %d page(s): %s",
+                     len(pinned_chunks), len(pinned_urls), ", ".join(sorted(pinned_urls)))
+
     answer = _call_with_retry(
         prompt_builder=lambda ranked: _cast_prompt(expanded, ranked, all_results),
         all_chunks=filtered_chunks,
@@ -343,6 +362,7 @@ def stage_cast(
         model=model,
         endpoint=endpoint,
         timeout=timeout,
+        pinned_chunks=pinned_chunks,
     )
 
     ranked_final = rank_chunks(rank_query, filtered_chunks, top_n=top_chunks)
@@ -369,6 +389,64 @@ def _is_junk_url(url: str) -> bool:
     except Exception:
         return False
     return any(junk in host for junk in _JUNK_DOMAINS)
+
+
+def _is_cast_source(url: str) -> bool:
+    """
+    Return True if *url* is a page type that reliably lists the full cast.
+
+    These are pinned into the model context (see _rank_with_pins) so cast data
+    always reaches the LLM regardless of DDG result ordering or TF-IDF score —
+    otherwise a plot/synopsis chunk can outrank the cast chunk and fall out of
+    the top-N cut, yielding an empty or one-line cast list.
+    """
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        path = (parsed.path or "").lower()
+    except Exception:
+        return False
+    if "fullcredits" in path:
+        return True
+    if "imdb.com" in host and "/title/" in path:
+        return True
+    if "tvmaze.com" in host and "/episodes/" in path:
+        return True
+    if "rottentomatoes.com" in host and "cast" in path:
+        return True
+    if "themoviedb.org" in host and "cast" in path:
+        return True
+    return False
+
+
+def _rank_with_pins(
+    rank_query: str,
+    all_chunks: list,
+    pinned_chunks: list,
+    top_n: int,
+) -> list:
+    """
+    Rank chunks by TF-IDF but guarantee cast-source chunks lead the result.
+
+    Reserves up to half the slots for the best (TF-IDF-ranked) pinned chunks and
+    places them FIRST, so they survive both the top-N cut and the downstream
+    _MAX_CONTEXT_WORDS budget. Remaining slots are filled with the best
+    non-pinned chunks. Falls back to plain ranking when nothing is pinned.
+    """
+    if not pinned_chunks:
+        return rank_chunks(rank_query, all_chunks, top_n=top_n)
+
+    pin_slots = min(len(pinned_chunks), max(1, top_n // 2))
+    pinned_ranked = rank_chunks(rank_query, pinned_chunks, top_n=pin_slots)
+
+    pinned_ids = {id(c) for c in pinned_chunks}
+    rest = [c for c in all_chunks if id(c) not in pinned_ids]
+    remaining = top_n - len(pinned_ranked)
+    rest_ranked = (
+        rank_chunks(rank_query, rest, top_n=remaining) if remaining > 0 else []
+    )
+    # Pinned first (not re-sorted by score) so they lead the context block.
+    return pinned_ranked + rest_ranked
 
 
 def _download_and_chunk(results: list[SearchResult], timeout: int) -> list:
@@ -655,9 +733,21 @@ def _cast_prompt(ref: str, ranked: list, all_results: list[SearchResult]) -> str
         "Answer ONLY using the context passages provided below.\n"
         f"Never invent cast members not in the context. {citation_instruction}\n\n"
         f"List the full cast for: {ref}\n"
-        "Format as a two-column table with headers: Character | Actor\n"
-        "One row per cast member. Include all cast members in the context.\n"
-        "After the table, note any recurring or guest cast if mentioned.\n\n"
+        "Format as a two-column table with headers: Character | Actor\n\n"
+        "PAIRING RULES — the context may list cast as an undelimited run of "
+        "\"Actor Name Character Name Actor Name Character Name …\", which is easy to "
+        "misalign. Follow these exactly:\n"
+        "- Keep each actor paired with their OWN character. Never shift a character "
+        "onto the next actor's row.\n"
+        "- Keep full multi-word names intact. Never split one person's name across the "
+        "two columns (e.g. 'Ian Andrew Troi' is one character, 'David Keith Anderson' "
+        "is one actor).\n"
+        "- If you cannot confidently tell which actor plays which character for a given "
+        "entry, OMIT that row rather than guess a pairing.\n"
+        "- Skip uncredited background/extra roles (marked '(uncredited)'); include only "
+        "credited cast.\n"
+        "- One row per credited cast member.\n\n"
+        "After the table, note any recurring or guest cast if the context labels them so.\n\n"
         f"=== CONTEXT ===\n\n{context}\n\n=== ANSWER ===\n"
     )
 
@@ -670,11 +760,17 @@ def _call_with_retry(
     model: str,
     endpoint: str,
     timeout: int,
+    pinned_chunks: list | None = None,
 ) -> str:
-    """Rank chunks, build prompt, call Ollama. Retries with fewer chunks on failure."""
+    """Rank chunks, build prompt, call Ollama. Retries with fewer chunks on failure.
+
+    When *pinned_chunks* is given, those chunks (ranked among themselves) always
+    lead the context so cast-source pages survive the top-N cut and the context
+    word budget — see _rank_with_pins.
+    """
     last_error: str = ""
     for attempt_chunks in [top_chunks, max(2, top_chunks // 2), 1]:
-        ranked = rank_chunks(rank_query, all_chunks, top_n=attempt_chunks)
+        ranked = _rank_with_pins(rank_query, all_chunks, pinned_chunks or [], attempt_chunks)
         prompt = prompt_builder(ranked)
 
         context_words = sum(len(rc.chunk.text.split()) for rc in ranked)
@@ -690,7 +786,7 @@ def _call_with_retry(
                 model=model,
                 endpoint=endpoint,
                 timeout=timeout,
-                num_ctx=4096,
+                num_ctx=OLLAMA_NUM_CTX,
             )
             if resp.answer.strip():
                 return resp.answer
