@@ -5,6 +5,10 @@
 # 2026-07-15 22:45 UTC — also parse the plain title/episode-page shape
 #                        (mainColumnData.cast.edges) — previously only /fullcredits
 #                        pages yielded structured pairs
+# 2026-07-15 23:55 UTC — title-page shape corrected to the real castV2 groupings
+#                        (verified against tt1683235); include "(credited as …)"
+#                        from CreditedAs attributes — on-screen credit can differ
+#                        from IMDB's current name (Maria Lark → Feodor Lark)
 
 from __future__ import annotations
 
@@ -91,32 +95,44 @@ def extract_imdb_cast(html: str) -> list[tuple[str, str]]:
 
 def _cast_from_main_column(data: dict) -> list[tuple[str, str]]:
     """
-    Cast pairs from a plain title/episode page: mainColumnData.cast.edges,
-    node.name.nameText.text + node.characters[].name.
+    Cast pairs from a plain title/episode page: mainColumnData.castV2 is a list
+    of credit groupings ("Top Cast"); each grouping's credits carry
+    name.nameText.text and creditedRoles.edges[].node.characters.edges[].node.name.
+    A CreditedAs attribute ("as Maria Lark") is appended to the actor name, since
+    the on-screen credit can differ from IMDB's current name for the person.
     """
     try:
-        edges = (
-            data["props"]["pageProps"]["mainColumnData"]["cast"]["edges"]
-        )
+        groupings = data["props"]["pageProps"]["mainColumnData"]["castV2"]
     except (KeyError, TypeError) as exc:
         logger.debug("IMDB title-page cast path not found: %s", exc)
         return []
 
     pairs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
-    for edge in edges:
-        node = edge.get("node") or {}
-        actor = (((node.get("name") or {}).get("nameText")) or {}).get("text")
-        if not actor:
-            continue
-        characters = [
-            c["name"] for c in (node.get("characters") or []) if c.get("name")
-        ]
-        character = " / ".join(characters) if characters else "(unspecified)"
-        key = (actor, character)
-        if key not in seen:
-            seen.add(key)
-            pairs.append(key)
+    for g in groupings or []:
+        for cred in g.get("credits") or []:
+            actor = (((cred.get("name") or {}).get("nameText")) or {}).get("text")
+            if not actor:
+                continue
+            characters: list[str] = []
+            credited_as: str | None = None
+            for redge in ((cred.get("creditedRoles") or {}).get("edges")) or []:
+                rnode = redge.get("node") or {}
+                for attr in rnode.get("attributes") or []:
+                    text = attr.get("text") or ""
+                    if text.lower().startswith("as "):
+                        credited_as = text[3:]
+                for cedge in ((rnode.get("characters") or {}).get("edges")) or []:
+                    name = (cedge.get("node") or {}).get("name")
+                    if name:
+                        characters.append(name)
+            character = " / ".join(characters) if characters else "(unspecified)"
+            if credited_as:
+                actor = f"{actor} (credited as {credited_as})"
+            key = (actor, character)
+            if key not in seen:
+                seen.add(key)
+                pairs.append(key)
     if pairs:
         logger.debug("Extracted %d structured cast pairs from IMDB title page", len(pairs))
     return pairs

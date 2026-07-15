@@ -44,6 +44,10 @@
 #                        ranked_final uses _rank_with_pins so citations match the model's
 #                        context; guard empty rest in _rank_with_pins (zero-chunks warning);
 #                        junk domains += tornadomovies, pogdesign.co.uk
+# 2026-07-15 23:30 UTC — _extract_episode_title: verify candidates against the target
+#                        season/episode (marker in result title+snippet; match wins,
+#                        contradiction disqualifies, no marker = weak fallback); stop
+#                        rejecting episode pages titled "… - Full cast & crew"
 
 from __future__ import annotations
 
@@ -581,6 +585,28 @@ def _fetch_sources(
     return all_results, all_chunks, successful_sources
 
 
+def _episode_marker_match(text: str, season: int | None, episode: int | None) -> bool | None:
+    """
+    Does *text* explicitly name the target episode?
+
+    True  — a season/episode marker matching (season, episode) is present.
+    False — a marker is present but names a DIFFERENT episode.
+    None  — no marker found (or no target to compare against).
+    """
+    if season is None or episode is None:
+        return None
+    m = re.search(
+        r"\bs(\d{1,2})[.\s]*e(\d{1,2})\b"
+        r"|\bseason\s*(\d{1,2}),?\s*episode\s*(\d{1,2})\b"
+        r"|\b(\d{1,2})x(\d{2})\b",
+        text.lower(),
+    )
+    if not m:
+        return None
+    nums = [int(g) for g in m.groups() if g is not None]
+    return (nums[0], nums[1]) == (season, episode)
+
+
 def _extract_episode_title(
     results: list[SearchResult],
     ref: str,
@@ -591,7 +617,13 @@ def _extract_episode_title(
     Looks for source titles like "Loud as a Whisper - Wikipedia" and extracts
     "Loud as a Whisper" — used to enrich the rank query so TF-IDF steers
     toward episode-specific chunks.
+
+    A candidate whose title+snippet carries a season/episode marker matching the
+    target is returned immediately; one carrying a marker for a DIFFERENT episode
+    is skipped (same-show sibling episodes rank well on DDG). Candidates with no
+    marker are kept only as a fallback.
     """
+    target = parse_reference(ref)
     ref_words = set(re.split(r"\W+", ref.lower()))
     generic = {
         "wikipedia", "imdb", "tmdb", "fandom", "season", "episode", "list",
@@ -605,6 +637,7 @@ def _extract_episode_title(
         re.IGNORECASE,
     )
 
+    fallback: str | None = None
     for result in results:
         # Person pages (IMDB /name/, RT /celebrity/) have titles that look
         # exactly like short episode titles — e.g. "Patricia Arquette - IMDb".
@@ -616,6 +649,12 @@ def _extract_episode_title(
         )[0].strip()
         # Drop parenthetical qualifiers: "(TV series)", "(TV Series 1987–1994)", "(film)", "(2005)".
         title_clean = re.sub(r"\s*\([^)]*\)", "", title_clean).strip()
+        # An episode fullcredits page is titled '"Show" Title (…) - Full cast & crew - IMDb';
+        # drop that suffix so _NON_EPISODE_RE ("full cast") doesn't reject a valid episode.
+        title_clean = re.sub(
+            r"\s*[-|]\s*full cast.*$", "", title_clean, flags=re.IGNORECASE
+        ).strip()
+        title_clean = title_clean.replace('"', "").strip()
 
         # Skip series/season/list pages outright — they are not episode titles.
         if _NON_EPISODE_RE.search(title_clean):
@@ -636,11 +675,23 @@ def _extract_episode_title(
         ]
         # Require at least one word that is NOT part of the series name / generic
         # vocabulary, otherwise this is just the show title restated.
-        if meaningful:
-            logger.debug("Episode title extracted: %r from %r", title_clean, title)
-            return title_clean
+        if not meaningful:
+            continue
 
-    return None
+        verdict = _episode_marker_match(
+            f"{title} {result.snippet or ''}", target.season, target.episode
+        )
+        if verdict is False:
+            logger.debug("Episode title rejected (wrong episode): %r from %r", title_clean, title)
+            continue
+        if verdict is True:
+            logger.debug("Episode title extracted (marker match): %r from %r", title_clean, title)
+            return title_clean
+        if fallback is None:
+            fallback = title_clean
+            logger.debug("Episode title fallback candidate: %r from %r", title_clean, title)
+
+    return fallback
 
 
 def _filter_chunks_for_episode(chunks: list, cref: CastRef) -> list:
