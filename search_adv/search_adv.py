@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/Users/dennishmathes/repos/scripts/search_adv/.venv/bin/python
 # search_adv.py — CLI entry point for the search_adv RAG tool
 # 2025-07-15 14:00 UTC
 # 2025-07-15 15:00 UTC — snippet fallback: use DDG snippet as chunk when download fails (403/404)

@@ -2,6 +2,9 @@
 # 2026-07-15 18:40 UTC — Part B: parse IMDB's __NEXT_DATA__ cast (GraphQL creditGroupings)
 #                        so the model gets delimited "Actor — Character" pairs instead of
 #                        IMDB's undelimited flat-text run (which forced fragile prompt rules)
+# 2026-07-15 22:45 UTC — also parse the plain title/episode-page shape
+#                        (mainColumnData.cast.edges) — previously only /fullcredits
+#                        pages yielded structured pairs
 
 from __future__ import annotations
 
@@ -32,9 +35,10 @@ def extract_imdb_cast(html: str) -> list[tuple[str, str]]:
     """
     Return [(actor, character), …] from an IMDB page's embedded __NEXT_DATA__ JSON.
 
-    Isolates the "Cast" credit grouping (grouping.text == "Cast" / role trait
-    CAST_TRAIT) so crew credits are excluded. Returns [] if the structure is
-    absent or shaped unexpectedly — callers fall back to plain text.
+    Handles two page shapes: /fullcredits (creditGroupings, isolated to the
+    "Cast" grouping so crew is excluded) and plain title/episode pages
+    (mainColumnData.cast.edges). Returns [] if neither structure is present —
+    callers fall back to plain text.
     """
     try:
         soup = BeautifulSoup(html, "lxml")
@@ -42,13 +46,18 @@ def extract_imdb_cast(html: str) -> list[tuple[str, str]]:
         if not tag or not tag.string:
             return []
         data = json.loads(tag.string)
+    except (TypeError, ValueError) as exc:
+        logger.debug("IMDB __NEXT_DATA__ not parseable: %s", exc)
+        return []
+
+    try:
         groupings = (
             data["props"]["pageProps"]["contentData"]["data"]["title"]
             ["creditGroupings"]["edges"]
         )
-    except (KeyError, TypeError, ValueError) as exc:
-        logger.debug("IMDB __NEXT_DATA__ cast path not found: %s", exc)
-        return []
+    except (KeyError, TypeError) as exc:
+        logger.debug("IMDB fullcredits cast path not found (%s), trying title page shape", exc)
+        return _cast_from_main_column(data)
 
     pairs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -77,6 +86,39 @@ def extract_imdb_cast(html: str) -> list[tuple[str, str]]:
                 pairs.append(key)
     if pairs:
         logger.debug("Extracted %d structured cast pairs from IMDB", len(pairs))
+    return pairs
+
+
+def _cast_from_main_column(data: dict) -> list[tuple[str, str]]:
+    """
+    Cast pairs from a plain title/episode page: mainColumnData.cast.edges,
+    node.name.nameText.text + node.characters[].name.
+    """
+    try:
+        edges = (
+            data["props"]["pageProps"]["mainColumnData"]["cast"]["edges"]
+        )
+    except (KeyError, TypeError) as exc:
+        logger.debug("IMDB title-page cast path not found: %s", exc)
+        return []
+
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for edge in edges:
+        node = edge.get("node") or {}
+        actor = (((node.get("name") or {}).get("nameText")) or {}).get("text")
+        if not actor:
+            continue
+        characters = [
+            c["name"] for c in (node.get("characters") or []) if c.get("name")
+        ]
+        character = " / ".join(characters) if characters else "(unspecified)"
+        key = (actor, character)
+        if key not in seen:
+            seen.add(key)
+            pairs.append(key)
+    if pairs:
+        logger.debug("Extracted %d structured cast pairs from IMDB title page", len(pairs))
     return pairs
 
 

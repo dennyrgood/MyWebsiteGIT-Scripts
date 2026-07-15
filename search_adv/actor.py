@@ -37,6 +37,13 @@
 #                        slimmed the undelimited-run pairing rules to a fallback
 # 2026-07-15 21:40 UTC — pass context_sources (citation-ordered) to AnswerRecord so the
 #                        Sources list can show only cited pages
+# 2026-07-15 22:45 UTC — structured-cast chunks exempt from episode filter and hard-pinned
+#                        to context position 1 (they are names-only: the filter deleted
+#                        them, and TF-IDF pin re-rank buried them); _extract_episode_title
+#                        skips person pages (was returning "Patricia Arquette" as a title);
+#                        ranked_final uses _rank_with_pins so citations match the model's
+#                        context; guard empty rest in _rank_with_pins (zero-chunks warning);
+#                        junk domains += tornadomovies, pogdesign.co.uk
 
 from __future__ import annotations
 
@@ -52,7 +59,8 @@ from downloader import download
 from extractor import extract
 from output import AnswerRecord
 from castref import CastRef, expand_shorthand, parse_reference
-from ranker import rank_chunks
+from ranker import RankedChunk, rank_chunks
+from structured_cast import CAST_BLOCK_HEADER
 from search import SearchResult, search
 from utils import OLLAMA_NUM_CTX
 
@@ -81,6 +89,7 @@ _JUNK_DOMAINS: frozenset[str] = frozenset([
     "movies4kto.watch", "fmovies", "soap2day", "yesmovies",
     "putlocker", "cineb.net", "watchseries", "myflixer",
     "gogoanime", "123movies", "streamingcommunity",
+    "tornadomovies", "pogdesign.co.uk",
     # AI-generated Wikipedia clone and social/video noise observed in results
     "grokipedia.com", "youtube.com", "youtu.be", "vk.com",
     "dailymotion.com", "facebook.com", "tiktok.com",
@@ -368,7 +377,7 @@ def stage_cast(
         pinned_chunks=pinned_chunks,
     )
 
-    ranked_final = rank_chunks(rank_query, filtered_chunks, top_n=top_chunks)
+    ranked_final = _rank_with_pins(rank_query, filtered_chunks, pinned_chunks, top_chunks)
     confidence = compute_confidence(ranked_final)
 
     return AnswerRecord(
@@ -440,14 +449,26 @@ def _rank_with_pins(
     if not pinned_chunks:
         return rank_chunks(rank_query, all_chunks, top_n=top_n)
 
-    pin_slots = min(len(pinned_chunks), max(1, top_n // 2))
-    pinned_ranked = rank_chunks(rank_query, pinned_chunks, top_n=pin_slots)
+    # Structured-cast blocks bypass TF-IDF entirely: they are pure proper nouns
+    # with none of the rank-query vocabulary, so they lose the pin re-rank to
+    # their own page's flat-text sibling chunks. Always context position 1.
+    structured = [c for c in pinned_chunks if CAST_BLOCK_HEADER in c.text][:1]
+    structured_ids = {id(c) for c in structured}
+    tfidf_pins = [c for c in pinned_chunks if id(c) not in structured_ids]
+
+    pin_slots = min(len(tfidf_pins), max(1, top_n // 2) - len(structured))
+    pinned_ranked = (
+        rank_chunks(rank_query, tfidf_pins, top_n=pin_slots) if pin_slots > 0 else []
+    )
+    pinned_ranked = [
+        RankedChunk(chunk=c, score=1.0) for c in structured
+    ] + pinned_ranked
 
     pinned_ids = {id(c) for c in pinned_chunks}
     rest = [c for c in all_chunks if id(c) not in pinned_ids]
     remaining = top_n - len(pinned_ranked)
     rest_ranked = (
-        rank_chunks(rank_query, rest, top_n=remaining) if remaining > 0 else []
+        rank_chunks(rank_query, rest, top_n=remaining) if remaining > 0 and rest else []
     )
     # Pinned first (not re-sorted by score) so they lead the context block.
     return pinned_ranked + rest_ranked
@@ -585,6 +606,10 @@ def _extract_episode_title(
     )
 
     for result in results:
+        # Person pages (IMDB /name/, RT /celebrity/) have titles that look
+        # exactly like short episode titles — e.g. "Patricia Arquette - IMDb".
+        if "/name/" in result.url or "/celebrity/" in result.url:
+            continue
         title = result.title or ""
         title_clean = re.split(
             r"\s*[-|]\s*(Wikipedia|IMDb|TMDB|Fandom|TV Guide|Rotten|The Movie)", title
@@ -648,6 +673,11 @@ def _filter_chunks_for_episode(chunks: list, cref: CastRef) -> list:
 
     filtered = []
     for chunk in chunks:
+        # A structured-cast block is names-only and never mentions the season/
+        # episode — it must always survive this filter.
+        if CAST_BLOCK_HEADER in chunk.text:
+            filtered.append(chunk)
+            continue
         text_lower = chunk.text.lower()
         has_combined = any(re.search(p, text_lower) for p in combined_patterns)
         has_season = any(re.search(p, text_lower) for p in season_patterns)
