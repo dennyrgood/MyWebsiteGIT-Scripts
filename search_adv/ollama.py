@@ -1,5 +1,8 @@
 # ollama.py — Ollama /api/generate client for search_adv
 # 2025-07-15 14:00 UTC
+# 2026-07-15 16:36 UTC — added think=False; gemma4:26b-a4b-it-qat is a reasoning model
+#                        that otherwise burns the whole num_ctx budget on hidden thinking
+#                        and returns an empty `response` (done_reason=length)
 
 from __future__ import annotations
 
@@ -45,6 +48,7 @@ def generate(
     top_p: float = OLLAMA_TOP_P,
     repeat_penalty: float = OLLAMA_REPEAT_PENALTY,
     num_ctx: int = OLLAMA_NUM_CTX,
+    think: bool = False,
 ) -> OllamaResponse:
     """
     Send *prompt* to Ollama and return the generated answer.
@@ -78,6 +82,9 @@ def generate(
         "model": model,
         "prompt": prompt,
         "stream": False,
+        # Reasoning models (e.g. gemma4:26b-a4b-it-qat) otherwise spend the whole
+        # num_ctx budget on hidden thinking and return an empty response.
+        "think": think,
         "options": {
             "temperature": temperature,
             "top_p": top_p,

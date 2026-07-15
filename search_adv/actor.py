@@ -12,11 +12,21 @@
 # 2025-07-15 20:15 UTC — reverted source cap and bad priority queries; cast queries now
 #                        use natural language search to find episode+cast pages reliably
 # 2025-07-15 20:30 UTC — added episode title third-pass search in _fetch_sources
+# 2025-07-15 21:00 UTC — added parse_cast_ref; stage_cast builds queries inline from title+episode;
+#                        deleted _CAST_PRIORITY_QUERIES/_CAST_GENERAL_QUERIES; added _JUNK_DOMAINS filter
+# 2026-07-15 16:36 UTC — normalize compact sSSEE notation (s0101→season 1 episode 1);
+#                        expanded _JUNK_DOMAINS (grokipedia, youtube, vkontakte, social/video)
+# 2026-07-15 16:55 UTC — _extract_episode_title: strip parentheticals + skip
+#                        series/season/list pages (was returning "Medium (TV series)");
+#                        stage_cast: drop episode title from rank query (biased TF-IDF
+#                        toward plot pages over cast pages), rank on cast vocabulary,
+#                        keep episode-title URL pinning
 
 from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import urlparse
 
 import ollama as ollama_mod
 from browser import fetch_with_browser, needs_browser
@@ -42,12 +52,30 @@ _NAME_RE = re.compile(r"^[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+){1,2}$")
 # Shorthand episode pattern: S4E10, s04e10, S4 E10, etc.
 _SHORTHAND_RE = re.compile(r"\bS(\d{1,2})\s*E(\d{1,2})\b", re.IGNORECASE)
 
+# Compact episode notation with no E separator: s0101 → S01E01 (two-digit season, two-digit episode).
+_COMPACT_RE = re.compile(r"\bS(\d{2})(\d{2})\b", re.IGNORECASE)
+
+# Matches the start of an episode identifier within a cast ref string
+_EPISODE_SPLIT_RE = re.compile(
+    r"\b(s\d{1,2}\s*e\d{1,2}|season\s*\d+|episode\s*\d+)\b",
+    re.IGNORECASE,
+)
+
 # Word budget for context passed to Ollama
 _MAX_CONTEXT_WORDS = 600
 
-# Preferred high-quality sources.
-# Note: site:themoviedb.org sometimes resolves to developer.themoviedb.org (API docs)
-# via DDG — general queries are more reliable for finding actual content pages.
+# Streaming/piracy sites that never contain cast data
+_JUNK_DOMAINS: frozenset[str] = frozenset([
+    "movies4kto.watch", "fmovies", "soap2day", "yesmovies",
+    "putlocker", "cineb.net", "watchseries", "myflixer",
+    "gogoanime", "123movies", "streamingcommunity",
+    # AI-generated Wikipedia clone and social/video noise observed in results
+    "grokipedia.com", "youtube.com", "youtu.be", "vk.com",
+    "dailymotion.com", "facebook.com", "tiktok.com",
+    "instagram.com", "pinterest.com", "twitter.com", "x.com",
+])
+
+# Preferred high-quality sources for filmography queries.
 _FILMOGRAPHY_PRIORITY_QUERIES = [
     "{name} filmography site:en.wikipedia.org",
     "{name} performances site:en.wikipedia.org",
@@ -55,15 +83,6 @@ _FILMOGRAPHY_PRIORITY_QUERIES = [
 _FILMOGRAPHY_GENERAL_QUERIES = [
     "{name} complete filmography television movies career",
     "{name} TV shows movies list all roles",
-]
-
-_CAST_PRIORITY_QUERIES = [
-    "{ref} wikipedia",
-    "{ref} cast imdb",
-]
-_CAST_GENERAL_QUERIES = [
-    "{ref} full cast list characters actors",
-    "{ref} episode cast crew rottentomatoes",
 ]
 
 
@@ -90,7 +109,27 @@ def normalize_episode_ref(text: str) -> str:
     """
     def _expand(m: re.Match) -> str:
         return f"season {int(m.group(1))} episode {int(m.group(2))}"
+    # Expand compact sSSEE first (s0101) so the sN eM pass has nothing left to catch.
+    text = _COMPACT_RE.sub(_expand, text)
     return _SHORTHAND_RE.sub(_expand, text)
+
+
+def parse_cast_ref(text: str) -> tuple[str, str | None]:
+    """
+    Split a cast/show reference into (title, episode_ref).
+
+    "Medium season 4 episode 10"                   → ("Medium", "season 4 episode 10")
+    "Star Trek The Next Generation season 2 episode 5" → ("Star Trek The Next Generation", "season 2 episode 5")
+    "The Godfather 1972"                           → ("The Godfather 1972", None)
+
+    Call after normalize_episode_ref so shorthand is already expanded.
+    """
+    m = _EPISODE_SPLIT_RE.search(text)
+    if not m:
+        return text.strip(), None
+    title = text[: m.start()].strip().rstrip(",- ")
+    episode_part = text[m.start():].strip()
+    return title, episode_part
 
 
 # ---------------------------------------------------------------------------
@@ -230,11 +269,31 @@ def stage_cast(
 ) -> AnswerRecord:
     """Return a cast list (Character → Actor table) for a show/episode/movie reference."""
     expanded = normalize_episode_ref(ref)
+    title, episode = parse_cast_ref(expanded)
+
+    if episode:
+        priority_queries = [
+            f'"{title}" {episode} cast site:en.wikipedia.org',
+            f'"{title}" {episode} cast site:imdb.com',
+        ]
+        general_queries = [
+            f'"{title}" {episode} cast characters actors',
+            f'"{title}" {episode} cast rottentomatoes',
+        ]
+    else:
+        priority_queries = [
+            f'"{title}" cast site:en.wikipedia.org',
+            f'"{title}" cast site:imdb.com',
+        ]
+        general_queries = [
+            f'"{title}" cast characters actors',
+            f'"{title}" cast rottentomatoes',
+        ]
 
     all_results, all_chunks, successful_sources = _fetch_sources(
         name=expanded,
-        priority_queries=_CAST_PRIORITY_QUERIES,
-        general_queries=_CAST_GENERAL_QUERIES,
+        priority_queries=priority_queries,
+        general_queries=general_queries,
         max_results=max_results,
         timeout=timeout,
     )
@@ -248,28 +307,24 @@ def stage_cast(
             elapsed=0.0,
         )
 
-    # Enrich rank query with episode title extracted from source titles.
-    # e.g. "Loud as a Whisper - Wikipedia" → rank query includes "Loud as a Whisper"
-    # which steers TF-IDF toward episode-specific chunks rather than series overview.
+    # The episode title is useful for *discovery* (finding the right page, done in
+    # _fetch_sources) but harmful in the *rank* query: enriching with e.g. "Dark Page"
+    # biases TF-IDF toward the prose/plot page that repeats the title, over the cast
+    # page that names it once and then lists the actors. So rank on cast vocabulary
+    # only, and rely on episode-URL pinning below to keep episode-specific chunks up top.
     ep_title = _extract_episode_title(all_results, expanded)
-    rank_query = f"{expanded} cast characters actors who plays"
+    rank_query = f"{expanded} cast characters actors played by role starring guest star"
     if ep_title:
-        # Use episode title as primary rank signal — far more specific than generic cast terms
-        rank_query = f"{ep_title} cast characters actors who plays {expanded}"
-        logger.debug("Enriched rank query with episode title: %s", ep_title)
+        logger.debug("Episode title (used for URL pinning, not rank text): %s", ep_title)
 
     filtered_chunks = _filter_chunks_for_episode(all_chunks, expanded)
 
     # Pin chunks from the episode-specific page to the top before TF-IDF ranking.
-    # TF-IDF can score bibliography/reference chunks higher than actual cast content
-    # when vocabulary overlap is coincidental. URL-based pinning is more reliable.
     if ep_title:
-        ep_title_slug = ep_title.lower().replace(" ", "_").replace(" ", "-")
         ep_words = set(ep_title.lower().split())
 
         def _episode_url_score(chunk) -> int:
             url_lower = chunk.source_url.lower()
-            # Score: 2 if URL contains episode title words, 1 if partial, 0 otherwise
             url_words = set(re.split(r"[/_\-.]", url_lower))
             overlap = len(ep_words & url_words)
             return overlap
@@ -305,6 +360,15 @@ def stage_cast(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _is_junk_url(url: str) -> bool:
+    """Return True if url is a streaming/piracy site with no cast data."""
+    try:
+        host = urlparse(url).hostname or ""
+    except Exception:
+        return False
+    return any(junk in host for junk in _JUNK_DOMAINS)
 
 
 def _download_and_chunk(results: list[SearchResult], timeout: int) -> list:
@@ -355,6 +419,7 @@ def _fetch_sources(
     """Run priority then general searches, download pages, chunk text.
 
     Deduplicates mobile/desktop variants of the same page.
+    Skips known streaming/piracy domains.
     """
     all_results: list[SearchResult] = []
     seen_canonical: set[str] = set()
@@ -367,7 +432,6 @@ def _fetch_sources(
                 canonical = _canonical_url(r.url)
                 if canonical not in seen_canonical:
                     seen_canonical.add(canonical)
-                    # Store with canonical URL so download uses the desktop version
                     all_results.append(
                         SearchResult(
                             title=r.title,
@@ -379,10 +443,7 @@ def _fetch_sources(
     _run_queries(priority_queries, per_query=3)
     _run_queries(general_queries, per_query=max_results // 2)
 
-    # Third pass: if we can extract an episode title from the results so far,
-    # fire a targeted Wikipedia search for that title directly.
-    # e.g. "Loud as a Whisper wikipedia" or "Dark Page star trek wikipedia"
-    # This ensures the episode-specific page is always in the source list.
+    # Third pass: targeted Wikipedia search for episode title if extractable.
     ep_title = _extract_episode_title(all_results, name)
     if ep_title:
         logger.debug("Episode title bonus search: %s", ep_title)
@@ -399,6 +460,9 @@ def _fetch_sources(
     successful_sources: list[SearchResult] = []
 
     for result in all_results:
+        if _is_junk_url(result.url):
+            logger.debug("Skipping junk domain: %s", result.url)
+            continue
         text = _fetch_text(result, timeout)
         if text:
             chunks = chunk_text(text, source_url=result.url)
@@ -431,28 +495,41 @@ def _extract_episode_title(
         "cast", "crew", "series", "episodes", "the", "of", "and", "a", "an",
         "tv", "show", "next", "generation", "trek", "star", "medium",
     }
+    # Titles that are the series/season/list page, not a single episode — never
+    # a valid episode title. These previously leaked through as "Medium (TV series)".
+    _NON_EPISODE_RE = re.compile(
+        r"\b(tv series|film series|season\s*\d+|list of|full cast|episode list)\b",
+        re.IGNORECASE,
+    )
 
     for result in results:
         title = result.title or ""
-        # Strip site suffixes
         title_clean = re.split(
             r"\s*[-|]\s*(Wikipedia|IMDb|TMDB|Fandom|TV Guide|Rotten|The Movie)", title
         )[0].strip()
-        # Remove year suffixes like (1989)
-        title_clean = re.sub(r"\s*\(\d{4}\)\s*$", "", title_clean).strip()
+        # Drop parenthetical qualifiers: "(TV series)", "(TV Series 1987–1994)", "(film)", "(2005)".
+        title_clean = re.sub(r"\s*\([^)]*\)", "", title_clean).strip()
+
+        # Skip series/season/list pages outright — they are not episode titles.
+        if _NON_EPISODE_RE.search(title_clean):
+            continue
 
         words = title_clean.split()
         if len(words) < 2 or len(words) > 7:
             continue
 
+        # Normalise punctuation before comparing, else "Trek:" dodges the generic
+        # set and the series name leaks through as a fake episode title.
         meaningful = [
             w for w in words
-            if w.lower() not in ref_words
-            and w.lower() not in generic
-            and len(w) > 2
-            and not w.isdigit()
+            if (wn := w.lower().strip(":.,'\"!?")) not in ref_words
+            and wn not in generic
+            and len(wn) > 2
+            and not wn.isdigit()
         ]
-        if 1 <= len(meaningful) <= len(words):
+        # Require at least one word that is NOT part of the series name / generic
+        # vocabulary, otherwise this is just the show title restated.
+        if meaningful:
             logger.debug("Episode title extracted: %r from %r", title_clean, title)
             return title_clean
 
