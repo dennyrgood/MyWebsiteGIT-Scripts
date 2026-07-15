@@ -2,6 +2,7 @@
 
 Created: 2025-07-15 14:00 UTC
 Updated: 2026-07-15 21:00 UTC — documented --cast / --actor modes, --validate, --no-resolve
+Updated: 2026-07-15 21:15 UTC — documented cast/actor pipeline modules (actor, castref, show_resolver, structured_cast, browser, utils)
 
 **Local RAG search tool — DuckDuckGo + full web retrieval + Ollama**
 
@@ -50,6 +51,38 @@ Confidence Scoring (confidence.py)
     ▼
 Output — Rich / JSON / Markdown / HTML (output.py)
 ```
+
+The diagram above is the **plain-search** path. The `--cast` and `--actor` modes add
+a specialised pipeline on top of the same retrieval/ranking/Ollama stages:
+
+```
+--cast / --actor REF
+    │
+    ▼
+Parse & standardise reference (castref.py)   → CastRef {kind, title, season, episode, year}
+    │
+    ▼
+Resolve show name (show_resolver.py)         → TVmaze direct, else corroborated DDG lookup
+    │
+    ▼
+Targeted search + fetch (actor.py)           → pins IMDB/TVmaze/RT cast pages into context
+    │                                            (bot-protected sites via browser.py / Playwright)
+    ├── IMDB → structured actor→character pairs (structured_cast.py, from __NEXT_DATA__)
+    │
+    ▼
+TF-IDF rank + Ollama (ranker.py, ollama.py)  → Character | Actor table
+```
+
+**Module roles for these modes:**
+
+| Module | Role |
+|---|---|
+| `actor.py` | Orchestrates `--cast` (cast table) and `--actor` (identify actor / filmography); query building, cast-source pinning, prompts |
+| `castref.py` | Standardises any reference notation (`s0101`, `s04e10`, `4x10`, `season N episode M`, `Title YEAR`) into a `CastRef` |
+| `show_resolver.py` | Resolves a fuzzy show title to a canonical name via TVmaze, with a corroborated DuckDuckGo fallback for abbreviations/typos |
+| `structured_cast.py` | Extracts clean actor→character pairs from IMDB's embedded `__NEXT_DATA__` JSON |
+| `browser.py` | Headless-Chromium (Playwright) fetch for domains that block plain HTTP (IMDB, Fandom, …) |
+| `utils.py` | Shared constants and defaults (model, endpoint, chunk size, num_ctx, timeouts) |
 
 ---
 
