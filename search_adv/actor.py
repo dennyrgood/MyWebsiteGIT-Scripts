@@ -67,7 +67,7 @@ from castref import CastRef, expand_shorthand, parse_reference
 from ranker import RankedChunk, rank_chunks
 from structured_cast import CAST_BLOCK_HEADER
 from search import SearchResult, search
-from utils import OLLAMA_NUM_CTX
+from utils import DEFAULT_OLLAMA_TIMEOUT, OLLAMA_NUM_CTX
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +165,7 @@ def stage1_identify_actor(
     timeout: int,
     max_results: int = 6,
     top_chunks: int = 4,
+    ollama_timeout: int = DEFAULT_OLLAMA_TIMEOUT,
 ) -> str | None:
     """
     Given a show/episode/character reference, return the actor's real name.
@@ -207,7 +208,7 @@ def stage1_identify_actor(
             extraction_prompt,
             model=model,
             endpoint=endpoint,
-            timeout=timeout,
+            timeout=ollama_timeout,
             temperature=0.0,
             num_ctx=OLLAMA_NUM_CTX,
         )
@@ -233,6 +234,7 @@ def stage2_filmography(
     timeout: int,
     max_results: int = 8,
     top_chunks: int = 5,
+    ollama_timeout: int = DEFAULT_OLLAMA_TIMEOUT,
 ) -> AnswerRecord:
     """Search for and summarise *actor_name*'s complete filmography."""
     all_results, all_chunks, successful_sources = _fetch_sources(
@@ -260,7 +262,7 @@ def stage2_filmography(
         top_chunks=top_chunks,
         model=model,
         endpoint=endpoint,
-        timeout=timeout,
+        ollama_timeout=ollama_timeout,
     )
 
     ranked_final = rank_chunks(rank_query, all_chunks, top_n=top_chunks)
@@ -289,6 +291,7 @@ def stage_cast(
     max_results: int = 8,
     top_chunks: int = 5,
     cref: CastRef | None = None,
+    ollama_timeout: int = DEFAULT_OLLAMA_TIMEOUT,
 ) -> AnswerRecord:
     """Return a cast list (Character → Actor table) for a show/episode/movie reference.
 
@@ -378,7 +381,7 @@ def stage_cast(
         top_chunks=top_chunks,
         model=model,
         endpoint=endpoint,
-        timeout=timeout,
+        ollama_timeout=ollama_timeout,
         pinned_chunks=pinned_chunks,
     )
 
@@ -880,7 +883,7 @@ def _call_with_retry(
     top_chunks: int,
     model: str,
     endpoint: str,
-    timeout: int,
+    ollama_timeout: int = DEFAULT_OLLAMA_TIMEOUT,
     pinned_chunks: list | None = None,
 ) -> str:
     """Rank chunks, build prompt, call Ollama. Retries with fewer chunks on failure.
@@ -906,7 +909,7 @@ def _call_with_retry(
                 prompt,
                 model=model,
                 endpoint=endpoint,
-                timeout=timeout,
+                timeout=ollama_timeout,
                 num_ctx=OLLAMA_NUM_CTX,
             )
             if resp.answer.strip():

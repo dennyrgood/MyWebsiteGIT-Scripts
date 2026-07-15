@@ -50,6 +50,7 @@ CACHE_TTL_SECONDS: Final[int] = 86_400   # 24 hours
 # ---------------------------------------------------------------------------
 
 DEFAULT_OLLAMA_ENDPOINT: Final[str] = "http://imagebeast:11434"
+DEFAULT_OLLAMA_TIMEOUT: Final[int] = 135   # generation can be slow on big local models
 DEFAULT_MODEL: Final[str] = "gemma4:26b-a4b-it-qat"
 OLLAMA_TEMPERATURE: Final[float] = 0.2
 OLLAMA_TOP_P: Final[float] = 0.9

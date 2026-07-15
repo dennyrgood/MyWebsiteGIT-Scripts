@@ -15,7 +15,7 @@ import requests
 from utils import (
     DEFAULT_MODEL,
     DEFAULT_OLLAMA_ENDPOINT,
-    DEFAULT_TIMEOUT,
+    DEFAULT_OLLAMA_TIMEOUT,
     OLLAMA_NUM_CTX,
     OLLAMA_REPEAT_PENALTY,
     OLLAMA_TEMPERATURE,
@@ -23,9 +23,6 @@ from utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Extra seconds added to timeout for the Ollama call (generation can be slow)
-_OLLAMA_TIMEOUT_BUFFER = 120
 
 
 @dataclass
@@ -43,7 +40,7 @@ def generate(
     prompt: str,
     model: str = DEFAULT_MODEL,
     endpoint: str = DEFAULT_OLLAMA_ENDPOINT,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int = DEFAULT_OLLAMA_TIMEOUT,
     temperature: float = OLLAMA_TEMPERATURE,
     top_p: float = OLLAMA_TOP_P,
     repeat_penalty: float = OLLAMA_REPEAT_PENALTY,
@@ -62,8 +59,8 @@ def generate(
     endpoint:
         Base URL of the Ollama server (e.g. ``"http://imagebeast:11434"``).
     timeout:
-        Base HTTP timeout in seconds (a generous buffer is added on top for
-        generation latency).
+        Total request timeout in seconds (generation included — no hidden
+        buffer is added).
     temperature / top_p / repeat_penalty / num_ctx:
         Ollama generation options.
 
@@ -93,14 +90,13 @@ def generate(
         },
     }
 
-    effective_timeout = timeout + _OLLAMA_TIMEOUT_BUFFER
-    logger.debug("POST %s (model=%s, timeout=%ds)", url, model, effective_timeout)
+    logger.debug("POST %s (model=%s, timeout=%ds)", url, model, timeout)
 
     try:
         response = requests.post(
             url,
             json=payload,
-            timeout=effective_timeout,
+            timeout=timeout,
             headers={"Content-Type": "application/json"},
         )
         response.raise_for_status()
@@ -111,7 +107,7 @@ def generate(
         ) from exc
     except requests.exceptions.Timeout as exc:
         raise RuntimeError(
-            f"Ollama request timed out after {effective_timeout}s."
+            f"Ollama request timed out after {timeout}s."
         ) from exc
     except requests.exceptions.HTTPError as exc:
         raise RuntimeError(f"Ollama HTTP error: {exc}") from exc

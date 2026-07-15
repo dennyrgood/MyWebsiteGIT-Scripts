@@ -33,7 +33,13 @@ from output import AnswerRecord, print_rich, to_html, to_json, to_markdown
 from prompts import build_prompt
 from ranker import rank_chunks
 from search import SearchResult, search
-from utils import DEFAULT_MAX_RESULTS, DEFAULT_OLLAMA_ENDPOINT, DEFAULT_MODEL, DEFAULT_TOP_CHUNKS
+from utils import (
+    DEFAULT_MAX_RESULTS,
+    DEFAULT_MODEL,
+    DEFAULT_OLLAMA_ENDPOINT,
+    DEFAULT_OLLAMA_TIMEOUT,
+    DEFAULT_TOP_CHUNKS,
+)
 
 console = Console()
 err_console = Console(stderr=True)  # failure messages; never silenced by --quiet
@@ -66,7 +72,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--chunks", type=int, default=DEFAULT_TOP_CHUNKS, help="Top chunks to send to LLM")
     p.add_argument("--site", default=None, help="Restrict search to domain")
     p.add_argument("--exclude", nargs="*", default=None, help="Domains to exclude")
-    p.add_argument("--timeout", type=int, default=15, help="HTTP timeout in seconds")
+    p.add_argument("--timeout", type=int, default=15,
+                   help="HTTP timeout in seconds for page downloads")
+    p.add_argument("--ollama-timeout", type=int, default=DEFAULT_OLLAMA_TIMEOUT,
+                   dest="ollama_timeout",
+                   help="Timeout in seconds for Ollama generation requests")
     p.add_argument("--no-cache", action="store_true", help="Disable page cache")
     p.add_argument("--actor", default=None, metavar="REF",
                    help="Actor lookup: 'Show S1E1 Character' or 'Actor Name'")
@@ -102,6 +112,7 @@ def run_query(
     site: str | None,
     exclude: list[str] | None,
     timeout: int,
+    ollama_timeout: int = DEFAULT_OLLAMA_TIMEOUT,
     verbose: bool,
 ) -> AnswerRecord:
     """
@@ -191,7 +202,7 @@ def run_query(
     _log_stage(verbose, f"Sending to Ollama ({model})…")
     try:
         ollama_resp = ollama.generate(
-            prompt, model=model, endpoint=endpoint, timeout=timeout
+            prompt, model=model, endpoint=endpoint, timeout=ollama_timeout
         )
         answer = ollama_resp.answer
     except RuntimeError as exc:
@@ -253,6 +264,7 @@ def run_batch(
                 site=args.site,
                 exclude=args.exclude,
                 timeout=args.timeout,
+                ollama_timeout=args.ollama_timeout,
                 verbose=args.verbose,
             )
         except Exception as exc:  # noqa: BLE001
@@ -371,6 +383,7 @@ def main() -> None:
                     model=args.model,
                     endpoint=args.endpoint,
                     timeout=args.timeout,
+                    ollama_timeout=args.ollama_timeout,
                 )
                 progress.remove_task(task)
                 if not actor_name:
@@ -389,6 +402,7 @@ def main() -> None:
                 model=args.model,
                 endpoint=args.endpoint,
                 timeout=args.timeout,
+                ollama_timeout=args.ollama_timeout,
                 max_results=args.results,
                 top_chunks=args.chunks,
             )
@@ -472,6 +486,7 @@ def main() -> None:
                 model=args.model,
                 endpoint=args.endpoint,
                 timeout=args.timeout,
+                ollama_timeout=args.ollama_timeout,
                 max_results=args.results,
                 top_chunks=args.chunks,
                 cref=cref,
@@ -519,6 +534,7 @@ def main() -> None:
             site=args.site,
             exclude=args.exclude,
             timeout=args.timeout,
+            ollama_timeout=args.ollama_timeout,
             verbose=args.verbose,
         )
         progress.remove_task(task)
