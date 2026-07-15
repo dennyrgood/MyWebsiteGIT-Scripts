@@ -1,6 +1,7 @@
 # search_adv
 
 Created: 2025-07-15 14:00 UTC
+Updated: 2026-07-15 21:00 UTC — documented --cast / --actor modes, --validate, --no-resolve
 
 **Local RAG search tool — DuckDuckGo + full web retrieval + Ollama**
 
@@ -75,10 +76,53 @@ pip install -r requirements.txt
 
 ## Usage
 
+There are three modes — pick one per run:
+
+| Mode | Flag | Purpose |
+|---|---|---|
+| Plain search | *(positional query)* | Answer any question via the RAG pipeline |
+| Cast list | `--cast REF` | Character → Actor table for a show/episode/movie |
+| Actor lookup | `--actor REF` | Identify an actor and/or summarise their filmography |
+
 ### Single query
 
 ```bash
 python search_adv.py "What caused the 2023 banking crisis?"
+```
+
+### Cast list (`--cast`)
+
+Accepts flexible episode notation and movie references — all of these work:
+
+```bash
+python search_adv.py --cast "medium s0101"                      # compact SSEE
+python search_adv.py --cast "medium s04e10"                     # SxxExx
+python search_adv.py --cast "the office 4x10"                   # NxM
+python search_adv.py --cast "star trek next generation s07e07"  # spelled-out show
+python search_adv.py --cast "The Godfather 1972"                # movie + year
+```
+
+The reference is standardised and echoed before searching (`Interpreting → …`), and
+the show title is resolved against TVmaze/DuckDuckGo so abbreviations and typos are
+corrected (e.g. `star trek next gen` → `Star Trek: The Next Generation`). If the show
+can't be confidently resolved it stops with a suggestion rather than searching garbage.
+
+```bash
+# Dry-run: show how the reference is parsed/resolved, then exit (no search, ~seconds)
+python search_adv.py --cast "star trek next gen" --validate
+
+# Skip show-name resolution and search the title exactly as typed
+python search_adv.py --cast "my obscure show s01e01" --no-resolve
+```
+
+> Tip: quote the whole reference. `--cast "hope street" s01e01` still works (the stray
+> `s01e01` is recovered), but `--cast "hope street s01e01"` is unambiguous.
+
+### Actor lookup (`--actor`)
+
+```bash
+python search_adv.py --actor "Bryan Cranston"          # filmography
+python search_adv.py --actor "Medium S1E1 Cynthia"     # who played the character
 ```
 
 ### Restrict to a domain
@@ -147,6 +191,10 @@ python search_adv.py "my question" --debug
 
 | Flag | Default | Description |
 |---|---|---|
+| `--cast REF` | — | Cast-list mode (Character → Actor) for a show/episode/movie |
+| `--actor REF` | — | Actor-lookup mode (identify actor / filmography) |
+| `--validate` | off | With `--cast`: resolve/parse the reference, print it, and exit (no search) |
+| `--no-resolve` | off | With `--cast`: skip TVmaze/DDG show-name resolution (search title as typed) |
 | `--model` | `gemma4:26b-a4b-it-qat` | Ollama model tag |
 | `--endpoint` | `http://imagebeast:11434` | Ollama server URL |
 | `--results` | `8` | Max DuckDuckGo results to fetch |
