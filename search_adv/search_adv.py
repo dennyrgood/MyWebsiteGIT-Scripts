@@ -26,7 +26,7 @@ from castref import is_bare_qualifier, parse_reference
 from show_resolver import resolve_show
 from chunker import chunk_text
 from confidence import compute_confidence
-from downloader import download
+from downloader import ContentType, DownloadResult, download
 from extractor import extract
 from output import AnswerRecord, print_rich, to_html, to_json, to_markdown
 from prompts import build_prompt
@@ -124,9 +124,16 @@ def run_query(
         # Check cache first
         cached = cache.get(result.url)
         if cached is not None:
-            logger.debug("Cache hit: %s", result.url)
-            raw_content = cached
-            content_type_hint = None
+            raw_content, ct_name = cached
+            # Legacy entries predate cached content types; assume HTML.
+            content_type = ContentType[ct_name] if ct_name else ContentType.HTML
+            dl_for_extract = DownloadResult(
+                url=result.url,
+                content=raw_content,
+                content_type=content_type,
+                final_url=result.url,
+                status_code=200,
+            )
         else:
             dl = download(result.url, timeout=timeout)
             if dl is None:
@@ -138,20 +145,8 @@ def run_query(
                         all_chunks.extend(chunks)
                         successful_sources.append(result)
                 continue
-            raw_content = dl.content
-            content_type_hint = dl.content_type
-            cache.put(result.url, raw_content)
+            cache.put(result.url, dl.content, dl.content_type.name)
             dl_for_extract = dl
-        # Re-wrap in DownloadResult for extractor when coming from cache
-        from downloader import DownloadResult, ContentType
-        if cached is not None:
-            dl_for_extract = DownloadResult(
-                url=result.url,
-                content=raw_content,
-                content_type=ContentType.HTML,   # safe default
-                final_url=result.url,
-                status_code=200,
-            )
 
         # 3. Extract text
         _log_stage(verbose, f"  Extracting: {result.url}")
@@ -282,6 +277,21 @@ def run_batch(
 # ---------------------------------------------------------------------------
 
 
+def _emit(record: AnswerRecord, args: argparse.Namespace) -> None:
+    """Print *record* in the selected format and optionally write the HTML report."""
+    if args.output_json:
+        print(to_json(record))
+    elif args.markdown:
+        print(to_markdown(record))
+    else:
+        print_rich(record)
+
+    if args.html:
+        html_path = Path(args.html)
+        html_path.write_text(to_html(record), encoding="utf-8")
+        console.print(f"[dim]HTML report written to {html_path}[/dim]")
+
+
 def _log_stage(verbose: bool, message: str) -> None:
     if verbose:
         console.print(f"[dim]{message}[/dim]")
@@ -363,18 +373,7 @@ def main() -> None:
 
         record.elapsed = time.monotonic() - t0
 
-        if args.output_json:
-            print(to_json(record))
-        elif args.markdown:
-            print(to_markdown(record))
-        else:
-            print_rich(record)
-
-        if args.html:
-            html_path = Path(args.html)
-            html_path.write_text(to_html(record), encoding="utf-8")
-            console.print(f"[dim]HTML report written to {html_path}[/dim]")
-
+        _emit(record, args)
         cache.close()
         return
 
@@ -458,18 +457,7 @@ def main() -> None:
 
         record.elapsed = time.monotonic() - t0
 
-        if args.output_json:
-            print(to_json(record))
-        elif args.markdown:
-            print(to_markdown(record))
-        else:
-            print_rich(record)
-
-        if args.html:
-            html_path = Path(args.html)
-            html_path.write_text(to_html(record), encoding="utf-8")
-            console.print(f"[dim]HTML report written to {html_path}[/dim]")
-
+        _emit(record, args)
         cache.close()
         return
 
@@ -513,19 +501,7 @@ def main() -> None:
         )
         progress.remove_task(task)
 
-    # Output
-    if args.output_json:
-        print(to_json(record))
-    elif args.markdown:
-        print(to_markdown(record))
-    else:
-        print_rich(record)
-
-    if args.html:
-        html_path = Path(args.html)
-        html_path.write_text(to_html(record), encoding="utf-8")
-        console.print(f"[dim]HTML report written to {html_path}[/dim]")
-
+    _emit(record, args)
     cache.close()
 
 

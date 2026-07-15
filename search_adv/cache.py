@@ -40,26 +40,31 @@ def _key(url: str) -> str:
     return hashlib.sha256(url.encode()).hexdigest()
 
 
-def get(url: str) -> Optional[bytes]:
+def get(url: str) -> Optional[tuple[bytes, Optional[str]]]:
     """
-    Return cached bytes for *url*, or ``None`` if not cached / expired.
+    Return ``(content, content_type_name)`` for *url*, or ``None`` if not
+    cached / expired. ``content_type_name`` is a :class:`downloader.ContentType`
+    member name, or ``None`` for entries written before types were cached.
     """
     if not _enabled or _cache is None:
         return None
     key = _key(url)
     value = _cache.get(key)
-    if value is not None:
-        logger.debug("Cache hit: %s", url)
+    if value is None:
+        return None
+    logger.debug("Cache hit: %s", url)
+    if isinstance(value, bytes):  # legacy entry: bare content, type unknown
+        return value, None
     return value  # type: ignore[return-value]
 
 
-def put(url: str, content: bytes) -> None:
-    """Store *content* for *url* with the configured TTL."""
+def put(url: str, content: bytes, content_type_name: Optional[str] = None) -> None:
+    """Store *content* (and its content-type name) for *url* with the configured TTL."""
     if not _enabled or _cache is None:
         return
     key = _key(url)
-    _cache.set(key, content, expire=CACHE_TTL_SECONDS)
-    logger.debug("Cached %d bytes for %s", len(content), url)
+    _cache.set(key, (content, content_type_name), expire=CACHE_TTL_SECONDS)
+    logger.debug("Cached %d bytes (%s) for %s", len(content), content_type_name, url)
 
 
 def close() -> None:
