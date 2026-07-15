@@ -35,6 +35,8 @@
 # 2026-07-15 18:40 UTC — Part B: _cast_prompt treats a STRUCTURED CAST block (from
 #                        structured_cast/browser IMDB extraction) as authoritative;
 #                        slimmed the undelimited-run pairing rules to a fallback
+# 2026-07-15 21:40 UTC — pass context_sources (citation-ordered) to AnswerRecord so the
+#                        Sources list can show only cited pages
 
 from __future__ import annotations
 
@@ -256,6 +258,7 @@ def stage2_filmography(
         confidence=confidence,
         sources=successful_sources,
         elapsed=0.0,
+        context_sources=_context_sources(ranked_final, all_results),
     )
 
 
@@ -374,6 +377,7 @@ def stage_cast(
         confidence=confidence,
         sources=successful_sources,
         elapsed=0.0,
+        context_sources=_context_sources(ranked_final, all_results),
     )
 
 
@@ -673,6 +677,23 @@ def _build_context_block(ranked: list) -> str:
         parts.append(rc.chunk.text.strip())
         total_words += len(words)
     return "\n\n---\n\n".join(parts)
+
+
+def _context_sources(ranked: list, all_results: list[SearchResult]) -> list[SearchResult]:
+    """
+    Sources in citation order — element i-1 is the page that "[i]" in the answer
+    refers to (matches the numbering in _numbered_context_block). Passed to the
+    AnswerRecord so the Sources list can show only the cited pages.
+    """
+    url_to_title = {r.url: r.title for r in all_results}
+    return [
+        SearchResult(
+            title=url_to_title.get(rc.chunk.source_url, rc.chunk.source_url),
+            url=rc.chunk.source_url,
+            snippet="",
+        )
+        for rc in ranked
+    ]
 
 
 def _numbered_context_block(ranked: list, all_results: list[SearchResult]) -> str:

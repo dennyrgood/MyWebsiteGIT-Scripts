@@ -1,11 +1,15 @@
 # output.py — Terminal, JSON, Markdown, and HTML output renderers
 # 2025-07-15 14:00 UTC
+# 2026-07-15 21:40 UTC — Sources list: when context_sources is set (cast/actor), show
+#                        only the pages actually cited in the answer, keeping their
+#                        citation numbers (no renumbering); drops fetched-but-unused pages
 
 from __future__ import annotations
 
+import html
 import json
-import textwrap
-from dataclasses import asdict, dataclass
+import re
+from dataclasses import dataclass
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -29,6 +33,40 @@ class AnswerRecord:
     confidence: ConfidenceResult
     sources: list[SearchResult]
     elapsed: float          # seconds
+    # Sources in citation order — element i-1 is what "[i]" in the answer refers to.
+    # When set (cast/actor modes), only the cited entries are shown, keeping their
+    # numbers. None for plain search → the full `sources` list is shown as before.
+    context_sources: list[SearchResult] | None = None
+
+
+_CITE_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
+
+
+def _cited_numbers(answer: str) -> set[int]:
+    """Citation numbers referenced in *answer*, e.g. '[1]' / '[1, 2]' → {1, 2}."""
+    nums: set[int] = set()
+    for m in _CITE_RE.finditer(answer):
+        for part in m.group(1).split(","):
+            nums.add(int(part.strip()))
+    return nums
+
+
+def _display_sources(record: AnswerRecord) -> list[tuple[int, SearchResult]]:
+    """
+    (number, source) pairs to render.
+
+    - Plain search (no context_sources): the full source list, numbered 1..N.
+    - Cast/actor: only the sources actually cited in the answer, keeping their
+      citation numbers (no renumbering). If the answer carries no citations
+      (single-source case), show the context sources that were used.
+    """
+    if record.context_sources is None:
+        return list(enumerate(record.sources, 1))
+    numbered = list(enumerate(record.context_sources, 1))
+    cited = _cited_numbers(record.answer)
+    if cited:
+        return [(i, s) for i, s in numbered if i in cited]
+    return numbered
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +79,7 @@ def print_rich(record: AnswerRecord) -> None:
     _print_question(record.query)
     _print_answer(record.answer)
     _print_confidence(record.confidence)
-    _print_sources(record.sources)
+    _print_sources(_display_sources(record))
     _print_timing(record.elapsed)
 
 
@@ -64,7 +102,7 @@ def _print_confidence(conf: ConfidenceResult) -> None:
     )
 
 
-def _print_sources(sources: list[SearchResult]) -> None:
+def _print_sources(sources: list[tuple[int, SearchResult]]) -> None:
     if not sources:
         return
     console.print()
@@ -72,7 +110,7 @@ def _print_sources(sources: list[SearchResult]) -> None:
     table.add_column("#", style="dim", width=3)
     table.add_column("Title", style="bold")
     table.add_column("URL", style="blue underline")
-    for i, src in enumerate(sources, 1):
+    for i, src in sources:
         table.add_row(str(i), src.title or "(no title)", src.url)
     console.print(table)
 
@@ -93,7 +131,10 @@ def to_json(record: AnswerRecord) -> str:
         "answer": record.answer,
         "confidence": record.confidence.score,
         "confidence_label": record.confidence.label,
-        "sources": [{"title": s.title, "url": s.url} for s in record.sources],
+        "sources": [
+            {"n": i, "title": s.title, "url": s.url}
+            for i, s in _display_sources(record)
+        ],
         "elapsed": round(record.elapsed, 3),
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
@@ -114,7 +155,7 @@ def to_markdown(record: AnswerRecord) -> str:
         f"**{record.confidence.label}** ({record.confidence.score}/100)\n"
     )
     lines.append("# Sources\n")
-    for i, src in enumerate(record.sources, 1):
+    for i, src in _display_sources(record):
         lines.append(f"{i}. [{src.title or src.url}]({src.url})")
     lines.append(f"\n---\n*Elapsed: {elapsed_str(record.elapsed)}*\n")
     return "\n".join(lines)
@@ -131,13 +172,13 @@ def to_html(record: AnswerRecord) -> str:
         record.confidence.label, "#555"
     )
     sources_html = "\n".join(
-        f'    <li><a href="{s.url}" target="_blank" rel="noopener">'
+        f'    <li value="{i}"><a href="{s.url}" target="_blank" rel="noopener">'
         f'{s.title or s.url}</a></li>'
-        for s in record.sources
+        for i, s in _display_sources(record)
     )
     # Convert answer newlines to <p> tags
     answer_paragraphs = "".join(
-        f"<p>{textwrap.escape(para.strip())}</p>"
+        f"<p>{html.escape(para.strip())}</p>"
         for para in record.answer.split("\n\n")
         if para.strip()
     )
@@ -147,7 +188,7 @@ def to_html(record: AnswerRecord) -> str:
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>search_adv — {textwrap.escape(record.query)}</title>
+  <title>search_adv — {html.escape(record.query)}</title>
   <style>
     :root {{
       --bg: #0f1117;
@@ -196,7 +237,7 @@ def to_html(record: AnswerRecord) -> str:
 
     <div class="card">
       <h1>Question</h1>
-      <div class="question">{textwrap.escape(record.query)}</div>
+      <div class="question">{html.escape(record.query)}</div>
     </div>
 
     <div class="card">
@@ -212,9 +253,9 @@ def to_html(record: AnswerRecord) -> str:
 
     <div class="card">
       <h1>Sources</h1>
-      <ul>
+      <ol>
 {sources_html}
-      </ul>
+      </ol>
     </div>
 
     <div class="elapsed">Elapsed: {elapsed_str(record.elapsed)}</div>
