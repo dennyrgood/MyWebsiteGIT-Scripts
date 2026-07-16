@@ -32,6 +32,9 @@ from pathlib import Path
 HOSTNAME_MAP = {
     "Denniss-MacBook-Air.local": "denniss-macbook-air",
     "Denniss-2ndMBA":            "denniss-2nd-macbook-air",
+    # mb2 renamed 2026-07-16 to match its tailnet name (fixes Ollama's
+    # DNS-rebinding 403 on hostname URLs); cover both raw spellings.
+    "denniss-2nd-macbook-air.local": "denniss-2nd-macbook-air",
     "Mathes-Mac-mini.local":     "mathes-mac-mini",
 }
 HOST = HOSTNAME_MAP.get(socket.gethostname(), socket.gethostname())

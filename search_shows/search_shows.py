@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 import re
@@ -63,7 +64,9 @@ def load_keys() -> dict:
 
 def get_json(url: str, params: dict | None = None) -> dict | list | None:
     try:
-        r = requests.get(url, params=params, timeout=TIMEOUT)
+        # Wikipedia (and others) 403 the default python-requests agent.
+        r = requests.get(url, params=params, timeout=TIMEOUT,
+                         headers={"User-Agent": "search_shows/1.0 (personal cast lookup tool)"})
         if r.status_code == 404:
             return None
         r.raise_for_status()
@@ -114,6 +117,103 @@ def parse_ref(raw: str) -> dict:
         ref["year"] = int(y.group(1))
         ref["title"] = _clean_title(YEAR_RE.sub("", text)).strip("()")
     return ref
+
+
+# ------------------------------------------------------------- title resolver
+
+def _similar(a: str, b: str) -> float:
+    return difflib.SequenceMatcher(None, a.casefold(), b.casefold()).ratio()
+
+
+def wiki_suggest(text: str) -> str | None:
+    """Wikipedia's search suggestion — a free spelling corrector ('toy storie 5'
+    → 'toy story 5'). Returns None when Wikipedia has no better idea."""
+    d = get_json(
+        "https://en.wikipedia.org/w/api.php",
+        {"action": "query", "list": "search", "srsearch": text, "srlimit": 1,
+         "srinfo": "suggestion", "format": "json"},
+    )
+    try:
+        return d["query"]["searchinfo"]["suggestion"]
+    except (KeyError, TypeError):
+        return None
+
+
+def collect_candidates(title: str, keys: dict, movie: bool = False) -> list[dict]:
+    """Title candidates from the mode-appropriate APIs: [{name, year, type}]."""
+    cands: list[dict] = []
+    seen: set = set()
+
+    def add(name: str, year: str, typ: str) -> None:
+        k = (name.casefold(), typ)
+        if name and k not in seen:
+            seen.add(k)
+            cands.append({"name": name, "year": year, "type": typ})
+
+    if movie:
+        if keys.get("tmdb"):
+            f = get_json(f"{TMDB}/search/movie", {"api_key": keys["tmdb"], "query": title})
+            for r in (f or {}).get("results", [])[:6]:
+                add(r["title"], (r.get("release_date") or "")[:4], "movie")
+        if not cands and keys.get("omdb"):
+            f = get_json("https://www.omdbapi.com/",
+                         {"apikey": keys["omdb"], "s": title, "type": "movie"})
+            for r in (f or {}).get("Search", [])[:6]:
+                add(r["Title"], r.get("Year", "")[:4], "movie")
+    else:
+        for m in get_json(f"{TVMAZE}/search/shows", {"q": title}) or []:
+            add(m["show"]["name"], (m["show"].get("premiered") or "")[:4], "tv")
+        if not cands and keys.get("tmdb"):
+            f = get_json(f"{TMDB}/search/tv", {"api_key": keys["tmdb"], "query": title})
+            for r in (f or {}).get("results", [])[:6]:
+                add(r["name"], (r.get("first_air_date") or "")[:4], "tv")
+    return cands
+
+
+def resolve_title(ref: dict, keys: dict, movie: bool = False) -> tuple[str | None, dict | None]:
+    """Resolve ref['title'] against the APIs, fixing spelling via Wikipedia if
+    nothing matches. On a confident match, updates ref['title'] in place and
+    returns (note, None); when ambiguous returns (None, choices_record)."""
+    typed = ref["title"]
+    title = typed
+    cands = collect_candidates(title, keys, movie)
+    corrected = None
+    if not cands:
+        sug = wiki_suggest(title)
+        if sug and sug.casefold() != title.casefold():
+            corrected, title = sug, sug
+            cands = collect_candidates(title, keys, movie)
+    if not cands:
+        return None, None  # unresolved — downstream lookups report the miss
+
+    best = cands[0]
+    if len(cands) == 1 or _similar(title, best["name"]) >= 0.8:
+        note = None
+        if best["name"].casefold() != typed.casefold():
+            note = f'"{typed}" → "{best["name"]}"' + (
+                f' (spelling: "{corrected}")' if corrected else ""
+            )
+        ref["title"] = best["name"]
+        return note, None
+
+    # Genuinely ambiguous — hand back a choice list.
+    qual = ""
+    if ref["season"] and ref["episode"]:
+        qual = f" s{ref['season']:02d}e{ref['episode']:02d}"
+    elif ref["season"]:
+        qual = f" s{ref['season']:02d}"
+    elif ref["episode"]:
+        qual = f" episode {ref['episode']}"
+    rest = f" {ref['rest']}" if ref.get("rest") else ""
+    for c in cands:
+        year = f" ({c['year']})" if c["type"] == "movie" and c["year"] else ""
+        c["requery"] = f"{c['name']}{year}{qual}{rest}"
+    return None, {
+        "kind": "choices",
+        "query": typed,
+        "corrected": corrected,
+        "candidates": cands[:8],
+    }
 
 
 # ---------------------------------------------------------------- TV (TVmaze)
@@ -317,13 +417,27 @@ def actor_credits(name: str, keys: dict) -> dict | None:
 
 # ---------------------------------------------------------------- show info
 
-def show_info(query: str) -> dict | None:
-    show = get_json(f"{TVMAZE}/singlesearch/shows", {"q": query})
-    if not show:
+def show_info(query: str, keys: dict | None = None) -> dict | None:
+    matches = get_json(f"{TVMAZE}/search/shows", {"q": query}) or []
+    if not matches and keys and keys.get("tmdb"):
+        # Same abbreviation fallback as tv_cast: resolve the title via TMDB, retry.
+        found = get_json(f"{TMDB}/search/tv", {"api_key": keys["tmdb"], "query": query})
+        if found and found.get("results"):
+            matches = get_json(
+                f"{TVMAZE}/search/shows", {"q": found["results"][0]["name"]}
+            ) or []
+    if not matches:
         return None
+    show = matches[0]["show"]
+    others = [
+        f"{m['show']['name']} ({(m['show'].get('premiered') or '?')[:4]})"
+        for m in matches[1:6]
+    ]
     summary = re.sub(r"<[^>]+>", "", show.get("summary") or "")
     return {
         "kind": "show",
+        "query": query,
+        "other_matches": others,
         "show": show["name"],
         "premiered": show.get("premiered"),
         "status": show.get("status"),
@@ -346,6 +460,14 @@ def print_pairs(rows: list[dict], left: str, right: str) -> None:
 
 def render(result: dict) -> None:
     kind = result["kind"]
+    if kind == "choices":
+        print(f'Multiple possible matches for "{result["query"]}"'
+              + (f' (spelling suggestion: "{result["corrected"]}")' if result.get("corrected") else "")
+              + ":")
+        for i, c in enumerate(result["candidates"], 1):
+            year = f" ({c['year']})" if c["year"] else ""
+            print(f"  {i}. [{c['type']}] {c['name']}{year}  →  re-run with: {c['requery']}")
+        return
     if kind == "tv":
         if result.get("resolved_via"):
             print(f"Resolved: {result['resolved_via']}")
@@ -364,6 +486,8 @@ def render(result: dict) -> None:
         if result.get("url"):
             print(f"\nSource: {result['url']}")
     elif kind == "movie":
+        if result.get("resolved_via"):
+            print(f"Resolved: {result['resolved_via']}")
         print(f"{result['title']}  (released {result.get('released')})  [{result['source']}]")
         if result.get("plot"):
             print(result["plot"])
@@ -396,6 +520,8 @@ def render(result: dict) -> None:
             print(f"Genres: {', '.join(result['genres'])}")
         if result.get("summary"):
             print(f"\n{result['summary']}")
+        if result.get("other_matches"):
+            print("\nOther matches:", " · ".join(result["other_matches"]))
         if result.get("url"):
             print(f"\nSource: {result['url']}")
 
@@ -415,14 +541,22 @@ def main() -> int:
 
     if args.cast:
         ref = parse_ref(args.cast)
-        if ref["rest"] and (ref["season"] or ref["episode"]):
+        is_movie = args.movie or (ref["year"] is not None and not ref["season"])
+        note, choices = resolve_title(ref, keys, movie=is_movie)
+        if choices:
+            result = choices
+        elif ref["rest"] and (ref["season"] or ref["episode"]):
             # Trailing text after the episode is a character name — same behaviour
             # as --actor, so either mode accepts "medium s0101 george".
             result = find_character(ref, ref["rest"], keys)
-        elif args.movie or (ref["year"] and not ref["season"]):
+        elif args.movie:
+            result = movie_cast(ref, keys)  # forced movie: no silent TV fallback
+        elif is_movie:
             result = movie_cast(ref, keys) or tv_cast(ref, keys)
         else:
             result = tv_cast(ref, keys) or movie_cast(ref, keys)
+        if result and note and not result.get("resolved_via"):
+            result["resolved_via"] = note
     elif args.actor:
         aref = parse_ref(args.actor)
         if aref["rest"] and (aref["season"] or aref["episode"]):
@@ -431,7 +565,14 @@ def main() -> int:
         else:
             result = actor_credits(args.actor, keys)
     elif args.query:
-        result = show_info(" ".join(args.query))
+        sref = parse_ref(" ".join(args.query))
+        note, choices = resolve_title(sref, keys)
+        if choices:
+            result = choices
+        else:
+            result = show_info(sref["title"], keys)
+            if result and note:
+                result["resolved_via"] = note
     else:
         p.print_help()
         return 2

@@ -190,6 +190,18 @@ function pairTable(rows, leftHead, rightHead) {
 
 function render(rec) {
   let h = '';
+  if (rec.kind === 'choices') {
+    h += `<p>Multiple possible matches for <strong>${esc(rec.query)}</strong>`
+      + (rec.corrected ? ` (spelling suggestion: <strong>${esc(rec.corrected)}</strong>)` : '')
+      + ' — pick one:</p><div class="tablewrap"><table><tr><th></th><th>Title</th><th>Year</th></tr>'
+      + rec.candidates.map(c =>
+          `<tr><td>${esc(c.type)}</td>`
+          + `<td><a href="#" class="choicelink${c.type === 'movie' ? ' movie' : ''}" data-query="${esc(c.requery)}">${esc(c.name)}</a></td>`
+          + `<td>${esc(c.year || '')}</td></tr>`
+        ).join('') + '</table></div>';
+    h += `<div class="meta">${esc(rec.elapsed ?? '?')}s</div>`;
+    return h;
+  }
   if (rec.kind === 'tv') {
     if (rec.resolved_via) h += `<div class="meta">Resolved: ${esc(rec.resolved_via)}</div>`;
     h += `<h2>${esc(rec.show)} (${esc((rec.premiered || '?').slice(0, 4))})</h2>`;
@@ -210,6 +222,7 @@ function render(rec) {
     h += '<h3>Main cast</h3>' + pairTable(rec.main_cast, 'Character', 'Actor');
     if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
   } else if (rec.kind === 'movie') {
+    if (rec.resolved_via) h += `<div class="meta">Resolved: ${esc(rec.resolved_via)}</div>`;
     h += `<h2>${esc(rec.title)}</h2>`;
     h += `<div class="meta">Released ${esc(rec.released || '?')} · source: ${esc(rec.source)}</div>`;
     if (rec.plot) h += `<p>${esc(rec.plot)}</p>`;
@@ -246,12 +259,21 @@ function render(rec) {
           }).join('') + '</table></div>';
     }
   } else if (rec.kind === 'show') {
+    if (rec.resolved_via) h += `<div class="meta">Resolved: ${esc(rec.resolved_via)}</div>`;
+    if (rec.query && rec.query.toLowerCase() !== rec.show.toLowerCase())
+      h += `<div class="meta">Best match for “${esc(rec.query)}”:</div>`;
     h += `<h2>${esc(rec.show)} (${esc((rec.premiered || '?').slice(0, 4))})</h2>`;
     h += `<div class="meta">${esc(rec.status || '')}`
       + (rec.network ? ` · ${esc(rec.network)}` : '')
       + (rec.genres && rec.genres.length ? ` · ${esc(rec.genres.join(', '))}` : '')
       + '</div>';
     if (rec.summary) h += `<p>${esc(rec.summary)}</p>`;
+    if (rec.other_matches && rec.other_matches.length) {
+      h += '<div class="meta">Not it? Other matches: '
+        + rec.other_matches.map(mname =>
+            `<a href="#" class="showlink" data-query="${esc(mname.replace(/\s*\(\d{4}\)$/, '').replace(/\s*\(\?\)$/, ''))}">${esc(mname)}</a>`
+          ).join(' · ') + '</div>';
+    }
     if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
   } else {
     h += `<pre>${esc(JSON.stringify(rec, null, 2))}</pre>`;
@@ -315,6 +337,24 @@ $('result').addEventListener('click', e => {
     syncMode();
     $('movie').checked = link.classList.contains('movie');
     $('query').value = link.dataset.query;
+    run();
+    return;
+  }
+  const choice = e.target.closest('a.choicelink');
+  if (choice) {
+    e.preventDefault();
+    // keep the current mode; a movie candidate flips the movie checkbox
+    if (mode() === 'cast') $('movie').checked = choice.classList.contains('movie');
+    $('query').value = choice.dataset.query;
+    run();
+    return;
+  }
+  const sl = e.target.closest('a.showlink');
+  if (sl) {
+    e.preventDefault();
+    document.querySelector('input[name=mode][value=show]').checked = true;
+    syncMode();
+    $('query').value = sl.dataset.query;
     run();
   }
 });
