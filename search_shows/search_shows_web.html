@@ -154,12 +154,12 @@ const MODE_HELP = {
     hint: ["Show + episode → guest & main cast",
            "Season only → episode list",
            "Movie + year → movie cast",
-           "Add a character after the episode (medium s0101 george) to see who played them"],
+           "Add a character after the show or episode (medium s0101 joe) to see who played them"],
   },
   actor: {
-    ph: "Diana Muldaur · medium s0101 george",
+    ph: "Diana Muldaur · medium s0101 joe · chicago pd voight",
     hint: ["An actor's name → their TV & movie credits",
-           "Or show + episode + character → who played them"],
+           "Or show + character (episode optional) → who played them"],
   },
   show: {
     ph: "hope street",
@@ -259,7 +259,11 @@ function render(rec) {
     if (rec.error) {
       h += `<p class="error">${esc(rec.error)}</p>`;
       if (rec.characters_seen && rec.characters_seen.length)
-        h += `<div class="meta">Characters found: ${esc(rec.characters_seen.join(', '))}</div>`;
+        h += '<div class="meta">Characters found: '
+          + rec.characters_seen.map(c => rec.requery_prefix
+              ? `<a href="#" class="charlink" data-query="${esc(rec.requery_prefix + ' ' + c)}" title="who played ${esc(c)}">${esc(c)}</a>`
+              : esc(c)
+            ).join(', ') + '</div>';
       h += `<div class="meta">${esc(rec.elapsed ?? '?')}s</div>`;
       return h;
     }
@@ -310,7 +314,7 @@ function render(rec) {
     if (rec.other_matches && rec.other_matches.length) {
       h += '<div class="meta">Not it? Other matches: '
         + rec.other_matches.map(mname =>
-            `<a href="#" class="showlink" data-query="${esc(mname.replace(/\s*\(\d{4}\)$/, '').replace(/\s*\(\?\)$/, ''))}">${esc(mname)}</a>`
+            `<a href="#" class="showlink" data-query="${esc(mname.replace(/\s*\(\?\)$/, ''))}">${esc(mname)}</a>`
           ).join(' · ') + '</div>';
     }
   } else {
@@ -372,6 +376,15 @@ $('result').addEventListener('click', e => {
     document.querySelector('input[name=mode][value=actor]').checked = true;
     syncMode();
     $('query').value = actor.dataset.actor;
+    run();
+    return;
+  }
+  const ch = e.target.closest('a.charlink');
+  if (ch) {
+    e.preventDefault();
+    document.querySelector('input[name=mode][value=actor]').checked = true;
+    syncMode();
+    $('query').value = ch.dataset.query;
     run();
     return;
   }

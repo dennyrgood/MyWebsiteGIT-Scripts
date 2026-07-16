@@ -300,8 +300,20 @@ def _tv_seasons(show_id: int) -> list[dict]:
     ]
 
 
+def _pick_tvmaze_show(title: str, year: int | None = None) -> dict | None:
+    """Best TVmaze match for *title* — honouring *year* so same-titled shows
+    ("The Office" 2001 vs 2005) resolve to the one actually asked for instead
+    of whichever TVmaze ranks first."""
+    matches = get_json(f"{TVMAZE}/search/shows", {"q": title}) or []
+    if year:
+        for m in matches:
+            if (m["show"].get("premiered") or "")[:4] == str(year):
+                return m["show"]
+    return matches[0]["show"] if matches else None
+
+
 def tv_cast(ref: dict, keys: dict | None = None) -> dict | None:
-    show = get_json(f"{TVMAZE}/singlesearch/shows", {"q": ref["title"]})
+    show = _pick_tvmaze_show(ref["title"], ref.get("year"))
     resolved_via = None
     if not show and keys and keys.get("tmdb"):
         # TVmaze search is not typo/abbreviation tolerant ("star trek next gen"
@@ -311,7 +323,7 @@ def tv_cast(ref: dict, keys: dict | None = None) -> dict | None:
         )
         if found and found.get("results"):
             canonical = found["results"][0]["name"]
-            show = get_json(f"{TVMAZE}/singlesearch/shows", {"q": canonical})
+            show = _pick_tvmaze_show(canonical, ref.get("year"))
             if show:
                 resolved_via = f'"{ref["title"]}" → "{canonical}" (TMDB)'
     if not show:
@@ -386,11 +398,19 @@ def find_character(ref: dict, character: str, keys: dict) -> dict | None:
         if close:
             match = next(c for c in pool if c["character"] == close[0])
     if not match:
+        qual = ""
+        if ref["season"] and ref["episode"]:
+            qual = f" s{ref['season']:02d}e{ref['episode']:02d}"
+        elif ref["season"]:
+            qual = f" s{ref['season']:02d}"
         return {
             "kind": "actor",
             "name": None,
             "error": f'No character matching "{character}" in {tv["show"]}'
             + (f' {tv["episode"]}' if tv.get("episode") else ""),
+            "show": tv["show"],
+            # Lets the GUI make each listed character a clickable retry.
+            "requery_prefix": f"{tv['show']}{qual}",
             "characters_seen": [c["character"] for c in pool],
         }
     out = actor_credits(match["actor"], keys) or {"kind": "actor", "name": match["actor"]}
@@ -401,6 +421,27 @@ def find_character(ref: dict, character: str, keys: dict) -> dict | None:
         "episode": tv.get("episode"),
     }
     return out
+
+
+def character_fallback(raw: str, keys: dict) -> dict | None:
+    """Last resort for "show + character" with no episode ("chicago pd voight"):
+    peel trailing word(s) off as a character name and match against the show's
+    cast — the natural couch question doesn't come with an episode number."""
+    words = raw.split()
+    miss = None
+    for n in (1, 2):
+        if len(words) <= n:
+            break
+        show_part = " ".join(words[:-n])
+        char_part = " ".join(words[-n:])
+        result = find_character(parse_ref(show_part), char_part, keys)
+        if result and not result.get("error"):
+            return result
+        # Keep a character-miss only when the show itself was a solid match —
+        # otherwise a typo'd actor name would surface some random show's cast.
+        if result and miss is None and _similar(show_part, result.get("show") or "") >= 0.6:
+            miss = result
+    return miss
 
 
 # ------------------------------------------------------------ movies (OMDb / TMDB)
@@ -426,6 +467,7 @@ def movie_cast(ref: dict, keys: dict) -> dict | None:
                     "released": found["results"][0].get("release_date"),
                     "source": "TMDB",
                     "url": f"https://www.themoviedb.org/movie/{mid}",
+                    "plot": found["results"][0].get("overview") or None,
                     "other_matches": others,
                     "cast": [
                         {"character": c.get("character", ""), "actor": c["name"]}
@@ -639,7 +681,7 @@ def actor_credits(name: str, keys: dict, winner: dict | None = None) -> dict | N
 
 # ---------------------------------------------------------------- show info
 
-def show_info(query: str, keys: dict | None = None) -> dict | None:
+def show_info(query: str, keys: dict | None = None, year: int | None = None) -> dict | None:
     matches = get_json(f"{TVMAZE}/search/shows", {"q": query}) or []
     if not matches and keys and keys.get("tmdb"):
         # Same abbreviation fallback as tv_cast: resolve the title via TMDB, retry.
@@ -651,10 +693,18 @@ def show_info(query: str, keys: dict | None = None) -> dict | None:
     if not matches:
         return None
     show = matches[0]["show"]
+    if year:
+        # Same-titled shows ("The Office" 2001/2005): an explicit year picks
+        # the right one instead of whichever TVmaze ranks first.
+        for m in matches:
+            if (m["show"].get("premiered") or "")[:4] == str(year):
+                show = m["show"]
+                break
     others = [
         f"{m['show']['name']} ({(m['show'].get('premiered') or '?')[:4]})"
-        for m in matches[1:6]
-    ]
+        for m in matches
+        if m["show"]["id"] != show["id"]
+    ][:5]
     summary = re.sub(r"<[^>]+>", "", show.get("summary") or "")
     return {
         "kind": "show",
@@ -776,7 +826,8 @@ def main() -> int:
     p.add_argument("query", nargs="*", help="show title (info mode)")
     p.add_argument("--cast", metavar="REF", help='e.g. "hope street s01e03", "the godfather (1972)"')
     p.add_argument("--actor", metavar="REF",
-                   help='actor name, or "Show S1E1 Character" to find who played them')
+                   help='actor name, or show + character ("chicago pd voight", '
+                        '"medium s1e1 joe") to find who played them')
     p.add_argument("--movie", action="store_true", help="with --cast: force movie lookup")
     p.add_argument("--list", action="store_true", dest="list_matches",
                    help="show every match instead of auto-picking the best one "
@@ -822,6 +873,9 @@ def main() -> int:
                 if resolve_as
                 else (tv_cast(ref, keys) or movie_cast(ref, keys))
             )
+            if not result:
+                # Maybe "show + character" typed into cast mode.
+                result = character_fallback(args.cast, keys)
         if result and note and not result.get("resolved_via"):
             result["resolved_via"] = note
     elif args.actor:
@@ -837,6 +891,9 @@ def main() -> int:
                 result = actor_credits(args.actor, keys, winner)
                 if result and note:
                     result["resolved_via"] = note
+                if not result:
+                    # Not a person — maybe "show + character" ("chicago pd voight").
+                    result = character_fallback(args.actor, keys)
     elif args.query:
         sref = parse_ref(" ".join(args.query))
         # No mode flag here to say TV vs movie — try both and let ranking sort
@@ -849,7 +906,7 @@ def main() -> int:
             if result and note:
                 result["resolved_via"] = note
         else:
-            result = show_info(sref["title"], keys)
+            result = show_info(sref["title"], keys, sref.get("year"))
             if result and note:
                 result["resolved_via"] = note
     else:
