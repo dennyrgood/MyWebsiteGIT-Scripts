@@ -2,7 +2,7 @@
   "metadata": {
     "created": "2025-11-20T16:31:34.392771",
     "last_scan": null,
-    "last_apply": "2026-07-06T20:37:25.288294"
+    "last_apply": "2026-07-16T16:11:57.963053"
   },
   "categories": [
     "Guides",
@@ -244,6 +244,15 @@
       "last_processed": "2026-07-06T20:37:25.288273",
       "file_mtime": "2026-02-20T07:37:35.058184",
       "readable_version": "./md_outputs/OneDriveSyncMonitor_Guide_macOS_Checker.md"
+    },
+    "./macmini-m4-migration.md": {
+      "hash": "sha256:0bcd44cb2d5b0af33dc247a578ac1b1ac1090074bb57a7dfb255ec2570b3bcdf",
+      "category": "Guides",
+      "summary": "Plan for migrating amsterdamdesktop (Flask backends, OpenWebUI, fleet status checker) and the laptop's LaunchAgent services to a new Mac Mini M4.",
+      "summary_approved": true,
+      "title": "macmini-m4-migration",
+      "last_processed": "2026-07-16T16:11:57.963022",
+      "file_mtime": "2026-07-16T16:10:01.513308"
     }
   }
 }
