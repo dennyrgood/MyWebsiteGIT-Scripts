@@ -6,6 +6,9 @@ result, and get the full record — facts, cast (with per-season episode counts
 for TV), crew, certifications, trailers, US watch providers, keywords,
 recommendations, a season/episode browser with guest stars, and a raw-JSON view.
 
+See [DATA_POINTS.md](DATA_POINTS.md) for the full list of fields the tool
+returns for movies, TV shows, seasons, and episodes.
+
 ## Setup (one time)
 
 ```sh
