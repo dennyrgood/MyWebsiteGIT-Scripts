@@ -233,6 +233,14 @@ function render(rec) {
               + `<td>${esc(e.airdate || '')}</td></tr>`;
           }).join('') + '</table></div>';
     }
+    if (rec.seasons && rec.seasons.length) {
+      h += `<h3>Seasons</h3><div class="tablewrap"><table><tr><th>Season</th><th>Year</th><th>Episodes</th></tr>`
+        + rec.seasons.map(s => {
+            const q = `${rec.show} season ${s.number}`;
+            return `<tr><td><a href="#" class="seasonlink" data-query="${esc(q)}" title="episodes of ${esc(q)}">Season ${s.number}</a></td>`
+              + `<td>${esc((s.premiered || '?').slice(0, 4))}</td><td>${esc(s.episode_count ?? '')}</td></tr>`;
+          }).join('') + '</table></div>';
+    }
     h += '<h3>Main cast</h3>' + pairTable(rec.main_cast, 'Character', 'Actor');
   } else if (rec.kind === 'movie') {
     if (rec.resolved_via) h += `<div class="meta">Resolved: ${esc(rec.resolved_via)}</div>`;
@@ -241,6 +249,12 @@ function render(rec) {
     h += `<div class="meta">Released ${esc(rec.released || '?')} · source: ${esc(rec.source)}</div>`;
     if (rec.plot) h += `<p>${esc(rec.plot)}</p>`;
     h += '<h3>Cast</h3>' + pairTable(rec.cast, 'Actor', 'Character');
+    if (rec.other_matches && rec.other_matches.length) {
+      h += '<div class="meta">Not it? Other matches: '
+        + rec.other_matches.map(mname =>
+            `<a href="#" class="titlelink movie" data-query="${esc(mname)}" title="cast of ${esc(mname)}">${esc(mname)}</a>`
+          ).join(' · ') + '</div>';
+    }
   } else if (rec.kind === 'actor') {
     if (rec.error) {
       h += `<p class="error">${esc(rec.error)}</p>`;
@@ -283,6 +297,15 @@ function render(rec) {
       + (rec.genres && rec.genres.length ? ` · ${esc(rec.genres.join(', '))}` : '')
       + '</div>';
     if (rec.summary) h += `<p>${esc(rec.summary)}</p>`;
+    h += `<div class="meta"><a href="#" class="titlelink" data-query="${esc(rec.show)}">Show cast</a></div>`;
+    if (rec.seasons && rec.seasons.length) {
+      h += `<h3>Seasons</h3><div class="tablewrap"><table><tr><th>Season</th><th>Year</th><th>Episodes</th></tr>`
+        + rec.seasons.map(s => {
+            const q = `${rec.show} season ${s.number}`;
+            return `<tr><td><a href="#" class="seasonlink" data-query="${esc(q)}" title="episodes of ${esc(q)}">Season ${s.number}</a></td>`
+              + `<td>${esc((s.premiered || '?').slice(0, 4))}</td><td>${esc(s.episode_count ?? '')}</td></tr>`;
+          }).join('') + '</table></div>';
+    }
     if (rec.other_matches && rec.other_matches.length) {
       h += '<div class="meta">Not it? Other matches: '
         + rec.other_matches.map(mname =>
@@ -346,7 +369,7 @@ $('result').addEventListener('click', e => {
     run();
     return;
   }
-  const link = e.target.closest('a.eplink, a.titlelink');
+  const link = e.target.closest('a.eplink, a.titlelink, a.seasonlink');
   if (link) {
     e.preventDefault();
     document.querySelector('input[name=mode][value=cast]').checked = true;

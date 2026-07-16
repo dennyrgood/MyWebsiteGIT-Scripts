@@ -287,6 +287,19 @@ def _build_choices(
 
 # ---------------------------------------------------------------- TV (TVmaze)
 
+def _tv_seasons(show_id: int) -> list[dict]:
+    seasons = get_json(f"{TVMAZE}/shows/{show_id}/seasons") or []
+    return [
+        {
+            "number": s["number"],
+            "episode_count": s.get("episodeOrder"),
+            "premiered": s.get("premiereDate"),
+        }
+        for s in seasons
+        if s.get("number") is not None
+    ]
+
+
 def tv_cast(ref: dict, keys: dict | None = None) -> dict | None:
     show = get_json(f"{TVMAZE}/singlesearch/shows", {"q": ref["title"]})
     resolved_via = None
@@ -342,6 +355,10 @@ def tv_cast(ref: dict, keys: dict | None = None) -> dict | None:
             for e in eps
             if e.get("season") == ref["season"]
         ]
+    else:
+        # Bare series query — surface the season list so it can be browsed
+        # instead of requiring the user to already know a season exists.
+        out["seasons"] = _tv_seasons(show["id"])
     return out
 
 
@@ -399,12 +416,17 @@ def movie_cast(ref: dict, keys: dict) -> dict | None:
             mid = found["results"][0]["id"]
             credits = get_json(f"{TMDB}/movie/{mid}/credits", {"api_key": keys["tmdb"]})
             if credits:
+                others = [
+                    f"{r['title']} ({(r.get('release_date') or '?')[:4]})"
+                    for r in found["results"][1:6]
+                ]
                 return {
                     "kind": "movie",
                     "title": found["results"][0]["title"],
                     "released": found["results"][0].get("release_date"),
                     "source": "TMDB",
                     "url": f"https://www.themoviedb.org/movie/{mid}",
+                    "other_matches": others,
                     "cast": [
                         {"character": c.get("character", ""), "actor": c["name"]}
                         for c in credits.get("cast", [])[:25]
@@ -645,6 +667,7 @@ def show_info(query: str, keys: dict | None = None) -> dict | None:
         "genres": show.get("genres"),
         "summary": summary,
         "url": show.get("url"),
+        "seasons": _tv_seasons(show["id"]),
     }
 
 
@@ -685,6 +708,11 @@ def render(result: dict) -> None:
             print(f"\nSeason {result['season']} episodes:")
             for e in result["episodes"]:
                 print(f"  E{e['number']:02d}  {e['name']}  ({e.get('airdate') or 'no airdate'})")
+        if result.get("seasons"):
+            print(f"\nSeasons ({len(result['seasons'])}):")
+            for s in result["seasons"]:
+                ec = f", {s['episode_count']} episodes" if s.get("episode_count") else ""
+                print(f"  Season {s['number']}  ({(s.get('premiered') or '?')[:4]}{ec})")
         print("\nMain cast:")
         print_pairs(result["main_cast"], "character", "actor")
         if result.get("url"):
@@ -697,6 +725,8 @@ def render(result: dict) -> None:
             print(result["plot"])
         print("\nCast:")
         print_pairs(result["cast"], "actor", "character")
+        if result.get("other_matches"):
+            print("\nNot it? Other matches:", " · ".join(result["other_matches"]))
     elif kind == "actor":
         if result.get("error"):
             print(result["error"])
@@ -729,6 +759,12 @@ def render(result: dict) -> None:
             print(f"Genres: {', '.join(result['genres'])}")
         if result.get("summary"):
             print(f"\n{result['summary']}")
+        if result.get("seasons"):
+            print(f"\nSeasons ({len(result['seasons'])}):")
+            for s in result["seasons"]:
+                ec = f", {s['episode_count']} episodes" if s.get("episode_count") else ""
+                print(f"  Season {s['number']}  ({(s.get('premiered') or '?')[:4]}{ec})")
+        print(f"\nCast: re-run with --cast \"{result['show']}\"")
         if result.get("other_matches"):
             print("\nOther matches:", " · ".join(result["other_matches"]))
         if result.get("url"):
@@ -803,9 +839,15 @@ def main() -> int:
                     result["resolved_via"] = note
     elif args.query:
         sref = parse_ref(" ".join(args.query))
-        note, choices = resolve_title(sref, keys, force_list=args.list_matches)
+        # No mode flag here to say TV vs movie — try both and let ranking sort
+        # it out, same as a bare --cast title with no year.
+        note, choices = resolve_title(sref, keys, movie=None, force_list=args.list_matches)
         if choices:
             result = choices
+        elif sref.get("resolved_type") == "movie":
+            result = movie_cast(sref, keys)
+            if result and note:
+                result["resolved_via"] = note
         else:
             result = show_info(sref["title"], keys)
             if result and note:
