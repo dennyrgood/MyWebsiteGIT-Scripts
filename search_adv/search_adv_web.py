@@ -2,10 +2,12 @@
 """Thin local web GUI for search_adv.
 
 Serves search_adv_web.html and runs search_adv.py as a subprocess — the CLI
-stays the single source of truth. Binds to 127.0.0.1 only (the endpoint
-executes a subprocess).
+stays the single source of truth. Binds to 0.0.0.0 so it's reachable over
+Tailscale/LAN (e.g. from a phone); args are passed as a list, never a shell
+string, so there's no injection surface.
 
-Start:  .venv/bin/python search_adv_web.py  →  http://127.0.0.1:5025
+Start:  .venv/bin/python search_adv_web.py  →  http://<host>:5025
+(port 5000 is taken by macOS AirPlay)
 """
 
 import subprocess
