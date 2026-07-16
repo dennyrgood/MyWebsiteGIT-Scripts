@@ -29,7 +29,15 @@ TVMAZE = "https://api.tvmaze.com"
 TMDB = "https://api.themoviedb.org/3"
 TIMEOUT = 10
 
-EP_RE = re.compile(r"\bs(\d{1,2})\s*e(\d{1,3})\b", re.IGNORECASE)
+# Episode notations, ported from search_adv's castref.py (same priority order):
+# s0101 (compact SSEE), s04e10 / S4 E10, 4x10, "season 4 [episode 10]", "episode 3".
+COMPACT_RE = re.compile(r"\bs(\d{2})(\d{2})\b", re.IGNORECASE)
+SHORTHAND_RE = re.compile(r"\bs(\d{1,2})\s*e(\d{1,3})\b", re.IGNORECASE)
+NXM_RE = re.compile(r"\b(\d{1,2})x(\d{1,3})\b", re.IGNORECASE)
+NATURAL_RE = re.compile(
+    r"\bseason\s*(\d{1,2})(?:\s*(?:,|-|\s)\s*episode\s*(\d{1,3}))?\b", re.IGNORECASE
+)
+EPISODE_ONLY_RE = re.compile(r"\bepisode\s*(\d{1,3})\b", re.IGNORECASE)
 YEAR_RE = re.compile(r"\(?\b(19\d{2}|20\d{2})\b\)?\s*$")
 
 
@@ -60,18 +68,39 @@ def get_json(url: str, params: dict | None = None) -> dict | list | None:
         return None
 
 
+def _clean_title(text: str) -> str:
+    return re.sub(r"[\s,\-–—:]+$", "", text).strip()
+
+
 def parse_ref(raw: str) -> dict:
-    """Split 'title s02e09' / 'title (1972)' into parts."""
-    ref = {"title": raw.strip(), "season": None, "episode": None, "year": None}
-    m = EP_RE.search(ref["title"])
+    """Standardise a show/episode/movie reference.
+
+    Returns title/season/episode/year plus 'rest' — any text after the episode
+    qualifier (e.g. a character name in "Medium S4E10 Cynthia").
+    """
+    text = raw.strip()
+    ref = {"title": text, "season": None, "episode": None, "year": None, "rest": ""}
+
+    for pat in (COMPACT_RE, SHORTHAND_RE, NXM_RE, NATURAL_RE):
+        m = pat.search(text)
+        if m:
+            ref["season"] = int(m.group(1))
+            ref["episode"] = int(m.group(2)) if m.group(2) else None
+            ref["title"] = _clean_title(text[: m.start()])
+            ref["rest"] = text[m.end() :].strip(" -–—:,")
+            return ref
+
+    m = EPISODE_ONLY_RE.search(text)
     if m:
-        ref["season"], ref["episode"] = int(m.group(1)), int(m.group(2))
-        ref["title"] = EP_RE.sub("", ref["title"]).strip(" -–:")
-    else:
-        y = YEAR_RE.search(ref["title"])
-        if y:
-            ref["year"] = int(y.group(1))
-            ref["title"] = YEAR_RE.sub("", ref["title"]).strip(" -–:()")
+        ref["episode"] = int(m.group(1))
+        ref["title"] = _clean_title(text[: m.start()])
+        ref["rest"] = text[m.end() :].strip(" -–—:,")
+        return ref
+
+    y = YEAR_RE.search(text)
+    if y:
+        ref["year"] = int(y.group(1))
+        ref["title"] = _clean_title(YEAR_RE.sub("", text)).strip("()")
     return ref
 
 
