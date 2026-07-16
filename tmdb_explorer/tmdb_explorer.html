@@ -475,6 +475,35 @@ function epRef(e) {
 
 function yesno(v) { return v === true ? "yes" : v === false ? "no" : ""; }
 
+/* Comma-list that shows the first `shown` entries with a "+N more" expander.
+   Entries are pre-escaped HTML. */
+function expandList(items, shown = 10) {
+  if (!items.length) return "";
+  const head = items.slice(0, shown).join("; ");
+  const rest = items.slice(shown);
+  if (!rest.length) return head;
+  return `${head}<span style="display:none">; ${rest.join("; ")}</span>` +
+    ` <button class="small" onclick="this.previousElementSibling.style.display='inline'; this.remove()">` +
+    `+${rest.length} more</button>`;
+}
+
+/* TV uses aggregate_credits (roles[] + episode counts); movies use credits. */
+function castLine(c, isTv) {
+  const role = isTv
+    ? (c.roles || []).map(r => r.character).filter(Boolean).join(" / ")
+    : c.character;
+  const eps = isTv && c.total_episode_count
+    ? ` <span class="muted">· ${c.total_episode_count} ep</span>` : "";
+  return esc(c.name) + (role ? ` <span class="muted">as ${esc(role)}</span>` : "") + eps;
+}
+
+function crewLine(c, isTv) {
+  const jobs = isTv
+    ? (c.jobs || []).map(j => j.job).filter(Boolean).join(" / ")
+    : c.job;
+  return esc(c.name) + (jobs ? ` <span class="muted">— ${esc(jobs)}</span>` : "");
+}
+
 function clip(s, n = 240) {
   s = (s || "").trim();
   return s.length > n ? esc(s.slice(0, n)) + "<span class='muted'>… </span>" : esc(s);
@@ -545,16 +574,15 @@ function dataPointsTable(d, type) {
   }
 
   G("People");
-  if (isTv) {
-    const cast = d.aggregate_credits?.cast || [], crew = d.aggregate_credits?.crew || [];
-    F("aggregate_credits", cast.length
-      ? `${cast.length} cast <span class="muted">· ${crew.length} crew · top: ${esc(cast[0].name)}</span>` : "");
-    F("created_by", names(d.created_by));
-  } else {
-    const cast = d.credits?.cast || [], crew = d.credits?.crew || [];
-    F("credits", cast.length
-      ? `${cast.length} cast <span class="muted">· ${crew.length} crew · top: ${esc(cast[0].name)}</span>` : "");
-  }
+  const src = isTv ? "aggregate_credits" : "credits";
+  const cast = d[src]?.cast || [], crew = d[src]?.crew || [];
+  F(`${src}.cast`, cast.length
+    ? `<span class="muted">${cast.length} total —</span> ` +
+      expandList(cast.map(c => castLine(c, isTv)), 10) : "");
+  F(`${src}.crew`, crew.length
+    ? `<span class="muted">${crew.length} total —</span> ` +
+      expandList(crew.map(c => crewLine(c, isTv)), 6) : "");
+  if (isTv) F("created_by", names(d.created_by));
 
   G("Companies & languages");
   if (isTv) F("networks", names(d.networks));
