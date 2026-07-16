@@ -31,6 +31,40 @@ pane from a terminal with:
 open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
 ```
 
+### Fallback: `/usr/bin/python3` refuses to be added at all
+
+On denniss-2nd-macbook-air (2026-07-16, macOS 26.2), neither the `+`
+dialog nor dragging the binary in from Finder (`open -R /usr/bin/python3`)
+would add it to the Full Disk Access list — no error, it just wouldn't
+take. `/usr/bin/python3` is an Apple platform-signed binary (`codesign
+-dv` shows `Platform identifier=26`, no team ID); TCC appears to block
+granting supplemental permissions to platform-signed script interpreters
+outright, presumably so a trusted system binary can't be used as a
+permissions backdoor for arbitrary scripts. Not yet confirmed whether
+this is universal to modern macOS or specific to that machine/OS version
+— worth rechecking on the next Mac before assuming either way.
+
+**Fix:** point the *installed* plist copy at a non-platform Python
+instead — one signed by a real third party (a team ID, not "platform"),
+which TCC will happily add. A python.org installer build works if
+present:
+
+```bash
+which -a python3   # look for /Library/Frameworks/Python.framework/... or similar
+codesign -dv <candidate path> 2>&1 | grep -E "TeamIdentifier|Platform"
+# TeamIdentifier=<something> and no "Platform identifier" = safe to use
+```
+
+Edit `~/Library/LaunchAgents/com.dennis.heartbeat-writer.plist`'s
+`ProgramArguments` to that full path (not `/usr/local/bin/python3` if
+it's a symlink — point straight at the resolved binary), then
+`bootout`/`bootstrap` to reload, and redo the Full Disk Access grant
+against the new path. The heartbeat script is stdlib-only, so any Python
+3 interpreter works — this is purely a TCC workaround, not a dependency
+issue. Don't change the *canonical* plist in the repo for this — not
+every Mac has a python.org install, and `/usr/bin/python3` is the safe
+default that should be tried first on each new machine.
+
 ## Steps
 
 1. **Sync the repo** so `launchagents/` is present
