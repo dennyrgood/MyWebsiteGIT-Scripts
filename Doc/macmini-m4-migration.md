@@ -119,24 +119,53 @@ network rather than anything local, so this is a low-risk move.
 `Status/checker.py` (poller) and `Status/fleet_api.py` (Flask JSON server)
 currently run redundantly on two Windows machines (amsterdamdesktop,
 ChatWorkhorse), each writing to a separate OneDrive-synced status file per
-`Status/readme.md`. Nothing about the design is Windows-specific — it's
-plain Python hitting HTTP endpoints and writing JSON to a shared
-OneDrive-synced location — so the Mac Mini can take over amsterdamdesktop's
-leg directly; the redundant pair doesn't need to be same-platform, and a
-platform-diverse pair is arguably better (catches platform-specific bugs
-that would otherwise take out both legs at once).
+`Status/readme.md`. The design itself isn't Windows-specific — it's plain
+Python hitting HTTP endpoints and writing JSON — so the Mac Mini can take
+over amsterdamdesktop's leg; the redundant pair doesn't need to be
+same-platform, and a platform-diverse pair is arguably better (catches
+platform-specific bugs that would otherwise take out both legs at once).
+
+**Confirmed dependency check (2026-07-16, read `checker.py`, `engine.py`,
+`config.py`, all of `checkers/*.py`):**
+- `checkers/tcp_checker.py` already branches on
+  `sys.platform.startswith('win')` to build the right `ping` command —
+  genuinely cross-platform already, no work needed.
+- `config.py:24` hardcodes `STATUS_DIR = Path("c:/fleet_monitor") /
+  CHECKER_HOST` — a literal Windows drive path. **Must change** before this
+  runs on macOS (there's a commented-out OneDrive-based path directly above
+  it in the file, suggesting this was a deliberate Windows-only override
+  worth revisiting rather than just copying blindly).
+- `config.py:18` sets `CHECKER_HOST` from
+  `os.environ.get("FLEET_CHECKER_HOST") or os.environ.get("COMPUTERNAME",
+  "unknown")` — `COMPUTERNAME` doesn't exist on macOS, so it'll silently
+  fall through to `"unknown"` unless `FLEET_CHECKER_HOST` is set explicitly
+  via the LaunchAgent plist's `EnvironmentVariables`.
+- Everything else (`requests`, `socket`, `pathlib`, the various
+  HTTP-based checkers) is plain Python with no OS-specific calls.
+
+**One codebase, not a Win/Mac fork:** rather than maintaining two versions
+of `config.py`, extend the same override pattern `CHECKER_HOST` already
+uses (`FLEET_CHECKER_HOST` env var first, OS-specific fallback second) to
+`STATUS_DIR` too — e.g. a `FLEET_STATUS_DIR` env var, set explicitly per
+machine (Task Scheduler's environment on Windows, the LaunchAgent's
+`EnvironmentVariables` on Mac), falling back to a sane per-OS default if
+unset. Keeps one shared `config.py` in the repo, and means adding a third
+leg later (another Mac, a Linux box) needs zero code changes — just a new
+plist/task env var.
 
 **Steps:**
-1. Clone `scripts` (already needed for LaunchAgents/Flask above) and
-   confirm `checker.py` / `fleet_api.py` have no Windows-only dependencies
-   (check for anything shelling out to Windows-specific tools or paths).
-2. Set up the Mac Mini's own OneDrive-synced status file path, matching
+1. Fix `STATUS_DIR` in `config.py` to a macOS-appropriate path (decide:
+   OneDrive-synced location, matching the commented-out line already in the
+   file, or a plain `~/fleet_monitor`).
+2. Set `FLEET_CHECKER_HOST` explicitly in the Mac Mini's LaunchAgent plist
+   rather than relying on `COMPUTERNAME`.
+3. Set up the Mac Mini's own OneDrive-synced status file path, matching
    the pattern ChatWorkhorse and amsterdamdesktop already use.
-3. Confirmed via Task Scheduler: "Fleet Checker" and "Fleet status" are
+4. Confirmed via Task Scheduler: "Fleet Checker" and "Fleet status" are
    separate "At system startup" tasks (poller vs. presenter) — translate
    each to its own LaunchAgent, consistent with the other always-on
    services.
-4. Update `Status/readme.md`'s host table once live to reflect the Mac
+5. Update `Status/readme.md`'s host table once live to reflect the Mac
    Mini as the second leg instead of amsterdamdesktop.
 
 ## 5. Suggested order of operations
@@ -188,6 +217,5 @@ No extra scheduling design work needed, just one plist per task.
 - Does amsterdamdesktop get fully decommissioned, or does it stay as a
   redundant heartbeat source per the existing two-Windows-machines
   redundancy design in `Status/readme.md`?
-- Are there any Windows-only dependencies in `checker.py`/`fleet_api.py`?
 - Does the Mac Mini's own Ollama get added to OpenWebUI's connection list,
   and does `denniss-macbook-air` stay in that list post-migration?
