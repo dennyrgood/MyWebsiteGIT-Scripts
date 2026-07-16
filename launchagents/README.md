@@ -10,6 +10,7 @@ at every login, restart automatically if they crash, and log to files.
 | Label | What it runs | Port | Log |
 |---|---|---|---|
 | `com.dennis.search-adv-web` | search_adv web GUI (`search_adv/.venv` python, `search_adv_web.py`) | 5025 | `~/Library/Logs/search_adv_web.log` |
+| `com.dennis.search-shows-web` | search_shows web GUI — cast/actor/show-info via TVmaze/TMDB/OMDb (`search_shows/.venv` python, `search_shows_web.py`) | 5020 | `~/Library/Logs/search_shows_web.log` |
 | `com.dennis.travel-http` | `python3 -m http.server` in `~/repos/dennyrgood.github.io/travel` | 5030 | `~/Library/Logs/travel_http.log` |
 | `com.dennis.heartbeat-writer` | `Status/onedrive_heartbeat_writer_all_macs.py` (fleet heartbeat → OneDrive) | — | `~/Library/Logs/heartbeat_writer.log` |
 
@@ -40,14 +41,29 @@ launchctl kickstart -k gui/501/com.dennis.search-adv-web
 # stop until next login / reinstall
 launchctl bootout gui/501/com.dennis.search-adv-web
 
-# is it running?  (second column 0 = last exit was clean)
+# is it running?  (columns: PID, last-exit-status, label — 0 = last exit was clean)
 launchctl list | grep com.dennis
+
+# full detail: state, last run, next scheduled, plist path
+launchctl print gui/501/com.dennis.search-adv-web
 
 # watch a log
 tail -f ~/Library/Logs/search_adv_web.log
 ```
 
 (`501` is the uid on this Mac; `gui/$(id -u)` is the portable spelling.)
+
+Note on the exit-status column: `launchctl kickstart -k` restarts a service
+by sending it SIGTERM, so right after using `-k` the status column will show
+`-15` (i.e. "killed") even though the restart succeeded — that's expected,
+not a fault. It clears on the *next* natural exit. If you want a clean `0`
+immediately (e.g. before double-checking health), bootout + bootstrap instead
+of kickstart:
+
+```bash
+launchctl bootout gui/501/com.dennis.search-shows-web
+launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.dennis.search-shows-web.plist
+```
 
 ## Ollama (not an agent here)
 
