@@ -5,6 +5,26 @@ Target: ~2 months out (fall 2026 pull-forward). Goal: retire amsterdamdesktop
 status checker — and stop running always-on LaunchAgent services on the
 laptop. Consolidate all of it onto the new Mac Mini M4.
 
+**Reconciling with the "PC Fleet — Current State" Google Doc (last verified
+2026-07-11):** that doc's plan routes Amsterdam's services to ChatWorkHorse
+(with WorkBench hedged as an alternate) rather than the Mac Mini, and scopes
+the Mac Mini ("WorkHub") narrowly as a general "Primary Workstation
+(Office/Admin)." Confirmed with the user (2026-07-16) that this plan
+doesn't reflect current thinking and nothing in this migration doc was
+missed as a result — the divergence is a destination decision, not a gap:
+- WorkBench's Windows side was never a serious candidate — the doc's
+  "ChatWorkHorse (or WorkBench)" hedging predates WorkBenchUnix (the Ubuntu
+  side of that dual-boot box) becoming the permanent production Immich
+  server, a fixture rather than the "experimentation machine" role the doc
+  still describes it as.
+- Actual intended shape going forward: **Mac Mini (WorkHub) is Amsterdam's
+  real replacement** for Flask/OpenWebUI/Fleet Status (this doc's scope);
+  ChatWorkHorse remains the LLM/Ollama primary; WorkBenchUnix is a future
+  overflow valve if ChatWorkHorse ever needs to shed load, not a competing
+  candidate for Amsterdam's role.
+- The Google Doc itself will be updated to reflect this at some point — not
+  yet done as of this writing.
+
 ## 1. Flask backends (currently on amsterdamdesktop, Win11)
 
 | App | Port | Blocker to move | Effort |
@@ -113,6 +133,20 @@ network rather than anything local, so this is a low-risk move.
    once the laptop is no longer meant to run always-on services?
 4. No data migration needed (chat history confirmed unimportant) — this is
    a clean fresh-container setup, not a lift-and-shift.
+
+**On Windows-only dependencies (2026-07-16):** OpenWebUI isn't vendored in
+this repo (third-party pip package on amsterdamdesktop), so there's no
+local file to check the way `checker.py` was checked in §4. But the
+question is largely moot given the Docker-based plan above: OpenWebUI
+ships official Linux-built Docker images (`ghcr.io/open-webui/open-webui`),
+which Docker Desktop on Mac runs via its Linux VM — the standard way most
+people run it, Mac included. The *current* fragility (bare pip install) is
+itself plausibly a Windows-specific problem in practice — pip installs on
+Windows commonly hit issues with compiled extensions expecting a Linux
+toolchain, which is likely exactly why Docker is the recommended path.
+Moving to Docker means the fragile pip layer is being replaced outright,
+not ported — no "does the Windows dependency work on Mac" question to
+answer.
 
 ## 4. Fleet status checker + presenter (currently one leg on amsterdamdesktop)
 
