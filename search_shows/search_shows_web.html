@@ -322,8 +322,14 @@ function render(rec) {
 
 function show(html) { $('result').innerHTML = html; $('out').classList.add('on'); }
 
+// Mirrors search_shows.py's episode-notation patterns (COMPACT_RE/SHORTHAND_RE/NXM_RE) —
+// a query naming a specific episode means "resolve straight to it", not "browse titles".
+const EPISODE_REF_RE = /\bs(\d{2})(\d{2})\b|\bs(\d{1,2})\s*e(\d{1,3})\b|\b(\d{1,2})x(\d{1,3})\b/i;
+
 async function run() {
   if (!$('query').value.trim()) { show('<p class="error">Enter a query first.</p>'); return; }
+  if ($('list_matches').checked && EPISODE_REF_RE.test($('query').value))
+    $('list_matches').checked = false;
   $('runBtn').disabled = true;
   $('spinner').classList.add('on'); $('out').classList.remove('on');
   try {
