@@ -4,9 +4,12 @@
 #
 # Usage:
 #   search_shows.py --cast "star trek next generation s02e9"   TV episode: main + guest cast
+#   search_shows.py --cast "medium s0101"                      also: 4x10, "season 4 episode 10"
+#   search_shows.py --cast "medium season 4"                   season: episode list + main cast
 #   search_shows.py --cast "hope street"                       TV series: main cast
-#   search_shows.py --cast "the godfather (1972)"              movie: top cast (OMDb/TMDB)
+#   search_shows.py --cast "the godfather (1972)"              movie: top cast (TMDB/OMDb)
 #   search_shows.py --actor "diana muldaur"                    TV credits (TVmaze; TMDB adds movies)
+#   search_shows.py --actor "medium s04e10 cynthia"            who played the character + credits
 #   search_shows.py "some show title"                          show summary/info
 #   ... [--json]
 #
@@ -139,6 +142,56 @@ def tv_cast(ref: dict) -> dict | None:
             out["episode"] = (
                 f"S{ref['season']:02d}E{ref['episode']:02d} — not found on TVmaze"
             )
+    elif ref["season"]:
+        # Season-only reference: list that season's episodes alongside the main cast.
+        eps = get_json(f"{TVMAZE}/shows/{show['id']}/episodes") or []
+        out["season"] = ref["season"]
+        out["episodes"] = [
+            {"number": e["number"], "name": e["name"], "airdate": e.get("airdate")}
+            for e in eps
+            if e.get("season") == ref["season"]
+        ]
+    return out
+
+
+def find_character(ref: dict, character: str, keys: dict) -> dict | None:
+    """Who played *character*? Match against the episode (or whole-show) cast,
+    then return that actor's credits."""
+    tv = tv_cast(ref)
+    if not tv:
+        return None
+    pool = tv["guest_cast"] + tv["main_cast"]
+    cq = character.casefold()
+    match = next(
+        (
+            c
+            for c in pool
+            if cq in c["character"].casefold() or c["character"].casefold() in cq
+        ),
+        None,
+    )
+    if not match:
+        import difflib
+
+        names = [c["character"] for c in pool]
+        close = difflib.get_close_matches(character, names, n=1, cutoff=0.6)
+        if close:
+            match = next(c for c in pool if c["character"] == close[0])
+    if not match:
+        return {
+            "kind": "actor",
+            "name": None,
+            "error": f'No character matching "{character}" in {tv["show"]}'
+            + (f' {tv["episode"]}' if tv.get("episode") else ""),
+            "characters_seen": [c["character"] for c in pool],
+        }
+    out = actor_credits(match["actor"], keys) or {"kind": "actor", "name": match["actor"]}
+    out["character_match"] = {
+        "character": match["character"],
+        "actor": match["actor"],
+        "show": tv["show"],
+        "episode": tv.get("episode"),
+    }
     return out
 
 
@@ -278,6 +331,10 @@ def render(result: dict) -> None:
             if result["guest_cast"]:
                 print("\nGuest cast:")
                 print_pairs(result["guest_cast"], "character", "actor")
+        if result.get("episodes") is not None:
+            print(f"\nSeason {result['season']} episodes:")
+            for e in result["episodes"]:
+                print(f"  E{e['number']:02d}  {e['name']}  ({e.get('airdate') or 'no airdate'})")
         print("\nMain cast:")
         print_pairs(result["main_cast"], "character", "actor")
         if result.get("url"):
@@ -289,6 +346,15 @@ def render(result: dict) -> None:
         print("\nCast:")
         print_pairs(result["cast"], "actor", "character")
     elif kind == "actor":
+        if result.get("error"):
+            print(result["error"])
+            if result.get("characters_seen"):
+                print("Characters found:", ", ".join(result["characters_seen"]))
+            return
+        cm = result.get("character_match")
+        if cm:
+            where = f" in {cm['show']}" + (f" {cm['episode']}" if cm.get("episode") else "")
+            print(f"{cm['character']}{where} was played by {cm['actor']}\n")
         print(result["name"] + (f"  (b. {result['birthday']})" if result.get("birthday") else ""))
         if result.get("tv_credits"):
             print("\nTV (TVmaze):")
@@ -329,7 +395,12 @@ def main() -> int:
         else:
             result = tv_cast(ref) or movie_cast(ref, keys)
     elif args.actor:
-        result = actor_credits(args.actor, keys)
+        aref = parse_ref(args.actor)
+        if aref["rest"] and (aref["season"] or aref["episode"]):
+            # "Medium S4E10 Cynthia" — find who played the character, then credits.
+            result = find_character(aref, aref["rest"], keys)
+        else:
+            result = actor_credits(args.actor, keys)
     elif args.query:
         result = show_info(" ".join(args.query))
     else:
