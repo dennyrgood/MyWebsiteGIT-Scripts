@@ -97,7 +97,8 @@
       <label><input type="radio" name="mode" value="actor"> actor</label>
       <label><input type="radio" name="mode" value="show"> show info</label>
     </div>
-    <input type="text" id="query" placeholder="'Show S1E1', 'Movie (1972)', or 'Actor Name'" autofocus>
+    <input type="text" id="query" autofocus>
+    <div class="meta" id="modehint"></div>
     <div class="checks castonly">
       <label><input type="checkbox" id="movie"> movie</label>
       <span class="meta">force movie lookup (otherwise TV is tried first)</span>
@@ -113,9 +114,12 @@
     <summary>Examples</summary>
     <table>
       <tr><td><code>star trek next generation s02e9</code></td><td>episode: guest + main cast</td></tr>
+      <tr><td><code>medium s0101</code> / <code>the office 4x10</code> / <code>medium season 4 episode 10</code></td><td>equivalent notations</td></tr>
+      <tr><td><code>medium season 4</code></td><td>season: episode list + main cast</td></tr>
       <tr><td><code>hope street</code></td><td>series: main cast</td></tr>
       <tr><td><code>the godfather (1972)</code></td><td>movie cast (TMDB, OMDb fallback)</td></tr>
       <tr><td><code>Diana Muldaur</code></td><td>actor: TV + movie credits</td></tr>
+      <tr><td><code>star trek next gen s02e9 Maddox</code></td><td>actor mode: who played a character</td></tr>
     </table>
     <p>Everything is a direct API lookup — no web scraping, no LLM; answers in
     about a second. Actor names in cast tables are clickable.</p>
@@ -140,8 +144,29 @@ function esc(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+const MODE_HELP = {
+  cast: {
+    ph: "medium s0101 · the office 4x10 · medium season 4 · the godfather (1972)",
+    hint: ["Show + episode → guest & main cast",
+           "Season only → episode list",
+           "Movie + year → movie cast",
+           "Add a character after the episode (medium s0101 george) to see who played them"],
+  },
+  actor: {
+    ph: "Diana Muldaur · medium s0101 george",
+    hint: ["An actor's name → their TV & movie credits",
+           "Or show + episode + character → who played them"],
+  },
+  show: {
+    ph: "hope street",
+    hint: ["A show title → summary, network, genres, status"],
+  },
+};
+
 function syncMode() {
   document.querySelector('.castonly').classList.toggle('dim', mode() !== 'cast');
+  $('query').placeholder = MODE_HELP[mode()].ph;
+  $('modehint').innerHTML = MODE_HELP[mode()].hint.map(esc).join('<br>');
 }
 document.querySelectorAll('input[name=mode]').forEach(r =>
   r.addEventListener('change', syncMode));
@@ -166,11 +191,21 @@ function pairTable(rows, leftHead, rightHead) {
 function render(rec) {
   let h = '';
   if (rec.kind === 'tv') {
+    if (rec.resolved_via) h += `<div class="meta">Resolved: ${esc(rec.resolved_via)}</div>`;
     h += `<h2>${esc(rec.show)} (${esc((rec.premiered || '?').slice(0, 4))})</h2>`;
     if (rec.episode) {
       h += `<div class="meta">Episode: ${esc(rec.episode)} (${esc(rec.airdate || 'no airdate')})</div>`;
       if (rec.guest_cast && rec.guest_cast.length)
         h += '<h3>Guest cast</h3>' + pairTable(rec.guest_cast, 'Character', 'Actor');
+    }
+    if (rec.episodes) {
+      h += `<h3>Season ${esc(rec.season)} episodes</h3><div class="tablewrap"><table><tr><th>#</th><th>Title</th><th>Airdate</th></tr>`
+        + rec.episodes.map(e => {
+            const q = `${rec.show} s${String(rec.season).padStart(2, '0')}e${String(e.number).padStart(2, '0')}`;
+            return `<tr><td>E${String(e.number).padStart(2, '0')}</td>`
+              + `<td><a href="#" class="eplink" data-query="${esc(q)}" title="cast of ${esc(q)}">${esc(e.name)}</a></td>`
+              + `<td>${esc(e.airdate || '')}</td></tr>`;
+          }).join('') + '</table></div>';
     }
     h += '<h3>Main cast</h3>' + pairTable(rec.main_cast, 'Character', 'Actor');
     if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
@@ -180,19 +215,35 @@ function render(rec) {
     if (rec.plot) h += `<p>${esc(rec.plot)}</p>`;
     h += '<h3>Cast</h3>' + pairTable(rec.cast, 'Actor', 'Character');
   } else if (rec.kind === 'actor') {
+    if (rec.error) {
+      h += `<p class="error">${esc(rec.error)}</p>`;
+      if (rec.characters_seen && rec.characters_seen.length)
+        h += `<div class="meta">Characters found: ${esc(rec.characters_seen.join(', '))}</div>`;
+      h += `<div class="meta">${esc(rec.elapsed ?? '?')}s</div>`;
+      return h;
+    }
+    if (rec.character_match) {
+      const cm = rec.character_match;
+      h += `<p><strong>${esc(cm.character)}</strong> in ${esc(cm.show)}`
+        + (cm.episode ? ` ${esc(cm.episode)}` : '')
+        + ` was played by <strong>${esc(cm.actor)}</strong></p>`;
+    }
     h += `<h2>${esc(rec.name)}</h2>`;
     if (rec.birthday) h += `<div class="meta">b. ${esc(rec.birthday)}</div>`;
     if (rec.tv_credits && rec.tv_credits.length) {
       h += '<h3>TV (TVmaze)</h3><div class="tablewrap"><table><tr><th>Show</th><th>Year</th><th>Character</th></tr>'
         + rec.tv_credits.map(c =>
-            `<tr><td>${esc(c.show)}</td><td>${esc((c.premiered || '?').slice(0, 4))}</td><td>${esc(c.character)}</td></tr>`
+            `<tr><td><a href="#" class="titlelink" data-query="${esc(c.show)}" title="cast of ${esc(c.show)}">${esc(c.show)}</a></td>`
+            + `<td>${esc((c.premiered || '?').slice(0, 4))}</td><td>${esc(c.character)}</td></tr>`
           ).join('') + '</table></div>';
     }
     if (rec.movie_credits && rec.movie_credits.length) {
       h += '<h3>Movies (TMDB)</h3><div class="tablewrap"><table><tr><th>Title</th><th>Year</th><th>Character</th></tr>'
-        + rec.movie_credits.map(c =>
-            `<tr><td>${esc(c.title)}</td><td>${esc((c.released || '?').slice(0, 4))}</td><td>${esc(c.character)}</td></tr>`
-          ).join('') + '</table></div>';
+        + rec.movie_credits.map(c => {
+            const q = `${c.title} (${(c.released || '').slice(0, 4)})`;
+            return `<tr><td><a href="#" class="titlelink movie" data-query="${esc(q)}" title="cast of ${esc(q)}">${esc(c.title)}</a></td>`
+              + `<td>${esc((c.released || '?').slice(0, 4))}</td><td>${esc(c.character)}</td></tr>`;
+          }).join('') + '</table></div>';
     }
   } else if (rec.kind === 'show') {
     h += `<h2>${esc(rec.show)} (${esc((rec.premiered || '?').slice(0, 4))})</h2>`;
@@ -248,13 +299,24 @@ async function run() {
 }
 
 $('result').addEventListener('click', e => {
-  const a = e.target.closest('a.actorlink');
-  if (!a) return;
-  e.preventDefault();
-  document.querySelector('input[name=mode][value=actor]').checked = true;
-  syncMode();
-  $('query').value = a.dataset.actor;
-  run();
+  const actor = e.target.closest('a.actorlink');
+  if (actor) {
+    e.preventDefault();
+    document.querySelector('input[name=mode][value=actor]').checked = true;
+    syncMode();
+    $('query').value = actor.dataset.actor;
+    run();
+    return;
+  }
+  const link = e.target.closest('a.eplink, a.titlelink');
+  if (link) {
+    e.preventDefault();
+    document.querySelector('input[name=mode][value=cast]').checked = true;
+    syncMode();
+    $('movie').checked = link.classList.contains('movie');
+    $('query').value = link.dataset.query;
+    run();
+  }
 });
 
 $('runBtn').addEventListener('click', run);

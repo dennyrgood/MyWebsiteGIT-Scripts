@@ -41,6 +41,8 @@ NATURAL_RE = re.compile(
     r"\bseason\s*(\d{1,2})(?:\s*(?:,|-|\s)\s*episode\s*(\d{1,3}))?\b", re.IGNORECASE
 )
 EPISODE_ONLY_RE = re.compile(r"\bepisode\s*(\d{1,3})\b", re.IGNORECASE)
+# Bare season shorthand with no episode: "medium s02", "medium s2".
+SEASON_ONLY_RE = re.compile(r"\bs(\d{1,2})\b", re.IGNORECASE)
 YEAR_RE = re.compile(r"\(?\b(19\d{2}|20\d{2})\b\)?\s*$")
 
 
@@ -100,6 +102,13 @@ def parse_ref(raw: str) -> dict:
         ref["rest"] = text[m.end() :].strip(" -–—:,")
         return ref
 
+    m = SEASON_ONLY_RE.search(text)
+    if m and text[: m.start()].strip():  # needs a title before it — don't eat a bare "s2" query
+        ref["season"] = int(m.group(1))
+        ref["title"] = _clean_title(text[: m.start()])
+        ref["rest"] = text[m.end() :].strip(" -–—:,")
+        return ref
+
     y = YEAR_RE.search(text)
     if y:
         ref["year"] = int(y.group(1))
@@ -109,11 +118,24 @@ def parse_ref(raw: str) -> dict:
 
 # ---------------------------------------------------------------- TV (TVmaze)
 
-def tv_cast(ref: dict) -> dict | None:
+def tv_cast(ref: dict, keys: dict | None = None) -> dict | None:
     show = get_json(f"{TVMAZE}/singlesearch/shows", {"q": ref["title"]})
+    resolved_via = None
+    if not show and keys and keys.get("tmdb"):
+        # TVmaze search is not typo/abbreviation tolerant ("star trek next gen"
+        # finds nothing) — resolve the canonical title via TMDB and retry.
+        found = get_json(
+            f"{TMDB}/search/tv", {"api_key": keys["tmdb"], "query": ref["title"]}
+        )
+        if found and found.get("results"):
+            canonical = found["results"][0]["name"]
+            show = get_json(f"{TVMAZE}/singlesearch/shows", {"q": canonical})
+            if show:
+                resolved_via = f'"{ref["title"]}" → "{canonical}" (TMDB)'
     if not show:
         return None
     out = {
+        "resolved_via": resolved_via,
         "kind": "tv",
         "show": show["name"],
         "premiered": show.get("premiered"),
@@ -157,7 +179,7 @@ def tv_cast(ref: dict) -> dict | None:
 def find_character(ref: dict, character: str, keys: dict) -> dict | None:
     """Who played *character*? Match against the episode (or whole-show) cast,
     then return that actor's credits."""
-    tv = tv_cast(ref)
+    tv = tv_cast(ref, keys)
     if not tv:
         return None
     pool = tv["guest_cast"] + tv["main_cast"]
@@ -325,6 +347,8 @@ def print_pairs(rows: list[dict], left: str, right: str) -> None:
 def render(result: dict) -> None:
     kind = result["kind"]
     if kind == "tv":
+        if result.get("resolved_via"):
+            print(f"Resolved: {result['resolved_via']}")
         print(f"{result['show']} ({(result.get('premiered') or '?')[:4]})")
         if result.get("episode"):
             print(f"Episode: {result['episode']}  ({result.get('airdate') or 'no airdate'})")
@@ -380,7 +404,8 @@ def main() -> int:
     p = argparse.ArgumentParser(description="Cast/actor/show lookup via TVmaze, OMDb, TMDB")
     p.add_argument("query", nargs="*", help="show title (info mode)")
     p.add_argument("--cast", metavar="REF", help='e.g. "hope street s01e03", "the godfather (1972)"')
-    p.add_argument("--actor", metavar="NAME", help="actor name for credits")
+    p.add_argument("--actor", metavar="REF",
+                   help='actor name, or "Show S1E1 Character" to find who played them')
     p.add_argument("--movie", action="store_true", help="with --cast: force movie lookup")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     args = p.parse_args()
@@ -390,10 +415,14 @@ def main() -> int:
 
     if args.cast:
         ref = parse_ref(args.cast)
-        if args.movie or (ref["year"] and not ref["season"]):
-            result = movie_cast(ref, keys) or tv_cast(ref)
+        if ref["rest"] and (ref["season"] or ref["episode"]):
+            # Trailing text after the episode is a character name — same behaviour
+            # as --actor, so either mode accepts "medium s0101 george".
+            result = find_character(ref, ref["rest"], keys)
+        elif args.movie or (ref["year"] and not ref["season"]):
+            result = movie_cast(ref, keys) or tv_cast(ref, keys)
         else:
-            result = tv_cast(ref) or movie_cast(ref, keys)
+            result = tv_cast(ref, keys) or movie_cast(ref, keys)
     elif args.actor:
         aref = parse_ref(args.actor)
         if aref["rest"] and (aref["season"] or aref["episode"]):
@@ -408,7 +437,10 @@ def main() -> int:
         return 2
 
     if not result:
-        print("Nothing found.", file=sys.stderr)
+        looked_for = args.cast or args.actor or " ".join(args.query)
+        print(f'Nothing found for "{looked_for}"'
+              + (f' (searched title: "{parse_ref(looked_for)["title"]}")' if args.cast else "")
+              + ".", file=sys.stderr)
         return 1
 
     result["elapsed"] = round(time.time() - start, 2)
