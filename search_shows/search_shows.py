@@ -139,38 +139,61 @@ def wiki_suggest(text: str) -> str | None:
         return None
 
 
-def collect_candidates(title: str, keys: dict, movie: bool = False) -> list[dict]:
-    """Title candidates from the mode-appropriate APIs: [{name, year, type}]."""
-    cands: list[dict] = []
+def _tv_candidates(title: str, keys: dict) -> list[tuple[str, str, str]]:
+    out = []
+    for m in get_json(f"{TVMAZE}/search/shows", {"q": title}) or []:
+        out.append((m["show"]["name"], (m["show"].get("premiered") or "")[:4], "tv"))
+    if not out and keys.get("tmdb"):
+        f = get_json(f"{TMDB}/search/tv", {"api_key": keys["tmdb"], "query": title})
+        for r in (f or {}).get("results", [])[:6]:
+            out.append((r["name"], (r.get("first_air_date") or "")[:4], "tv"))
+    return out
+
+
+def _movie_candidates(title: str, keys: dict) -> list[tuple[str, str, str]]:
+    out = []
+    if keys.get("tmdb"):
+        f = get_json(f"{TMDB}/search/movie", {"api_key": keys["tmdb"], "query": title})
+        for r in (f or {}).get("results", [])[:6]:
+            out.append((r["title"], (r.get("release_date") or "")[:4], "movie"))
+    if not out and keys.get("omdb"):
+        f = get_json("https://www.omdbapi.com/",
+                     {"apikey": keys["omdb"], "s": title, "type": "movie"})
+        for r in (f or {}).get("Search", [])[:6]:
+            out.append((r["Title"], r.get("Year", "")[:4], "movie"))
+    return out
+
+
+def collect_candidates(title: str, keys: dict, movie: bool | None = False) -> list[dict]:
+    """Title candidates from the mode-appropriate APIs: [{name, year, type}].
+
+    movie=True: movies only. movie=False: TV only. movie=None: auto — the
+    reference has no season/episode/year to disambiguate (e.g. a bare "Toy
+    Story 3", which is a movie with no parenthesised year), so try both and
+    let ranking sort it out.
+    """
     seen: set = set()
+    cands: list[dict] = []
 
-    def add(name: str, year: str, typ: str) -> None:
-        k = (name.casefold(), typ)
-        if name and k not in seen:
-            seen.add(k)
-            cands.append({"name": name, "year": year, "type": typ})
+    def add_all(rows: list[tuple[str, str, str]]) -> None:
+        for name, year, typ in rows:
+            k = (name.casefold(), typ)
+            if name and k not in seen:
+                seen.add(k)
+                cands.append({"name": name, "year": year, "type": typ})
 
-    if movie:
-        if keys.get("tmdb"):
-            f = get_json(f"{TMDB}/search/movie", {"api_key": keys["tmdb"], "query": title})
-            for r in (f or {}).get("results", [])[:6]:
-                add(r["title"], (r.get("release_date") or "")[:4], "movie")
-        if not cands and keys.get("omdb"):
-            f = get_json("https://www.omdbapi.com/",
-                         {"apikey": keys["omdb"], "s": title, "type": "movie"})
-            for r in (f or {}).get("Search", [])[:6]:
-                add(r["Title"], r.get("Year", "")[:4], "movie")
+    if movie is True:
+        add_all(_movie_candidates(title, keys))
+    elif movie is False:
+        add_all(_tv_candidates(title, keys))
     else:
-        for m in get_json(f"{TVMAZE}/search/shows", {"q": title}) or []:
-            add(m["show"]["name"], (m["show"].get("premiered") or "")[:4], "tv")
-        if not cands and keys.get("tmdb"):
-            f = get_json(f"{TMDB}/search/tv", {"api_key": keys["tmdb"], "query": title})
-            for r in (f or {}).get("results", [])[:6]:
-                add(r["name"], (r.get("first_air_date") or "")[:4], "tv")
+        add_all(_tv_candidates(title, keys))
+        add_all(_movie_candidates(title, keys))
+        cands.sort(key=lambda c: _similar(title, c["name"]), reverse=True)
     return cands
 
 
-def resolve_title(ref: dict, keys: dict, movie: bool = False) -> tuple[str | None, dict | None]:
+def resolve_title(ref: dict, keys: dict, movie: bool | None = False) -> tuple[str | None, dict | None]:
     """Resolve ref['title'] against the APIs, fixing spelling via Wikipedia if
     nothing matches. On a confident match, updates ref['title'] in place and
     returns (note, None); when ambiguous returns (None, choices_record)."""
@@ -184,7 +207,10 @@ def resolve_title(ref: dict, keys: dict, movie: bool = False) -> tuple[str | Non
             corrected, title = sug, sug
             cands = collect_candidates(title, keys, movie)
     if not cands:
-        return None, None  # unresolved — downstream lookups report the miss
+        # Unresolved even after a spelling-suggestion retry — hand back the
+        # failed suggestion (if any) so the caller can report it instead of a
+        # bare "nothing found".
+        return (f'spelling suggestion "{corrected}" also had no matches' if corrected else None), None
 
     best = cands[0]
     if len(cands) == 1 or _similar(title, best["name"]) >= 0.8:
@@ -194,6 +220,9 @@ def resolve_title(ref: dict, keys: dict, movie: bool = False) -> tuple[str | Non
                 f' (spelling: "{corrected}")' if corrected else ""
             )
         ref["title"] = best["name"]
+        ref["resolved_type"] = best["type"]
+        if best["type"] == "movie" and best.get("year") and not ref.get("year"):
+            ref["year"] = int(best["year"]) if best["year"].isdigit() else ref["year"]
         return note, None
 
     # Genuinely ambiguous — hand back a choice list.
@@ -538,11 +567,22 @@ def main() -> int:
 
     keys = load_keys()
     start = time.time()
+    note = None
 
     if args.cast:
         ref = parse_ref(args.cast)
-        is_movie = args.movie or (ref["year"] is not None and not ref["season"])
-        note, choices = resolve_title(ref, keys, movie=is_movie)
+        if args.movie:
+            resolve_as: bool | None = True
+        elif ref["season"] or ref["episode"]:
+            resolve_as = False
+        elif ref["year"] is not None:
+            resolve_as = True
+        else:
+            # No season/episode/year to disambiguate — e.g. "Toy Story 3" is a
+            # movie with no parenthesised year. Search both kinds and let
+            # ranking sort it out, rather than assuming TV and never trying movies.
+            resolve_as = None
+        note, choices = resolve_title(ref, keys, movie=resolve_as)
         if choices:
             result = choices
         elif ref["rest"] and (ref["season"] or ref["episode"]):
@@ -551,10 +591,18 @@ def main() -> int:
             result = find_character(ref, ref["rest"], keys)
         elif args.movie:
             result = movie_cast(ref, keys)  # forced movie: no silent TV fallback
-        elif is_movie:
-            result = movie_cast(ref, keys) or tv_cast(ref, keys)
+        elif ref.get("resolved_type") == "movie":
+            result = movie_cast(ref, keys)
+        elif ref.get("resolved_type") == "tv":
+            result = tv_cast(ref, keys)
         else:
-            result = tv_cast(ref, keys) or movie_cast(ref, keys)
+            # Unresolved by resolve_title (no API candidates at all) — last-ditch
+            # attempt against both, in the order the reference itself implies.
+            result = (
+                (movie_cast(ref, keys) or tv_cast(ref, keys))
+                if resolve_as
+                else (tv_cast(ref, keys) or movie_cast(ref, keys))
+            )
         if result and note and not result.get("resolved_via"):
             result["resolved_via"] = note
     elif args.actor:
@@ -581,6 +629,7 @@ def main() -> int:
         looked_for = args.cast or args.actor or " ".join(args.query)
         print(f'Nothing found for "{looked_for}"'
               + (f' (searched title: "{parse_ref(looked_for)["title"]}")' if args.cast else "")
+              + (f" — {note}" if note else "")
               + ".", file=sys.stderr)
         return 1
 
