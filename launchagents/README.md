@@ -36,22 +36,24 @@ first. Adding a new server = drop another `.plist` in this dir and re-run.
 
 ```bash
 # restart after a code change (replaces the old Ctrl-C / rerun cycle)
-launchctl kickstart -k gui/501/com.dennis.search-adv-web
+launchctl kickstart -k gui/$UID/com.dennis.search-shows-web
 
 # stop until next login / reinstall
-launchctl bootout gui/501/com.dennis.search-adv-web
+launchctl bootout gui/$UID/com.dennis.search-shows-web
 
 # is it running?  (columns: PID, last-exit-status, label — 0 = last exit was clean)
 launchctl list | grep com.dennis
 
 # full detail: state, last run, next scheduled, plist path
-launchctl print gui/501/com.dennis.search-adv-web
+launchctl print gui/$UID/com.dennis.search-shows-web
 
 # watch a log
-tail -f ~/Library/Logs/search_adv_web.log
+tail -f ~/Library/Logs/search_shows_web.log
 ```
 
-(`501` is the uid on this Mac; `gui/$(id -u)` is the portable spelling.)
+(`$UID` is a zsh/bash builtin that expands to the current user's uid —
+works unmodified on any Mac; `$(id -u)` is the fully portable spelling if
+`$UID` isn't set in your shell.)
 
 Note on the exit-status column: `launchctl kickstart -k` restarts a service
 by sending it SIGTERM, so right after using `-k` the status column will show
@@ -61,8 +63,8 @@ immediately (e.g. before double-checking health), bootout + bootstrap instead
 of kickstart:
 
 ```bash
-launchctl bootout gui/501/com.dennis.search-shows-web
-launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.dennis.search-shows-web.plist
+launchctl bootout gui/$UID/com.dennis.search-shows-web
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.dennis.search-shows-web.plist
 ```
 
 ## Ollama (not an agent here)
