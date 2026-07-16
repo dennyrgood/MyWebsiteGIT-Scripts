@@ -275,7 +275,7 @@ def _build_choices(
     rest = f" {ref['rest']}" if ref.get("rest") else ""
     for c in cands:
         c.pop("_kind_ambiguous", None)
-        year = f" ({c['year']})" if c["type"] == "movie" and c["year"] else ""
+        year = f" ({c['year']})" if c["year"] else ""
         c["requery"] = f"{c['name']}{year}{qual}{rest}"
     return None, {
         "kind": "choices",
@@ -751,12 +751,12 @@ def main() -> int:
             resolve_as: bool | None = True
         elif ref["season"] or ref["episode"]:
             resolve_as = False
-        elif ref["year"] is not None:
-            resolve_as = True
         else:
-            # No season/episode/year to disambiguate — e.g. "Toy Story 3" is a
-            # movie with no parenthesised year. Search both kinds and let
-            # ranking sort it out, rather than assuming TV and never trying movies.
+            # No season/episode to disambiguate — e.g. "Toy Story 3" is a
+            # movie with no parenthesised year, and a parenthesised year alone
+            # doesn't imply movie either ("The Office (2005)" is TV). Search
+            # both kinds and let ranking/year-matching sort it out, rather than
+            # assuming one kind and never trying the other.
             resolve_as = None
         note, choices = resolve_title(ref, keys, movie=resolve_as, force_list=args.list_matches)
         if choices:

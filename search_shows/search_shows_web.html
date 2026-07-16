@@ -359,6 +359,8 @@ $('result').addEventListener('click', e => {
     e.preventDefault();
     // keep the current mode; a movie candidate flips the movie checkbox
     if (mode() === 'cast') $('movie').checked = choice.classList.contains('movie');
+    // picking a specific candidate means "resolve this one", not "list again"
+    $('list_matches').checked = false;
     $('query').value = choice.dataset.query;
     run();
     return;
