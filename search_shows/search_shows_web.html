@@ -292,6 +292,7 @@ function render(rec) {
     if (rec.query && rec.query.toLowerCase() !== rec.show.toLowerCase())
       h += `<div class="meta">Best match for “${esc(rec.query)}”:</div>`;
     h += `<h2>${esc(rec.show)} (${esc((rec.premiered || '?').slice(0, 4))})</h2>`;
+    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
     h += `<div class="meta">${esc(rec.status || '')}`
       + (rec.network ? ` · ${esc(rec.network)}` : '')
       + (rec.genres && rec.genres.length ? ` · ${esc(rec.genres.join(', '))}` : '')
@@ -312,7 +313,6 @@ function render(rec) {
             `<a href="#" class="showlink" data-query="${esc(mname.replace(/\s*\(\d{4}\)$/, '').replace(/\s*\(\?\)$/, ''))}">${esc(mname)}</a>`
           ).join(' · ') + '</div>';
     }
-    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
   } else {
     h += `<pre>${esc(JSON.stringify(rec, null, 2))}</pre>`;
   }
