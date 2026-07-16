@@ -736,8 +736,8 @@ def main() -> int:
                    help='actor name, or "Show S1E1 Character" to find who played them')
     p.add_argument("--movie", action="store_true", help="with --cast: force movie lookup")
     p.add_argument("--list", action="store_true", dest="list_matches",
-                   help="show every title match instead of auto-picking the closest "
-                        '("toy story" --list → all Toy Story movies)')
+                   help="show every match instead of auto-picking the best one "
+                        '("toy story" --list → all Toy Story movies; "cranston" --list → every Cranston)')
     p.add_argument("--json", action="store_true", help="machine-readable output")
     args = p.parse_args()
 
