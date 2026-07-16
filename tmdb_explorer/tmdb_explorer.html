@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TMDB Explorer</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#f5f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161614" media="(prefers-color-scheme: dark)">
+<style>
+  :root {
+    --bg: #f5f5f2; --panel: #ffffff; --ink: #1e1e1c; --muted: #6b6b66;
+    --line: #dcdcd6; --accent: #2f5f8f; --err: #a33a2e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --panel: #201f1d; --ink: #e8e6e0; --muted: #97948c;
+      --line: #38362f; --accent: #7aa8d4; --err: #d97b6c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.5rem; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 -apple-system, "Helvetica Neue", sans-serif;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 1.2rem; margin: 0 0 1rem; }
+  h1 span { color: var(--muted); font-weight: normal; font-size: .85rem; }
+  h2 { font-size: 1.25rem; margin: .2rem 0 .1rem; }
+  h3 { font-size: .85rem; margin: 1.2rem 0 .4rem; color: var(--muted);
+       text-transform: uppercase; letter-spacing: .04em; }
+  a { color: var(--accent); }
+  fieldset {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    padding: 1rem; margin: 0 0 1rem;
+  }
+  legend { font-size: .8rem; color: var(--muted); padding: 0 .4rem; }
+  input[type=text] {
+    padding: .4rem .5rem; border: 1px solid var(--line);
+    border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit;
+    font-size: 16px; /* <16px makes iOS Safari zoom in on focus */
+  }
+  #query { width: 100%; }
+  .row2 { display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: center; margin-top: .7rem; }
+  .row2 label { display: inline-flex; align-items: center; gap: .35rem;
+                font-size: .9rem; cursor: pointer; }
+  #year { width: 6em; }
+  button {
+    padding: .5rem 1.1rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--accent); color: #fff; font: inherit; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  button.small {
+    padding: .1rem .5rem; font-size: .78rem; background: var(--panel);
+    color: var(--accent); border-color: var(--line);
+  }
+  #spinner { display: none; color: var(--muted); font-size: .9rem; }
+  #spinner.on { display: inline-block; }
+  #spinner::before {
+    content: ""; display: inline-block; width: .8em; height: .8em;
+    border: 2px solid var(--muted); border-top-color: transparent;
+    border-radius: 50%; margin-right: .4rem; vertical-align: -0.1em;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error { color: var(--err); font-weight: 600; margin: .8rem 0; }
+  .muted { color: var(--muted); }
+
+  /* search results */
+  .hit {
+    display: flex; gap: .8rem; padding: .6rem; margin-bottom: .6rem;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    cursor: pointer;
+  }
+  .hit:hover { border-color: var(--accent); }
+  .hit img, .hit .noimg {
+    width: 60px; height: 90px; object-fit: cover; border-radius: 4px; flex: none;
+    background: var(--line);
+  }
+  .hit .noimg { display: flex; align-items: center; justify-content: center;
+                color: var(--muted); font-size: 1.4rem; }
+  .hit b { font-size: 1rem; }
+  .hit .sub { color: var(--muted); font-size: .82rem; margin: .1rem 0 .25rem; }
+  .hit p { margin: 0; font-size: .86rem; }
+  .badge {
+    display: inline-block; font-size: .7rem; padding: 0 .45em; border-radius: 4px;
+    border: 1px solid var(--line); color: var(--muted); vertical-align: .12em;
+    margin-left: .4em; text-transform: uppercase;
+  }
+
+  /* details */
+  .backlink { display: inline-block; margin-bottom: .8rem; font-size: .9rem; cursor: pointer; }
+  .head { display: flex; gap: 1.2rem; }
+  .head img, .head .noimg {
+    width: 154px; border-radius: 8px; flex: none; align-self: flex-start;
+    background: var(--line);
+  }
+  .head .noimg { height: 231px; display: flex; align-items: center;
+                 justify-content: center; color: var(--muted); font-size: 2rem; }
+  .tagline { font-style: italic; color: var(--muted); margin: .2rem 0 .5rem; }
+  .metaline { font-size: .88rem; color: var(--muted); margin-bottom: .5rem; }
+  .idchip {
+    display: inline-flex; align-items: center; gap: .4em; font-size: .8rem;
+    color: var(--muted); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: .15rem .5rem; margin: .15rem .4rem .15rem 0;
+  }
+  .idchip code { font-size: .85rem; color: var(--ink); }
+  table.facts { border-collapse: collapse; margin: .3rem 0; font-size: .88rem; }
+  table.facts td { border: 1px solid var(--line); padding: .25rem .6rem; }
+  table.facts td:first-child { color: var(--muted); white-space: nowrap; }
+  .tablewrap { overflow-x: auto; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: .6rem; }
+  .card {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    overflow: hidden; font-size: .8rem;
+  }
+  .card img, .card .noimg { width: 100%; aspect-ratio: 2/3; object-fit: cover;
+                            background: var(--line); display: block; }
+  .card .noimg { display: flex; align-items: center; justify-content: center;
+                 color: var(--muted); font-size: 1.6rem; }
+  .card .pad { padding: .35rem .5rem .45rem; }
+  .card b { display: block; }
+  .card .sub { color: var(--muted); }
+  .card.click { cursor: pointer; }
+  .card.click:hover { border-color: var(--accent); }
+
+  .tags { display: flex; flex-wrap: wrap; gap: .35rem; }
+  .tags span {
+    font-size: .78rem; border: 1px solid var(--line); border-radius: 999px;
+    padding: .05rem .6rem; background: var(--panel); color: var(--muted);
+  }
+
+  .season {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    margin-bottom: .5rem;
+  }
+  .season > .shead { display: flex; gap: .7rem; align-items: center;
+                     padding: .5rem .7rem; cursor: pointer; }
+  .season > .shead:hover { color: var(--accent); }
+  .season .eps { border-top: 1px solid var(--line); padding: .5rem .7rem; }
+  .ep { padding: .4rem 0; border-bottom: 1px solid var(--line); font-size: .88rem; }
+  .ep:last-child { border-bottom: none; }
+  .ep summary { cursor: pointer; }
+  .ep .guests { margin: .3rem 0 0 1rem; font-size: .84rem; color: var(--muted); }
+
+  details.raw { margin: 1.4rem 0; }
+  details.raw summary { cursor: pointer; color: var(--muted); font-size: .85rem; }
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: .6rem; overflow-x: auto; font-size: .78rem; max-height: 70vh;
+  }
+  @media (max-width: 560px) {
+    body { padding: 1rem; }
+    .head img, .head .noimg { width: 100px; }
+    .head .noimg { height: 150px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>TMDB Explorer <span>title / TMDB id / IMDB id → everything TMDB knows</span></h1>
+
+  <div id="viewSearch">
+    <fieldset>
+      <legend>Search</legend>
+      <input type="text" id="query" placeholder="title, TMDB id (603), or IMDB id (tt0133093)" autofocus>
+      <div class="row2">
+        <label><input type="radio" name="stype" value="multi" checked> both</label>
+        <label><input type="radio" name="stype" value="movie"> movie</label>
+        <label><input type="radio" name="stype" value="tv"> tv</label>
+        <label>year <input type="text" id="year" inputmode="numeric" placeholder="any"></label>
+        <button id="go">Search</button>
+        <span id="spinner">searching…</span>
+      </div>
+    </fieldset>
+    <div id="results"></div>
+  </div>
+
+  <div id="viewDetail" style="display:none">
+    <a class="backlink" onclick="history.back()">← back</a>
+    <div id="detail"></div>
+  </div>
+</main>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const IMG = "https://image.tmdb.org/t/p/";
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+async function api(path, params) {
+  const resp = await fetch(path + "?" + new URLSearchParams(params));
+  let data;
+  try { data = await resp.json(); }
+  catch { data = { error: resp.statusText || "bad response" }; }
+  if (!resp.ok) throw new Error(data.error || resp.statusText);
+  return data;
+}
+
+function copyText(text, btn) {
+  const done = () => { const t = btn.textContent; btn.textContent = "✓";
+                       setTimeout(() => btn.textContent = t, 900); };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done);
+  } else { // http-over-LAN fallback
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    document.execCommand("copy"); ta.remove(); done();
+  }
+}
+
+function idChip(label, value, copyValue) {
+  const cv = copyValue ?? value;
+  return `<span class="idchip">${esc(label)} <code>${esc(value)}</code>` +
+         `<button class="small" onclick="copyText('${esc(cv)}', this)">copy</button></span>`;
+}
+
+function img(path, size, cls) {
+  return path
+    ? `<img class="${cls || ""}" src="${IMG}${size}${esc(path)}" loading="lazy" alt="">`
+    : `<div class="noimg ${cls || ""}">🎬</div>`;
+}
+
+/* ---------- routing ---------- */
+
+window.addEventListener("hashchange", route);
+window.addEventListener("DOMContentLoaded", () => {
+  $("#go").addEventListener("click", submitSearch);
+  $("#query").addEventListener("keydown", e => { if (e.key === "Enter") submitSearch(); });
+  $("#year").addEventListener("keydown", e => { if (e.key === "Enter") submitSearch(); });
+  route();
+});
+
+function submitSearch() {
+  const q = $("#query").value.trim();
+  if (!q) return;
+  const params = new URLSearchParams({ q,
+    type: document.querySelector('input[name=stype]:checked').value });
+  const year = $("#year").value.trim();
+  if (year) params.set("year", year);
+  const target = "q&" + params.toString();
+  if (location.hash.slice(1) === target) runSearch(params); // same search again
+  else location.hash = target;
+}
+
+function route() {
+  const h = location.hash.slice(1);
+  let m;
+  if ((m = h.match(/^(movie|tv)\/(\d+)$/))) { showDetail(m[1], m[2]); return; }
+  $("#viewDetail").style.display = "none";
+  $("#viewSearch").style.display = "";
+  if (h.startsWith("q&")) {
+    const params = new URLSearchParams(h.slice(2));
+    $("#query").value = params.get("q") || "";
+    $("#year").value = params.get("year") || "";
+    const st = params.get("type") || "multi";
+    const radio = document.querySelector(`input[name=stype][value=${st}]`);
+    if (radio) radio.checked = true;
+    runSearch(params);
+  }
+}
+
+/* ---------- search ---------- */
+
+async function runSearch(params) {
+  const out = $("#results");
+  $("#spinner").classList.add("on"); $("#go").disabled = true;
+  try {
+    const data = await api("/api/search", params);
+    if (!data.results.length) {
+      out.innerHTML = `<p class="muted">No matches.</p>`; return;
+    }
+    out.innerHTML = data.results.map(r => `
+      <div class="hit" onclick="location.hash='${r.media_type}/${r.id}'">
+        ${img(r.poster_path, "w92")}
+        <div>
+          <b>${esc(r.title)}</b>${r.year ? ` <span class="muted">(${r.year})</span>` : ""}
+          <span class="badge">${r.media_type}</span>
+          <div class="sub">TMDB id ${r.id}</div>
+          <p>${esc(firstLine(r.overview))}</p>
+        </div>
+      </div>`).join("");
+  } catch (e) {
+    out.innerHTML = `<p class="error">${esc(e.message)}</p>`;
+  } finally {
+    $("#spinner").classList.remove("on"); $("#go").disabled = false;
+  }
+}
+
+function firstLine(s) {
+  s = (s || "").trim();
+  const dot = s.indexOf(". ");
+  return dot > 0 && dot < 200 ? s.slice(0, dot + 1) : s.slice(0, 200);
+}
+
+/* ---------- details ---------- */
+
+async function showDetail(type, id) {
+  $("#viewSearch").style.display = "none";
+  $("#viewDetail").style.display = "";
+  const out = $("#detail");
+  out.innerHTML = `<p class="muted">loading…</p>`;
+  window.scrollTo(0, 0);
+  let d;
+  try { d = await api("/api/details", { type, id }); }
+  catch (e) { out.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
+  out.innerHTML = type === "movie" ? renderMovie(d) : renderTv(d);
+}
+
+function usCertMovie(d) {
+  const us = (d.release_dates?.results || []).find(r => r.iso_3166_1 === "US");
+  return us?.release_dates?.find(x => x.certification)?.certification || "";
+}
+function usCertTv(d) {
+  return (d.content_ratings?.results || []).find(r => r.iso_3166_1 === "US")?.rating || "";
+}
+
+function money(n) { return n ? "$" + n.toLocaleString("en-US") : ""; }
+function runtimeStr(mins) {
+  if (!mins) return "";
+  return mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+}
+
+function headBlock(d, type, cert, extraMeta) {
+  const title = d.title || d.name;
+  const year = (d.release_date || d.first_air_date || "").slice(0, 4);
+  const genres = (d.genres || []).map(g => g.name).join(", ");
+  const meta = [genres, extraMeta, d.status, cert,
+                d.vote_average ? `★ ${d.vote_average.toFixed(1)} (${d.vote_count.toLocaleString()})` : ""]
+               .filter(Boolean).join(" · ");
+  const imdb = d.external_ids?.imdb_id;
+  return `
+    <div class="head">
+      ${img(d.poster_path, "w342")}
+      <div>
+        <h2>${esc(title)}${year ? ` <span class="muted">(${year})</span>` : ""}</h2>
+        ${d.tagline ? `<div class="tagline">${esc(d.tagline)}</div>` : ""}
+        <div class="metaline">${esc(meta)}</div>
+        <div>
+          ${idChip("TMDB", d.id)}
+          ${imdb ? idChip("IMDB", imdb) : ""}
+        </div>
+        <p>${esc(d.overview || "")}</p>
+      </div>
+    </div>`;
+}
+
+function factsTable(rows) {
+  const body = rows.filter(([, v]) => v)
+    .map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join("");
+  return `<h3>Facts</h3><div class="tablewrap"><table class="facts">${body}</table></div>`;
+}
+
+function extLinks(d, type) {
+  const links = [`<a href="https://www.themoviedb.org/${type}/${d.id}" target="_blank">TMDB page</a>`];
+  if (d.external_ids?.imdb_id)
+    links.push(`<a href="https://www.imdb.com/title/${esc(d.external_ids.imdb_id)}/" target="_blank">IMDB</a>`);
+  if (d.homepage)
+    links.push(`<a href="${esc(d.homepage)}" target="_blank">homepage</a>`);
+  return links.join(" · ");
+}
+
+function castGrid(cast, isTv) {
+  if (!cast?.length) return "";
+  const card = c => {
+    const role = isTv
+      ? (c.roles || []).map(r => r.character).filter(Boolean).join(", ")
+      : c.character;
+    const eps = isTv && c.total_episode_count ? `${c.total_episode_count} ep` : "";
+    return `<div class="card">${img(c.profile_path, "w185")}
+      <div class="pad"><b>${esc(c.name)}</b>
+      <span class="sub">${esc(role || "")}${eps ? ` · ${eps}` : ""}</span></div></div>`;
+  };
+  const first = cast.slice(0, 12).map(card).join("");
+  const rest = cast.slice(12).map(card).join("");
+  return `<h3>Cast (${cast.length})</h3><div class="grid">${first}</div>` +
+    (rest ? `<div class="grid" style="display:none; margin-top:.6rem">${rest}</div>
+      <button class="small" style="margin-top:.6rem"
+        onclick="this.previousElementSibling.style.display='grid'; this.remove()">
+        show all ${cast.length}</button>` : "");
+}
+
+function crewBlock(d, type) {
+  let entries = [];
+  if (type === "movie") {
+    const crew = d.credits?.crew || [];
+    const directors = crew.filter(c => c.job === "Director").map(c => c.name);
+    const writers = [...new Set(crew.filter(c => c.department === "Writing").map(c => c.name))];
+    if (directors.length) entries.push(["Directed by", directors.join(", ")]);
+    if (writers.length) entries.push(["Written by", writers.join(", ")]);
+  } else if (d.created_by?.length) {
+    entries.push(["Created by", d.created_by.map(c => c.name).join(", ")]);
+  }
+  if (!entries.length) return "";
+  return `<h3>Key crew</h3>` + entries.map(([k, v]) =>
+    `<div><span class="muted">${k}:</span> ${esc(v)}</div>`).join("");
+}
+
+function trailerBlock(d) {
+  const vids = (d.videos?.results || [])
+    .filter(v => v.site === "YouTube" && (v.type === "Trailer" || v.type === "Teaser"));
+  if (!vids.length) return "";
+  return `<h3>Trailers</h3>` + vids.slice(0, 6).map(v =>
+    `<div><a href="https://www.youtube.com/watch?v=${esc(v.key)}" target="_blank">
+     ${esc(v.name)}</a> <span class="muted">(${esc(v.type)})</span></div>`).join("");
+}
+
+function providerBlock(d) {
+  const us = d["watch/providers"]?.results?.US;
+  if (!us) return "";
+  const groups = [["Stream", us.flatrate], ["Free", us.free], ["Rent", us.rent], ["Buy", us.buy]]
+    .filter(([, v]) => v?.length)
+    .map(([k, v]) => `<div><span class="muted">${k}:</span> ${esc(v.map(p => p.provider_name).join(", "))}</div>`);
+  if (!groups.length) return "";
+  return `<h3>Where to watch (US)</h3>${groups.join("")}
+    <div class="muted" style="font-size:.78rem">data by JustWatch${us.link ? ` — <a href="${esc(us.link)}" target="_blank">details</a>` : ""}</div>`;
+}
+
+function keywordBlock(d) {
+  const kws = d.keywords?.keywords || d.keywords?.results || [];
+  if (!kws.length) return "";
+  return `<h3>Keywords</h3><div class="tags">${kws.map(k => `<span>${esc(k.name)}</span>`).join("")}</div>`;
+}
+
+function recsBlock(d) {
+  const recs = (d.recommendations?.results || []).slice(0, 12);
+  if (!recs.length) return "";
+  return `<h3>Recommendations</h3><div class="grid">` + recs.map(r => {
+    const mt = r.media_type || (r.title ? "movie" : "tv");
+    const year = (r.release_date || r.first_air_date || "").slice(0, 4);
+    return `<div class="card click" onclick="location.hash='${mt}/${r.id}'">
+      ${img(r.poster_path, "w185")}
+      <div class="pad"><b>${esc(r.title || r.name)}</b>
+      <span class="sub">${year}${mt === "tv" ? " · tv" : ""}</span></div></div>`;
+  }).join("") + `</div>`;
+}
+
+function rawBlock(d) {
+  return `<details class="raw"><summary>View raw JSON</summary>
+    <pre>${esc(JSON.stringify(d, null, 2))}</pre></details>`;
+}
+
+function renderMovie(d) {
+  const langs = (d.spoken_languages || []).map(l => l.english_name).join(", ");
+  const companies = (d.production_companies || []).map(c => c.name).join(", ");
+  return headBlock(d, "movie", usCertMovie(d), runtimeStr(d.runtime)) +
+    factsTable([
+      ["Released", d.release_date],
+      ["Budget", money(d.budget)], ["Revenue", money(d.revenue)],
+      ["Languages", esc(langs)], ["Companies", esc(companies)],
+      ["Collection", esc(d.belongs_to_collection?.name || "")],
+      ["Links", extLinks(d, "movie")],
+    ]) +
+    castGrid(d.credits?.cast, false) + crewBlock(d, "movie") +
+    trailerBlock(d) + providerBlock(d) + keywordBlock(d) + recsBlock(d) + rawBlock(d);
+}
+
+function renderTv(d) {
+  const langs = (d.spoken_languages || []).map(l => l.english_name).join(", ");
+  const networks = (d.networks || []).map(n => n.name).join(", ");
+  const airs = [d.first_air_date, d.last_air_date].filter(Boolean).join(" → ");
+  return headBlock(d, "tv", usCertTv(d),
+      d.episode_run_time?.length ? runtimeStr(d.episode_run_time[0]) + "/ep" : "") +
+    factsTable([
+      ["Aired", esc(airs)],
+      ["Seasons", d.number_of_seasons], ["Episodes", d.number_of_episodes],
+      ["Networks", esc(networks)], ["Languages", esc(langs)],
+      ["Links", extLinks(d, "tv")],
+    ]) +
+    seasonsBlock(d) +
+    castGrid(d.aggregate_credits?.cast, true) + crewBlock(d, "tv") +
+    trailerBlock(d) + providerBlock(d) + keywordBlock(d) + recsBlock(d) + rawBlock(d);
+}
+
+/* ---------- seasons ---------- */
+
+function seasonsBlock(d) {
+  if (!d.seasons?.length) return "";
+  return `<h3>Seasons</h3>` + d.seasons.map(s => `
+    <div class="season" data-show="${d.id}" data-season="${s.season_number}">
+      <div class="shead" onclick="toggleSeason(this.parentElement)">
+        <b>${esc(s.name)}</b>
+        <span class="muted">${s.episode_count} episodes${s.air_date ? ` · ${s.air_date.slice(0, 4)}` : ""}</span>
+      </div>
+    </div>`).join("");
+}
+
+async function toggleSeason(el) {
+  const open = el.querySelector(".eps");
+  if (open) { open.remove(); return; }
+  const eps = document.createElement("div");
+  eps.className = "eps";
+  eps.innerHTML = `<span class="muted">loading…</span>`;
+  el.appendChild(eps);
+  try {
+    const data = await api("/api/season", { id: el.dataset.show, season: el.dataset.season });
+    eps.innerHTML = (data.episodes || []).map(e => {
+      const guests = (e.guest_stars || []).map(g =>
+        `${esc(g.name)}${g.character ? ` <span class="muted">as ${esc(g.character)}</span>` : ""}`);
+      const title = `<b>${e.episode_number}.</b> ${esc(e.name)}` +
+        (e.air_date ? ` <span class="muted">(${e.air_date})</span>` : "");
+      const overview = e.overview ? `<div class="muted">${esc(e.overview)}</div>` : "";
+      if (!guests.length) return `<div class="ep">${title}${overview}</div>`;
+      return `<div class="ep"><details><summary>${title}
+        <span class="muted">· ${guests.length} guest star${guests.length > 1 ? "s" : ""}</span></summary>
+        ${overview}<div class="guests">Guest stars: ${guests.join("; ")}</div></details></div>`;
+    }).join("") || `<span class="muted">no episodes listed</span>`;
+  } catch (err) {
+    eps.innerHTML = `<span class="error">${esc(err.message)}</span>`;
+  }
+}
+</script>
+</body>
+</html>
