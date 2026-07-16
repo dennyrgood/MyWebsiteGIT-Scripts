@@ -432,21 +432,147 @@ def movie_cast(ref: dict, keys: dict) -> dict | None:
 
 # ---------------------------------------------------------------- actor
 
-def actor_credits(name: str, keys: dict) -> dict | None:
+def _tvmaze_person_candidates(name: str) -> list[dict]:
+    out = []
+    for r in get_json(f"{TVMAZE}/search/people", {"q": name}) or []:
+        p = r["person"]
+        out.append({
+            "name": p["name"], "detail": f"b. {p['birthday']}" if p.get("birthday") else "",
+            "source": "tvmaze", "tvmaze_id": p["id"], "tmdb_id": None, "popularity": 0.0,
+        })
+    return out
+
+
+def _tmdb_person_candidates(name: str, keys: dict) -> list[dict]:
+    out = []
+    if not keys.get("tmdb"):
+        return out
+    found = get_json(f"{TMDB}/search/person", {"api_key": keys["tmdb"], "query": name})
+    for r in (found or {}).get("results", [])[:10]:
+        known = ", ".join(
+            (k.get("title") or k.get("name", "")) for k in r.get("known_for", [])[:2]
+        )
+        out.append({
+            "name": r["name"], "detail": f"known for {known}" if known else "",
+            "source": "tmdb", "tvmaze_id": None, "tmdb_id": r["id"],
+            "popularity": float(r.get("popularity") or 0),
+        })
+    return out
+
+
+def collect_person_candidates(name: str, keys: dict) -> list[dict]:
+    """Merge TVmaze + TMDB person candidates, deduped by name.
+
+    Ranked by TMDB popularity, not text similarity — for a partial/surname-only
+    query ("cranston"), every candidate matches the text about equally well
+    (they all contain "Cranston"); popularity is what actually distinguishes
+    Bryan Cranston from a dozen unrelated extras sharing the surname.
+    """
+    seen: set = set()
+    cands: list[dict] = []
+    for c in _tvmaze_person_candidates(name) + _tmdb_person_candidates(name, keys):
+        k = c["name"].casefold()
+        if k in seen:
+            # Merge: keep the richer detail/popularity, note both ids.
+            existing = next(x for x in cands if x["name"].casefold() == k)
+            if c["tmdb_id"] is not None:
+                existing["tmdb_id"] = c["tmdb_id"]
+                existing["popularity"] = max(existing["popularity"], c["popularity"])
+            if c["tvmaze_id"] is not None:
+                existing["tvmaze_id"] = c["tvmaze_id"]
+            if c["detail"] and not existing["detail"]:
+                existing["detail"] = c["detail"]
+            continue
+        seen.add(k)
+        cands.append(c)
+    cands.sort(key=lambda c: (c["popularity"], _similar(name, c["name"])), reverse=True)
+    return cands
+
+
+def resolve_person(
+    name: str, keys: dict, force_list: bool = False
+) -> tuple[str | None, dict | None, dict | None]:
+    """Resolve a (possibly partial) actor name. Returns (note, choices, winner)
+    where winner carries the ids needed to fetch credits without re-searching
+    by name (and re-triggering the same ambiguity)."""
+    typed = name
+    cands = collect_person_candidates(name, keys)
+    corrected = None
+    if not cands:
+        sug = wiki_suggest(name)
+        if sug and sug.casefold() != name.casefold():
+            corrected, name = sug, sug
+            cands = collect_person_candidates(name, keys)
+    if not cands:
+        note = f'spelling suggestion "{corrected}" also had no matches' if corrected else None
+        return note, None, None
+
+    if not force_list:
+        best = cands[0]
+        best_sim = _similar(name, best["name"])
+        second_pop = cands[1]["popularity"] if len(cands) > 1 else 0.0
+        # Dominant: this candidate is far more notable than the runner-up —
+        # the actual signal that "cranston" means Bryan Cranston, since text
+        # similarity alone can't tell him apart from namesake extras.
+        dominant = best["popularity"] >= 1.0 and (
+            second_pop == 0 or best["popularity"] / max(second_pop, 0.01) >= 3
+        )
+        # No popularity data at all (no TMDB key, or TVmaze-only hits) — fall
+        # back to the same near-tie-on-text-similarity test used for titles.
+        no_signal = best["popularity"] == 0 and all(c["popularity"] == 0 for c in cands)
+        rivals = [c for c in cands[1:] if best_sim - _similar(name, c["name"]) <= 0.05]
+        confident = len(cands) == 1 or best_sim >= 0.95 or dominant or (
+            no_signal and not rivals and best_sim >= 0.6
+        )
+        if confident:
+            note = None
+            if best["name"].casefold() != typed.casefold():
+                note = f'"{typed}" → "{best["name"]}"' + (
+                    f' (spelling: "{corrected}")' if corrected else ""
+                )
+            return note, None, best
+
+    for c in cands:
+        c["requery"] = c["name"]
+    return None, {
+        "kind": "choices",
+        "choice_of": "actor",
+        "query": typed,
+        "corrected": corrected,
+        "candidates": cands[:20 if force_list else 8],
+    }, None
+
+
+def actor_credits(name: str, keys: dict, winner: dict | None = None) -> dict | None:
+    """Fetch credits for an actor. *winner*, if given, carries the ids already
+    resolved by resolve_person — using them avoids re-searching by *name*,
+    which for a partial/ambiguous name would just reintroduce the ambiguity."""
     out = None
-    people = get_json(f"{TVMAZE}/search/people", {"q": name}) or []
-    if people:
-        p = people[0]["person"]
+    tvmaze_id = winner["tvmaze_id"] if winner else None
+    tmdb_id = winner["tmdb_id"] if winner else None
+    resolved_name = winner["name"] if winner else name
+
+    if tvmaze_id is None:
+        # Search by the already-resolved name (e.g. "Tom Hanks"), not the raw,
+        # possibly-partial input ("tom han") — searching by the latter here
+        # would silently reintroduce the exact ambiguity resolve_person just
+        # settled, and can land on a totally different, unrelated person.
+        people = get_json(f"{TVMAZE}/search/people", {"q": resolved_name}) or []
+        if people and _similar(resolved_name, people[0]["person"]["name"]) >= 0.9:
+            tvmaze_id = people[0]["person"]["id"]
+            resolved_name = people[0]["person"]["name"]
+    if tvmaze_id is not None:
+        p = get_json(f"{TVMAZE}/people/{tvmaze_id}") or {}
         credits = (
             get_json(
-                f"{TVMAZE}/people/{p['id']}/castcredits",
+                f"{TVMAZE}/people/{tvmaze_id}/castcredits",
                 {"embed[]": ["show", "character"]},
             )
             or []
         )
         out = {
             "kind": "actor",
-            "name": p["name"],
+            "name": p.get("name", resolved_name),
             "birthday": p.get("birthday"),
             "tv_credits": [
                 {
@@ -457,30 +583,31 @@ def actor_credits(name: str, keys: dict) -> dict | None:
                 for c in credits
             ],
         }
-    if keys.get("tmdb"):
+
+    if tmdb_id is None and keys.get("tmdb"):
         found = get_json(
-            f"{TMDB}/search/person", {"api_key": keys["tmdb"], "query": name}
+            f"{TMDB}/search/person", {"api_key": keys["tmdb"], "query": resolved_name}
         )
         if found and found.get("results"):
-            pid = found["results"][0]["id"]
-            mc = get_json(
-                f"{TMDB}/person/{pid}/movie_credits", {"api_key": keys["tmdb"]}
+            tmdb_id = found["results"][0]["id"]
+            resolved_name = found["results"][0]["name"]
+    if tmdb_id is not None:
+        mc = get_json(f"{TMDB}/person/{tmdb_id}/movie_credits", {"api_key": keys["tmdb"]})
+        if mc:
+            movies = sorted(
+                (c for c in mc.get("cast", []) if c.get("release_date")),
+                key=lambda c: c["release_date"],
+                reverse=True,
             )
-            if mc:
-                movies = sorted(
-                    (c for c in mc.get("cast", []) if c.get("release_date")),
-                    key=lambda c: c["release_date"],
-                    reverse=True,
-                )
-                out = out or {"kind": "actor", "name": found["results"][0]["name"], "tv_credits": []}
-                out["movie_credits"] = [
-                    {
-                        "title": c["title"],
-                        "character": c.get("character", ""),
-                        "released": c["release_date"],
-                    }
-                    for c in movies[:40]
-                ]
+            out = out or {"kind": "actor", "name": resolved_name, "tv_credits": []}
+            out["movie_credits"] = [
+                {
+                    "title": c["title"],
+                    "character": c.get("character", ""),
+                    "released": c["release_date"],
+                }
+                for c in movies[:40]
+            ]
     return out
 
 
@@ -534,8 +661,12 @@ def render(result: dict) -> None:
               + (f' (spelling suggestion: "{result["corrected"]}")' if result.get("corrected") else "")
               + ":")
         for i, c in enumerate(result["candidates"], 1):
-            year = f" ({c['year']})" if c["year"] else ""
-            print(f"  {i}. [{c['type']}] {c['name']}{year}  →  re-run with: {c['requery']}")
+            if result.get("choice_of") == "actor":
+                detail = f"  ({c['detail']})" if c.get("detail") else ""
+                print(f"  {i}. {c['name']}{detail}  →  re-run with: {c['requery']}")
+            else:
+                year = f" ({c['year']})" if c["year"] else ""
+                print(f"  {i}. [{c['type']}] {c['name']}{year}  →  re-run with: {c['requery']}")
         return
     if kind == "tv":
         if result.get("resolved_via"):
@@ -572,6 +703,8 @@ def render(result: dict) -> None:
         if cm:
             where = f" in {cm['show']}" + (f" {cm['episode']}" if cm.get("episode") else "")
             print(f"{cm['character']}{where} was played by {cm['actor']}\n")
+        if result.get("resolved_via"):
+            print(f"Resolved: {result['resolved_via']}")
         print(result["name"] + (f"  (b. {result['birthday']})" if result.get("birthday") else ""))
         if result.get("tv_credits"):
             print("\nTV (TVmaze):")
@@ -654,7 +787,13 @@ def main() -> int:
             # "Medium S4E10 Cynthia" — find who played the character, then credits.
             result = find_character(aref, aref["rest"], keys)
         else:
-            result = actor_credits(args.actor, keys)
+            note, choices, winner = resolve_person(args.actor, keys, force_list=args.list_matches)
+            if choices:
+                result = choices
+            else:
+                result = actor_credits(args.actor, keys, winner)
+                if result and note:
+                    result["resolved_via"] = note
     elif args.query:
         sref = parse_ref(" ".join(args.query))
         note, choices = resolve_title(sref, keys, force_list=args.list_matches)

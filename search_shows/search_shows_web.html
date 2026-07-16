@@ -198,12 +198,21 @@ function render(rec) {
   if (rec.kind === 'choices') {
     h += `<p>Multiple possible matches for <strong>${esc(rec.query)}</strong>`
       + (rec.corrected ? ` (spelling suggestion: <strong>${esc(rec.corrected)}</strong>)` : '')
-      + ' — pick one:</p><div class="tablewrap"><table><tr><th></th><th>Title</th><th>Year</th></tr>'
-      + rec.candidates.map(c =>
-          `<tr><td>${esc(c.type)}</td>`
-          + `<td><a href="#" class="choicelink${c.type === 'movie' ? ' movie' : ''}" data-query="${esc(c.requery)}">${esc(c.name)}</a></td>`
-          + `<td>${esc(c.year || '')}</td></tr>`
-        ).join('') + '</table></div>';
+      + ' — pick one:</p>';
+    if (rec.choice_of === 'actor') {
+      h += '<div class="tablewrap"><table><tr><th>Name</th><th>Detail</th></tr>'
+        + rec.candidates.map(c =>
+            `<tr><td><a href="#" class="choicelink actor" data-query="${esc(c.requery)}">${esc(c.name)}</a></td>`
+            + `<td>${esc(c.detail || '')}</td></tr>`
+          ).join('') + '</table></div>';
+    } else {
+      h += '<div class="tablewrap"><table><tr><th></th><th>Title</th><th>Year</th></tr>'
+        + rec.candidates.map(c =>
+            `<tr><td>${esc(c.type)}</td>`
+            + `<td><a href="#" class="choicelink${c.type === 'movie' ? ' movie' : ''}" data-query="${esc(c.requery)}">${esc(c.name)}</a></td>`
+            + `<td>${esc(c.year || '')}</td></tr>`
+          ).join('') + '</table></div>';
+    }
     h += `<div class="meta">${esc(rec.elapsed ?? '?')}s</div>`;
     return h;
   }
