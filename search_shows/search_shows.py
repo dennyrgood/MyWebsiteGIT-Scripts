@@ -121,7 +121,12 @@ def parse_ref(raw: str) -> dict:
 
 # ------------------------------------------------------------- title resolver
 
+_LEADING_ARTICLE_RE = re.compile(r"^(the|a|an)\s+", re.IGNORECASE)
+
+
 def _similar(a: str, b: str) -> float:
+    a = _LEADING_ARTICLE_RE.sub("", a.strip())
+    b = _LEADING_ARTICLE_RE.sub("", b.strip())
     return difflib.SequenceMatcher(None, a.casefold(), b.casefold()).ratio()
 
 
@@ -177,7 +182,7 @@ def collect_candidates(title: str, keys: dict, movie: bool | None = False) -> li
 
     def add_all(rows: list[tuple[str, str, str]]) -> None:
         for name, year, typ in rows:
-            k = (name.casefold(), typ)
+            k = (name.casefold(), typ, year)  # include year: same-titled movies (Dune '84/'21) aren't duplicates
             if name and k not in seen:
                 seen.add(k)
                 cands.append({"name": name, "year": year, "type": typ})
@@ -189,7 +194,11 @@ def collect_candidates(title: str, keys: dict, movie: bool | None = False) -> li
     else:
         add_all(_tv_candidates(title, keys))
         add_all(_movie_candidates(title, keys))
-        cands.sort(key=lambda c: _similar(title, c["name"]), reverse=True)
+    # Rank by closeness to what was typed — TMDB/TVmaze order by their own
+    # relevance (often popularity/recency), which can bury the actual best
+    # textual match (e.g. "Toy Story 5" ranked above "Toy Story" for a plain
+    # "toy story" query).
+    cands.sort(key=lambda c: _similar(title, c["name"]), reverse=True)
     return cands
 
 
@@ -212,8 +221,23 @@ def resolve_title(ref: dict, keys: dict, movie: bool | None = False) -> tuple[st
         # bare "nothing found".
         return (f'spelling suggestion "{corrected}" also had no matches' if corrected else None), None
 
+    # An explicit year (typed, or already carried on ref from a picker re-query)
+    # disambiguates same-titled entries outright — "Dune (1984)" shouldn't
+    # re-prompt just because "Dune" (2021) also exists.
+    if ref.get("year"):
+        year_matches = [c for c in cands if c["year"] == str(ref["year"])]
+        if len(year_matches) == 1:
+            cands = year_matches
+
     best = cands[0]
-    if len(cands) == 1 or _similar(title, best["name"]) >= 0.8:
+    best_sim = _similar(title, best["name"])
+    # Anything essentially tied with the best match (within 5%) is real
+    # ambiguity — e.g. "Dune" (2021 movie) vs "Dune" (1984 movie), or "office"
+    # matching both an exact-title movie and "The Office" (TV, article-stripped
+    # exact match). A merely-similar runner-up (a barely-relevant sequel)
+    # doesn't count — only near-ties with the top score do.
+    rivals = [c for c in cands[1:] if best_sim - _similar(title, c["name"]) <= 0.05]
+    if len(cands) == 1 or (not rivals and best_sim >= 0.8):
         note = None
         if best["name"].casefold() != typed.casefold():
             note = f'"{typed}" → "{best["name"]}"' + (
@@ -235,6 +259,7 @@ def resolve_title(ref: dict, keys: dict, movie: bool | None = False) -> tuple[st
         qual = f" episode {ref['episode']}"
     rest = f" {ref['rest']}" if ref.get("rest") else ""
     for c in cands:
+        c.pop("_kind_ambiguous", None)
         year = f" ({c['year']})" if c["type"] == "movie" and c["year"] else ""
         c["requery"] = f"{c['name']}{year}{qual}{rest}"
     return None, {
