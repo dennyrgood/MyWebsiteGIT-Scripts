@@ -251,9 +251,20 @@ Requires `flask` in the venv (`.venv/bin/pip install flask`).
 ```
 
 Then open <http://127.0.0.1:5025> (port 5000 is taken by macOS AirPlay).
-Supports plain query / `--cast` / `--actor` modes, all CLI options, and a
+Supports general / cast-list / actor modes, all CLI options, and a
 **Validate** button that shows the cast-mode "Interpreting →" echo before a
-full run. Binds to 127.0.0.1 only.
+full run.
+
+Binds to 0.0.0.0, so it's reachable over Tailscale/LAN (e.g. from a phone:
+`http://<tailscale-name>:5025`) — works as an iOS Add-to-Home-Screen app,
+with a proper icon served from `apple-touch-icon.png`. Other niceties:
+
+- Actor names in cast tables are links that re-run the lookup in actor mode.
+- Options (model, endpoint, timeouts, site/exclude) persist per browser via
+  localStorage; the query and checkboxes reset each run.
+- The spinner shows elapsed seconds; runs are capped at 300 s server-side.
+- Inline hints beside each option; site/exclude are labeled "general only"
+  since the cast/actor pipelines don't use them.
 
 ---
 
@@ -269,8 +280,8 @@ full run. Binds to 127.0.0.1 only.
 | `--endpoint` | `http://imagebeast:11434` | Ollama server URL |
 | `--results` | `8` | Max DuckDuckGo results to fetch |
 | `--chunks` | `5` | Top chunks sent to the LLM |
-| `--site` | — | Restrict search to one domain |
-| `--exclude` | — | Domains to exclude |
+| `--site` | — | Restrict search to one domain (general query mode only) |
+| `--exclude` | — | Domains to exclude (general query mode only; a soft `-site:` hint DDG may ignore) |
 | `--timeout` | `15` | HTTP timeout for page downloads (seconds) |
 | `--ollama-timeout` | `135` | Timeout for Ollama generation requests (seconds) |
 | `--no-cache` | off | Disable 24-hour page cache |
