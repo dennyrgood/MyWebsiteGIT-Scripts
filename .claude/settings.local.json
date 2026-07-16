@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '/<script>/{f=1;next}/<\\\\/script>/{f=0}f' search_adv_web.html)",
+      "Bash(node --check /private/tmp/claude-501/-Users-dennishmathes-repos-scripts-search-adv/52573a3f-a113-451d-b3d8-a7492954f93e/scratchpad/gui.js)",
+      "Read(//Users/dennishmathes/.claude/projects/-Users-dennishmathes-repos-scripts/memory/**)",
+      "Bash(sed -i '' 's|GUI done; follow-up tweak list in search_adv/NEXT_SESSION_web_gui_prompt.md.*|GUI done; all five follow-up tweaks implemented 2026-07-16, pending live test.|' MEMORY.md)"
+    ]
+  }
+}

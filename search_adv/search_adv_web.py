@@ -26,6 +26,11 @@ def index():
     return send_file(HERE / "search_adv_web.html", max_age=0)
 
 
+@app.get("/favicon.ico")
+def favicon():
+    return send_file(HERE / "favicon.ico")
+
+
 def _build_args(body: dict) -> list[str]:
     """Build the CLI arg list from named fields — never a raw shell string."""
     args: list[str] = []
