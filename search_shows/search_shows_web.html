@@ -152,6 +152,7 @@ const MODE_HELP = {
   cast: {
     ph: "medium s0101 · the office 4x10 · medium season 4 · the godfather (1972)",
     hint: ["Show + episode → guest & main cast",
+           "Show + episode title (the office dinner party) also works",
            "Season only → episode list",
            "Movie + year → movie cast",
            "Add a character after the show or episode (medium s0101 joe) to see who played them"],
@@ -221,6 +222,7 @@ function render(rec) {
     if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
     if (rec.episode) {
       h += `<div class="meta">Episode: ${esc(rec.episode)} (${esc(rec.airdate || 'no airdate')})</div>`;
+      if (rec.episode_summary) h += `<p>${esc(rec.episode_summary)}</p>`;
       if (rec.guest_cast && rec.guest_cast.length)
         h += '<h3>Guest cast</h3>' + pairTable(rec.guest_cast, 'Character', 'Actor');
     }

@@ -332,6 +332,7 @@ def tv_cast(ref: dict, keys: dict | None = None) -> dict | None:
         "resolved_via": resolved_via,
         "kind": "tv",
         "show": show["name"],
+        "show_id": show["id"],
         "premiered": show.get("premiered"),
         "url": show.get("url"),
         "main_cast": [],
@@ -349,6 +350,7 @@ def tv_cast(ref: dict, keys: dict | None = None) -> dict | None:
         if ep:
             out["episode"] = f"S{ref['season']:02d}E{ref['episode']:02d} — {ep['name']}"
             out["airdate"] = ep.get("airdate")
+            out["episode_summary"] = re.sub(r"<[^>]+>", "", ep.get("summary") or "") or None
             guests = get_json(f"{TVMAZE}/episodes/{ep['id']}/guestcast") or []
             out["guest_cast"] = [
                 {"character": g["character"]["name"], "actor": g["person"]["name"]}
@@ -397,6 +399,18 @@ def find_character(ref: dict, character: str, keys: dict) -> dict | None:
         close = difflib.get_close_matches(character, names, n=1, cutoff=0.6)
         if close:
             match = next(c for c in pool if c["character"] == close[0])
+    if not match and not ref["season"] and not ref["episode"]:
+        # Not a character — maybe an episode remembered by title ("the office
+        # dinner party"). High bar (0.8) so a vague word like "party" doesn't
+        # confidently land on one of several party episodes.
+        eps = get_json(f"{TVMAZE}/shows/{tv['show_id']}/episodes") or []
+        best = max(eps, key=lambda e: _similar(character, e.get("name") or ""), default=None)
+        if best and _similar(character, best.get("name") or "") >= 0.8:
+            eref = dict(ref, season=best["season"], episode=best["number"])
+            out = tv_cast(eref, keys)
+            if out:
+                out["resolved_via"] = f'"{character}" → episode "{best["name"]}"'
+                return out
     if not match:
         qual = ""
         if ref["season"] and ref["episode"]:
@@ -751,6 +765,8 @@ def render(result: dict) -> None:
         print(f"{result['show']} ({(result.get('premiered') or '?')[:4]})")
         if result.get("episode"):
             print(f"Episode: {result['episode']}  ({result.get('airdate') or 'no airdate'})")
+            if result.get("episode_summary"):
+                print(result["episode_summary"])
             if result["guest_cast"]:
                 print("\nGuest cast:")
                 print_pairs(result["guest_cast"], "character", "actor")
