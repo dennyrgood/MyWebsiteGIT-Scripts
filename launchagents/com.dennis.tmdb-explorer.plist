@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dennis.tmdb-explorer</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/dennishmathes/repos/scripts/tmdb_explorer/.venv/bin/python</string>
+        <string>/Users/dennishmathes/repos/scripts/tmdb_explorer/tmdb_explorer.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/dennishmathes/repos/scripts/tmdb_explorer</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/dennishmathes/Library/Logs/tmdb_explorer.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dennishmathes/Library/Logs/tmdb_explorer.log</string>
+</dict>
+</plist>
