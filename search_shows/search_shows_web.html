@@ -257,7 +257,7 @@ function render(rec) {
     }
     h += `<h2>${esc(rec.name)}</h2>`;
     if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
-    if (rec.birthday) h += `<div class="meta">b. ${esc(rec.birthday)}</div>`;
+    if (rec.birthday) h += `<div class="meta">b. ${esc(rec.birthday)}${rec.deathday ? ` &middot; d. ${esc(rec.deathday)}` : ''}</div>`;
     if (rec.tv_credits && rec.tv_credits.length) {
       h += '<h3>TV (TVmaze)</h3><div class="tablewrap"><table><tr><th>Show</th><th>Year</th><th>Character</th></tr>'
         + rec.tv_credits.map(c =>

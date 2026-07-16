@@ -576,6 +576,7 @@ def actor_credits(name: str, keys: dict, winner: dict | None = None) -> dict | N
             "kind": "actor",
             "name": p.get("name", resolved_name),
             "birthday": p.get("birthday"),
+            "deathday": p.get("deathday"),
             "url": p.get("url"),
             "tv_credits": [
                 {
@@ -708,7 +709,10 @@ def render(result: dict) -> None:
             print(f"{cm['character']}{where} was played by {cm['actor']}\n")
         if result.get("resolved_via"):
             print(f"Resolved: {result['resolved_via']}")
-        print(result["name"] + (f"  (b. {result['birthday']})" if result.get("birthday") else ""))
+        bd = f"b. {result['birthday']}" if result.get("birthday") else ""
+        dd = f"d. {result['deathday']}" if result.get("deathday") else ""
+        detail = ", ".join(x for x in (bd, dd) if x)
+        print(result["name"] + (f"  ({detail})" if detail else ""))
         if result.get("tv_credits"):
             print("\nTV (TVmaze):")
             for c in result["tv_credits"]:
