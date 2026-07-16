@@ -122,6 +122,24 @@
   }
   table.dp .none { color: var(--muted); }
 
+  /* people lists inside a data-point cell: aligned name / role / count columns.
+     .p uses display:contents so its spans become items of the parent grid. */
+  .plist {
+    display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content;
+    margin: .2rem 0;
+  }
+  .plist > .p { display: contents; }
+  .plist > .p.hide { display: none; }
+  /* padding, not grid gap — a gap would break the zebra stripes into segments */
+  .plist > .p > span { padding: .12rem .9rem .12rem 0; }
+  .plist > .p:nth-child(even) > span { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+  .plist .pr { color: var(--muted); }
+  .plist .pe { color: var(--muted); white-space: nowrap; text-align: right; padding-right: 0; }
+  @media (max-width: 560px) {
+    .plist { grid-template-columns: minmax(0, 1fr) max-content; }
+    .plist .pr { grid-column: 1 / -1; padding-bottom: .25rem; }
+  }
+
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: .6rem; }
   .card {
     border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
@@ -475,33 +493,48 @@ function epRef(e) {
 
 function yesno(v) { return v === true ? "yes" : v === false ? "no" : ""; }
 
-/* Comma-list that shows the first `shown` entries with a "+N more" expander.
-   Entries are pre-escaped HTML. */
-function expandList(items, shown = 10) {
-  if (!items.length) return "";
-  const head = items.slice(0, shown).join("; ");
-  const rest = items.slice(shown);
-  if (!rest.length) return head;
-  return `${head}<span style="display:none">; ${rest.join("; ")}</span>` +
-    ` <button class="small" onclick="this.previousElementSibling.style.display='inline'; this.remove()">` +
-    `+${rest.length} more</button>`;
+/* One person per line in aligned columns: [name, role/job, count/dept].
+   Cells are pre-escaped. Rows past `shown` are revealed by the +N more button. */
+function personGrid(rows, shown = 10) {
+  if (!rows.length) return "";
+  const body = rows.map(([a, b, c], i) =>
+    `<div class="p${i >= shown ? " hide" : ""}">` +
+      `<span class="pn">${a}</span><span class="pr">${b || ""}</span><span class="pe">${c || ""}</span>` +
+    `</div>`).join("");
+  const hidden = rows.length - shown;
+  return `<div class="muted" style="font-size:.9em">${rows.length} total</div>` +
+    `<div class="plist">${body}</div>` +
+    (hidden > 0
+      ? `<button class="small" onclick="this.previousElementSibling.querySelectorAll('.p.hide')` +
+        `.forEach(e => e.classList.remove('hide')); this.remove()">show all ${rows.length}</button>`
+      : "");
 }
 
-/* TV uses aggregate_credits (roles[] + episode counts); movies use credits. */
-function castLine(c, isTv) {
-  const role = isTv
-    ? (c.roles || []).map(r => r.character).filter(Boolean).join(" / ")
-    : c.character;
-  const eps = isTv && c.total_episode_count
-    ? ` <span class="muted">· ${c.total_episode_count} ep</span>` : "";
-  return esc(c.name) + (role ? ` <span class="muted">as ${esc(role)}</span>` : "") + eps;
+/* TV uses aggregate_credits (roles[]/jobs[] + episode counts); movies use credits. */
+function castRows(cast, isTv) {
+  return cast.map(c => {
+    const role = isTv
+      ? (c.roles || []).map(r => r.character).filter(Boolean).join(" / ")
+      : c.character;
+    return [esc(c.name), esc(role || ""), isTv && c.total_episode_count ? `${c.total_episode_count} ep` : ""];
+  });
 }
 
-function crewLine(c, isTv) {
-  const jobs = isTv
-    ? (c.jobs || []).map(j => j.job).filter(Boolean).join(" / ")
-    : c.job;
-  return esc(c.name) + (jobs ? ` <span class="muted">— ${esc(jobs)}</span>` : "");
+/* TMDB returns crew in an arbitrary order; sort by department so the people
+   you actually look for (directors, writers) are in the visible rows rather
+   than behind the expander with the stunt doubles. */
+const DEPT_ORDER = ["Directing", "Writing", "Production", "Camera", "Editing",
+  "Sound", "Art", "Costume & Make-Up", "Visual Effects", "Lighting", "Crew"];
+
+function crewRows(crew, isTv) {
+  return crew.map(c => {
+    const jobs = isTv ? (c.jobs || []).map(j => j.job).filter(Boolean).join(" / ") : c.job;
+    const dept = c.department || "";
+    const rank = DEPT_ORDER.indexOf(dept);
+    return [esc(c.name), esc(jobs || ""), esc(dept), rank < 0 ? DEPT_ORDER.length : rank, dept];
+    // job tiebreak is alphabetical, which usefully lands "Director" above
+    // "First/Second Assistant Director" within Directing
+  }).sort((a, b) => a[3] - b[3] || a[4].localeCompare(b[4]) || a[1].localeCompare(b[1]));
 }
 
 function clip(s, n = 240) {
@@ -576,12 +609,8 @@ function dataPointsTable(d, type) {
   G("People");
   const src = isTv ? "aggregate_credits" : "credits";
   const cast = d[src]?.cast || [], crew = d[src]?.crew || [];
-  F(`${src}.cast`, cast.length
-    ? `<span class="muted">${cast.length} total —</span> ` +
-      expandList(cast.map(c => castLine(c, isTv)), 10) : "");
-  F(`${src}.crew`, crew.length
-    ? `<span class="muted">${crew.length} total —</span> ` +
-      expandList(crew.map(c => crewLine(c, isTv)), 6) : "");
+  F(`${src}.cast`, personGrid(castRows(cast, isTv), 10));
+  F(`${src}.crew`, personGrid(crewRows(crew, isTv), 10));
   if (isTv) F("created_by", names(d.created_by));
 
   G("Companies & languages");
