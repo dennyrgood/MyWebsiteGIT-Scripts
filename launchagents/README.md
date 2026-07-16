@@ -17,6 +17,9 @@ Port notes: 5000 is taken by macOS AirPlay; travel deliberately sits at 5030
 so the 8xxx range stays free for ad-hoc testing (the generic `start_http`
 script at the repo root is unchanged for that).
 
+To set up another Mac (heartbeat only, incl. the required Full Disk Access
+grant), see `MIGRATION.md`.
+
 ## Install / update / remove
 
 ```bash
