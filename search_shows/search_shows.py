@@ -404,6 +404,7 @@ def movie_cast(ref: dict, keys: dict) -> dict | None:
                     "title": found["results"][0]["title"],
                     "released": found["results"][0].get("release_date"),
                     "source": "TMDB",
+                    "url": f"https://www.themoviedb.org/movie/{mid}",
                     "cast": [
                         {"character": c.get("character", ""), "actor": c["name"]}
                         for c in credits.get("cast", [])[:25]
@@ -420,6 +421,7 @@ def movie_cast(ref: dict, keys: dict) -> dict | None:
                 "title": data["Title"],
                 "released": data.get("Released"),
                 "source": "OMDb",
+                "url": f"https://www.imdb.com/title/{data['imdbID']}/" if data.get("imdbID") else None,
                 "cast": [
                     {"character": "", "actor": a.strip()}
                     for a in data.get("Actors", "").split(",")
@@ -574,6 +576,7 @@ def actor_credits(name: str, keys: dict, winner: dict | None = None) -> dict | N
             "kind": "actor",
             "name": p.get("name", resolved_name),
             "birthday": p.get("birthday"),
+            "url": p.get("url"),
             "tv_credits": [
                 {
                     "show": c["_embedded"]["show"]["name"],

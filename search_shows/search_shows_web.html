@@ -240,6 +240,7 @@ function render(rec) {
     h += `<div class="meta">Released ${esc(rec.released || '?')} · source: ${esc(rec.source)}</div>`;
     if (rec.plot) h += `<p>${esc(rec.plot)}</p>`;
     h += '<h3>Cast</h3>' + pairTable(rec.cast, 'Actor', 'Character');
+    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">${esc(rec.source === 'OMDb' ? 'IMDb page' : 'TMDB page')}</a></div>`;
   } else if (rec.kind === 'actor') {
     if (rec.error) {
       h += `<p class="error">${esc(rec.error)}</p>`;
@@ -256,6 +257,7 @@ function render(rec) {
     }
     h += `<h2>${esc(rec.name)}</h2>`;
     if (rec.birthday) h += `<div class="meta">b. ${esc(rec.birthday)}</div>`;
+    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
     if (rec.tv_credits && rec.tv_credits.length) {
       h += '<h3>TV (TVmaze)</h3><div class="tablewrap"><table><tr><th>Show</th><th>Year</th><th>Character</th></tr>'
         + rec.tv_credits.map(c =>
