@@ -18,15 +18,10 @@ env/
 # Cache
 .search_adv_cache/
 
-# Output files
-*.html
+# Output files (reports are written to explicitly named paths via --html /
+# batch CSV; don't blanket-ignore doc/source extensions like .md or .html)
 *.json
 *.csv
-*.md
-!README.md
-# Not output — the web GUI frontend and its notes
-!search_adv_web.html
-!NEXT_SESSION_web_gui_prompt.md
 
 # macOS
 .DS_Store
