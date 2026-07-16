@@ -53,6 +53,8 @@ def _build_args(body: dict) -> list[str]:
         args = ["--actor", query]
     else:
         args = [query]
+    if body.get("list_matches"):
+        args.append("--list")
     args.append("--json")
     return args
 

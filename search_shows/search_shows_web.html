@@ -45,7 +45,7 @@
     font-size: .9rem; color: var(--ink); margin: 0; cursor: pointer;
   }
   .checks { margin-top: .6rem; }
-  .castonly.dim { opacity: .45; pointer-events: none; }
+  .castonly.dim, .notactor.dim { opacity: .45; pointer-events: none; }
   .buttons { display: flex; gap: .75rem; align-items: center; margin-bottom: 1.25rem; }
   button {
     padding: .5rem 1.1rem; border: 1px solid var(--line); border-radius: 6px;
@@ -102,6 +102,10 @@
     <div class="checks castonly">
       <label><input type="checkbox" id="movie"> movie</label>
       <span class="meta">force movie lookup (otherwise TV is tried first)</span>
+    </div>
+    <div class="checks notactor">
+      <label><input type="checkbox" id="list_matches"> list all matches</label>
+      <span class="meta">show every title match instead of auto-picking the closest one</span>
     </div>
   </fieldset>
 
@@ -165,6 +169,7 @@ const MODE_HELP = {
 
 function syncMode() {
   document.querySelector('.castonly').classList.toggle('dim', mode() !== 'cast');
+  document.querySelector('.notactor').classList.toggle('dim', mode() === 'actor');
   $('query').placeholder = MODE_HELP[mode()].ph;
   $('modehint').innerHTML = MODE_HELP[mode()].hint.map(esc).join('<br>');
 }
@@ -296,6 +301,7 @@ async function run() {
         mode: mode(),
         query: $('query').value,
         movie: $('movie').checked,
+        list_matches: $('list_matches').checked,
       }),
     });
     const data = await resp.json();

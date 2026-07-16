@@ -202,10 +202,14 @@ def collect_candidates(title: str, keys: dict, movie: bool | None = False) -> li
     return cands
 
 
-def resolve_title(ref: dict, keys: dict, movie: bool | None = False) -> tuple[str | None, dict | None]:
+def resolve_title(
+    ref: dict, keys: dict, movie: bool | None = False, force_list: bool = False
+) -> tuple[str | None, dict | None]:
     """Resolve ref['title'] against the APIs, fixing spelling via Wikipedia if
     nothing matches. On a confident match, updates ref['title'] in place and
-    returns (note, None); when ambiguous returns (None, choices_record)."""
+    returns (note, None); when ambiguous (or *force_list*) returns
+    (None, choices_record) — e.g. "toy story" with force_list shows every
+    Toy Story entry instead of auto-picking the closest title match."""
     typed = ref["title"]
     title = typed
     cands = collect_candidates(title, keys, movie)
@@ -223,11 +227,16 @@ def resolve_title(ref: dict, keys: dict, movie: bool | None = False) -> tuple[st
 
     # An explicit year (typed, or already carried on ref from a picker re-query)
     # disambiguates same-titled entries outright — "Dune (1984)" shouldn't
-    # re-prompt just because "Dune" (2021) also exists.
-    if ref.get("year"):
+    # re-prompt just because "Dune" (2021) also exists. Skipped when browsing
+    # on purpose (force_list) — a year alongside --list still means "show me
+    # everything close to this", not "narrow to one".
+    if ref.get("year") and not force_list:
         year_matches = [c for c in cands if c["year"] == str(ref["year"])]
         if len(year_matches) == 1:
             cands = year_matches
+
+    if force_list:
+        return _build_choices(ref, typed, corrected, cands, cap=20)
 
     best = cands[0]
     best_sim = _similar(title, best["name"])
@@ -250,6 +259,12 @@ def resolve_title(ref: dict, keys: dict, movie: bool | None = False) -> tuple[st
         return note, None
 
     # Genuinely ambiguous — hand back a choice list.
+    return _build_choices(ref, typed, corrected, cands, cap=8)
+
+
+def _build_choices(
+    ref: dict, typed: str, corrected: str | None, cands: list[dict], cap: int
+) -> tuple[None, dict]:
     qual = ""
     if ref["season"] and ref["episode"]:
         qual = f" s{ref['season']:02d}e{ref['episode']:02d}"
@@ -266,7 +281,7 @@ def resolve_title(ref: dict, keys: dict, movie: bool | None = False) -> tuple[st
         "kind": "choices",
         "query": typed,
         "corrected": corrected,
-        "candidates": cands[:8],
+        "candidates": cands[:cap],
     }
 
 
@@ -587,6 +602,9 @@ def main() -> int:
     p.add_argument("--actor", metavar="REF",
                    help='actor name, or "Show S1E1 Character" to find who played them')
     p.add_argument("--movie", action="store_true", help="with --cast: force movie lookup")
+    p.add_argument("--list", action="store_true", dest="list_matches",
+                   help="show every title match instead of auto-picking the closest "
+                        '("toy story" --list → all Toy Story movies)')
     p.add_argument("--json", action="store_true", help="machine-readable output")
     args = p.parse_args()
 
@@ -607,7 +625,7 @@ def main() -> int:
             # movie with no parenthesised year. Search both kinds and let
             # ranking sort it out, rather than assuming TV and never trying movies.
             resolve_as = None
-        note, choices = resolve_title(ref, keys, movie=resolve_as)
+        note, choices = resolve_title(ref, keys, movie=resolve_as, force_list=args.list_matches)
         if choices:
             result = choices
         elif ref["rest"] and (ref["season"] or ref["episode"]):
@@ -639,7 +657,7 @@ def main() -> int:
             result = actor_credits(args.actor, keys)
     elif args.query:
         sref = parse_ref(" ".join(args.query))
-        note, choices = resolve_title(sref, keys)
+        note, choices = resolve_title(sref, keys, force_list=args.list_matches)
         if choices:
             result = choices
         else:
