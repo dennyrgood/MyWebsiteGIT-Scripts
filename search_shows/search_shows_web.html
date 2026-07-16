@@ -218,6 +218,7 @@ function render(rec) {
   if (rec.kind === 'tv') {
     if (rec.resolved_via) h += `<div class="meta">Resolved: ${esc(rec.resolved_via)}</div>`;
     h += `<h2>${esc(rec.show)} (${esc((rec.premiered || '?').slice(0, 4))})</h2>`;
+    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
     if (rec.episode) {
       h += `<div class="meta">Episode: ${esc(rec.episode)} (${esc(rec.airdate || 'no airdate')})</div>`;
       if (rec.guest_cast && rec.guest_cast.length)
@@ -233,14 +234,13 @@ function render(rec) {
           }).join('') + '</table></div>';
     }
     h += '<h3>Main cast</h3>' + pairTable(rec.main_cast, 'Character', 'Actor');
-    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
   } else if (rec.kind === 'movie') {
     if (rec.resolved_via) h += `<div class="meta">Resolved: ${esc(rec.resolved_via)}</div>`;
     h += `<h2>${esc(rec.title)}</h2>`;
+    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">${esc(rec.source === 'OMDb' ? 'IMDb page' : 'TMDB page')}</a></div>`;
     h += `<div class="meta">Released ${esc(rec.released || '?')} · source: ${esc(rec.source)}</div>`;
     if (rec.plot) h += `<p>${esc(rec.plot)}</p>`;
     h += '<h3>Cast</h3>' + pairTable(rec.cast, 'Actor', 'Character');
-    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">${esc(rec.source === 'OMDb' ? 'IMDb page' : 'TMDB page')}</a></div>`;
   } else if (rec.kind === 'actor') {
     if (rec.error) {
       h += `<p class="error">${esc(rec.error)}</p>`;
@@ -256,8 +256,8 @@ function render(rec) {
         + ` was played by <strong>${esc(cm.actor)}</strong></p>`;
     }
     h += `<h2>${esc(rec.name)}</h2>`;
-    if (rec.birthday) h += `<div class="meta">b. ${esc(rec.birthday)}</div>`;
     if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
+    if (rec.birthday) h += `<div class="meta">b. ${esc(rec.birthday)}</div>`;
     if (rec.tv_credits && rec.tv_credits.length) {
       h += '<h3>TV (TVmaze)</h3><div class="tablewrap"><table><tr><th>Show</th><th>Year</th><th>Character</th></tr>'
         + rec.tv_credits.map(c =>
