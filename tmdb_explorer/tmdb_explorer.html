@@ -112,6 +112,16 @@
   table.facts td:first-child { color: var(--muted); white-space: nowrap; }
   .tablewrap { overflow-x: auto; }
 
+  table.dp { border-collapse: collapse; margin: .3rem 0; font-size: .85rem; width: 100%; }
+  table.dp td { border: 1px solid var(--line); padding: .25rem .6rem; vertical-align: top; }
+  table.dp td:first-child { white-space: nowrap; width: 1%; }
+  table.dp code { font-size: .95em; }
+  table.dp tr.grp td {
+    background: var(--panel); color: var(--muted); font-size: .72rem;
+    text-transform: uppercase; letter-spacing: .05em; font-weight: 600;
+  }
+  table.dp .none { color: var(--muted); }
+
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: .6rem; }
   .card {
     border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
@@ -443,6 +453,160 @@ function recsBlock(d) {
   }).join("") + `</div>`;
 }
 
+/* ---------- all data points (mirrors DATA_POINTS.md) ---------- */
+
+function names(arr, key = "name", max = 8) {
+  if (!Array.isArray(arr) || !arr.length) return "";
+  const list = arr.map(x => (typeof x === "string" ? x : x?.[key])).filter(Boolean);
+  if (!list.length) return "";
+  return list.slice(0, max).map(esc).join(", ") +
+    (list.length > max ? ` <span class="muted">+${list.length - max} more</span>` : "");
+}
+
+function imgCell(path, size) {
+  return path ? `<a href="${IMG}${size}${esc(path)}" target="_blank"><code>${esc(path)}</code></a>` : "";
+}
+
+function epRef(e) {
+  if (!e) return "";
+  return `S${e.season_number}E${e.episode_number} — ${esc(e.name)}` +
+    (e.air_date ? ` <span class="muted">(${e.air_date})</span>` : "");
+}
+
+function yesno(v) { return v === true ? "yes" : v === false ? "no" : ""; }
+
+function clip(s, n = 240) {
+  s = (s || "").trim();
+  return s.length > n ? esc(s.slice(0, n)) + "<span class='muted'>… </span>" : esc(s);
+}
+
+function dataPointsTable(d, type) {
+  const isTv = type === "tv";
+  const rows = [];
+  const G = label => rows.push(["grp", label]);
+  const F = (field, value) => rows.push([field, value]);
+
+  G("Identity");
+  F("id", `<code>${d.id}</code>`);
+  F(isTv ? "name" : "title", esc(d.name || d.title));
+  F(isTv ? "original_name" : "original_title", esc(d.original_name || d.original_title));
+  F("original_language", esc(d.original_language));
+  F("origin_country", names(d.origin_country));
+  F("adult", yesno(d.adult));
+
+  G("Story");
+  F("overview", clip(d.overview));
+  F("tagline", esc(d.tagline));
+
+  G("Classification");
+  F("genres", names(d.genres));
+  F("keywords", names(d.keywords?.keywords || d.keywords?.results || [], "name", 12));
+  if (isTv) {
+    const cr = d.content_ratings?.results || [];
+    F("content_ratings", cr.length
+      ? `US: ${esc(usCertTv(d) || "—")} <span class="muted">· ${cr.length} countries</span>` : "");
+  } else {
+    const rd = d.release_dates?.results || [];
+    F("release_dates", rd.length
+      ? `US: ${esc(usCertMovie(d) || "—")} <span class="muted">· ${rd.length} countries</span>` : "");
+  }
+
+  G("Ratings & popularity");
+  F("vote_average", d.vote_average ? d.vote_average.toFixed(1) : "");
+  F("vote_count", d.vote_count ? d.vote_count.toLocaleString() : "");
+  F("popularity", d.popularity ? d.popularity.toFixed(1) : "");
+
+  G("Status");
+  F("status", esc(d.status));
+  if (isTv) {
+    F("type", esc(d.type));
+    F("in_production", yesno(d.in_production));
+  }
+
+  G("Dates & runtime");
+  if (isTv) {
+    F("first_air_date", esc(d.first_air_date));
+    F("last_air_date", esc(d.last_air_date));
+    F("episode_run_time", (d.episode_run_time || []).map(m => `${m}m`).join(", "));
+    F("number_of_seasons", d.number_of_seasons);
+    F("number_of_episodes", d.number_of_episodes);
+    F("last_episode_to_air", epRef(d.last_episode_to_air));
+    F("next_episode_to_air", epRef(d.next_episode_to_air));
+  } else {
+    F("release_date", esc(d.release_date));
+    F("runtime", runtimeStr(d.runtime));
+  }
+
+  if (!isTv) {
+    G("Money & franchise");
+    F("budget", money(d.budget));
+    F("revenue", money(d.revenue));
+    F("belongs_to_collection", esc(d.belongs_to_collection?.name || ""));
+  }
+
+  G("People");
+  if (isTv) {
+    const cast = d.aggregate_credits?.cast || [], crew = d.aggregate_credits?.crew || [];
+    F("aggregate_credits", cast.length
+      ? `${cast.length} cast <span class="muted">· ${crew.length} crew · top: ${esc(cast[0].name)}</span>` : "");
+    F("created_by", names(d.created_by));
+  } else {
+    const cast = d.credits?.cast || [], crew = d.credits?.crew || [];
+    F("credits", cast.length
+      ? `${cast.length} cast <span class="muted">· ${crew.length} crew · top: ${esc(cast[0].name)}</span>` : "");
+  }
+
+  G("Companies & languages");
+  if (isTv) F("networks", names(d.networks));
+  F("production_companies", names(d.production_companies));
+  F("production_countries", names(d.production_countries));
+  F("spoken_languages", names(d.spoken_languages, "english_name"));
+
+  G("Images & video");
+  F("poster_path", imgCell(d.poster_path, "w342"));
+  F("backdrop_path", imgCell(d.backdrop_path, "w780"));
+  const vids = d.videos?.results || [];
+  const vtypes = {};
+  vids.forEach(v => { vtypes[v.type] = (vtypes[v.type] || 0) + 1; });
+  F("videos", vids.length
+    ? `${vids.length} <span class="muted">(${esc(Object.entries(vtypes).map(([k, n]) => `${n} ${k}`).join(", "))})</span>` : "");
+
+  G("Links & availability");
+  const ext = Object.entries(d.external_ids || {}).filter(([, v]) => v);
+  F("external_ids", ext.length
+    ? ext.map(([k, v]) => `<span class="muted">${esc(k.replace(/_id$/, ""))}:</span> ${esc(v)}`).join(" · ") : "");
+  F("homepage", d.homepage ? `<a href="${esc(d.homepage)}" target="_blank">${clip(d.homepage, 60)}</a>` : "");
+  const wp = d["watch/providers"]?.results || {};
+  const us = wp.US;
+  const usSum = us ? ["flatrate", "free", "rent", "buy"].filter(k => us[k]?.length)
+    .map(k => `${k} ${us[k].length}`).join(", ") : "";
+  F("watch/providers", Object.keys(wp).length
+    ? `${Object.keys(wp).length} countries` + (usSum ? ` <span class="muted">· US: ${esc(usSum)}</span>` : "") : "");
+  F("recommendations", (d.recommendations?.results || []).length || "");
+
+  if (isTv) {
+    G("Seasons");
+    F("seasons", (d.seasons || []).length
+      ? `${d.seasons.length} <span class="muted">(incl. specials; expand a season above for episodes, synopses, guest stars)</span>` : "");
+  }
+
+  G("Flags");
+  if (!isTv) F("video", yesno(d.video) + ` <span class="muted">(direct-to-video flag, not the trailers)</span>`);
+  F("softcore", yesno(d.softcore) + ` <span class="muted">(undocumented TMDB flag)</span>`);
+
+  const body = rows.map(r => r[0] === "grp"
+    ? `<tr class="grp"><td colspan="2">${esc(r[1])}</td></tr>`
+    : `<tr><td><code>${esc(r[0])}</code></td><td>${r[1] === 0 || r[1] ? r[1] : `<span class="none">—</span>`}</td></tr>`
+  ).join("");
+
+  return `<h3>All data points</h3>
+    <div class="muted" style="font-size:.8rem; margin-bottom:.4rem">
+      Every field this tool fetches for a ${isTv ? "show" : "movie"}; <code>—</code> means TMDB has no value for this title.
+      Full reference: <code>DATA_POINTS.md</code>.
+    </div>
+    <div class="tablewrap"><table class="dp">${body}</table></div>`;
+}
+
 function rawBlock(d) {
   return `<details class="raw"><summary>View raw JSON</summary>
     <pre>${esc(JSON.stringify(d, null, 2))}</pre></details>`;
@@ -460,7 +624,8 @@ function renderMovie(d) {
       ["Links", extLinks(d, "movie")],
     ]) +
     castGrid(d.credits?.cast, false) + crewBlock(d, "movie") +
-    trailerBlock(d) + providerBlock(d) + keywordBlock(d) + recsBlock(d) + rawBlock(d);
+    trailerBlock(d) + providerBlock(d) + keywordBlock(d) + recsBlock(d) +
+    dataPointsTable(d, "movie") + rawBlock(d);
 }
 
 function renderTv(d) {
@@ -477,7 +642,8 @@ function renderTv(d) {
     ]) +
     seasonsBlock(d) +
     castGrid(d.aggregate_credits?.cast, true) + crewBlock(d, "tv") +
-    trailerBlock(d) + providerBlock(d) + keywordBlock(d) + recsBlock(d) + rawBlock(d);
+    trailerBlock(d) + providerBlock(d) + keywordBlock(d) + recsBlock(d) +
+    dataPointsTable(d, "tv") + rawBlock(d);
 }
 
 /* ---------- seasons ---------- */
