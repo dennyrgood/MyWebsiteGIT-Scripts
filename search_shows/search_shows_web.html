@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Show Searches</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#f5f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161614" media="(prefers-color-scheme: dark)">
+<style>
+  :root {
+    --bg: #f5f5f2; --panel: #ffffff; --ink: #1e1e1c; --muted: #6b6b66;
+    --line: #dcdcd6; --accent: #2f5f8f; --err: #a33a2e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --panel: #201f1d; --ink: #e8e6e0; --muted: #97948c;
+      --line: #38362f; --accent: #7aa8d4; --err: #d97b6c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.5rem; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 -apple-system, "Helvetica Neue", sans-serif;
+  }
+  main { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 1.2rem; margin: 0 0 1rem; }
+  h1 span { color: var(--muted); font-weight: normal; font-size: .85rem; }
+  fieldset {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    padding: 1rem; margin: 0 0 1rem;
+  }
+  legend { font-size: .8rem; color: var(--muted); padding: 0 .4rem; }
+  input[type=text] {
+    width: 100%; padding: .4rem .5rem; border: 1px solid var(--line);
+    border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit;
+    font-size: 16px; /* <16px makes iOS Safari zoom in on focus */
+  }
+  .modes { display: flex; flex-wrap: wrap; gap: 1.25rem; margin-bottom: .75rem; }
+  .modes label, .checks label {
+    display: inline-flex; align-items: center; gap: .35rem;
+    font-size: .9rem; color: var(--ink); margin: 0; cursor: pointer;
+  }
+  .checks { margin-top: .6rem; }
+  .castonly.dim { opacity: .45; pointer-events: none; }
+  .buttons { display: flex; gap: .75rem; align-items: center; margin-bottom: 1.25rem; }
+  button {
+    padding: .5rem 1.1rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--accent); color: #fff; font: inherit; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  #spinner { display: none; color: var(--muted); font-size: .9rem; }
+  #spinner.on { display: inline-block; }
+  #spinner::before {
+    content: ""; display: inline-block; width: .8em; height: .8em;
+    border: 2px solid var(--muted); border-top-color: transparent;
+    border-radius: 50%; margin-right: .4rem; vertical-align: -0.1em;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #out { display: none; }
+  #out.on { display: block; }
+  h2 { font-size: 1rem; margin: .2rem 0 .4rem; }
+  h3 { font-size: .85rem; margin: .9rem 0 .3rem; color: var(--muted); }
+  .tablewrap { overflow-x: auto; margin: .3rem 0; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid var(--line); padding: .25rem .6rem; text-align: left; }
+  a { color: var(--accent); }
+  .meta { color: var(--muted); font-size: .85rem; margin-top: .75rem; }
+  pre {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: .6rem; overflow-x: auto; font-size: .82rem; white-space: pre-wrap;
+  }
+  .error { color: var(--err); font-weight: 600; }
+  details.examples {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    padding: .6rem 1rem; margin-bottom: 1.25rem; font-size: .9rem;
+  }
+  details.examples summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
+  details.examples table { border-collapse: collapse; margin: .4rem 0; }
+  details.examples td { border: none; padding: .1rem 1rem .1rem 0; color: var(--muted); }
+  details.examples td:first-child { color: var(--ink); }
+  details.examples code { background: var(--bg); padding: 0 .25em; border-radius: 3px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Show Searches <span>Casts, Actors, and Show Info — TVmaze / TMDB / OMDb</span></h1>
+
+  <fieldset>
+    <legend>Query</legend>
+    <div class="modes">
+      <label><input type="radio" name="mode" value="cast" checked> cast list</label>
+      <label><input type="radio" name="mode" value="actor"> actor</label>
+      <label><input type="radio" name="mode" value="show"> show info</label>
+    </div>
+    <input type="text" id="query" placeholder="'Show S1E1', 'Movie (1972)', or 'Actor Name'" autofocus>
+    <div class="checks castonly">
+      <label><input type="checkbox" id="movie"> movie</label>
+      <span class="meta">force movie lookup (otherwise TV is tried first)</span>
+    </div>
+  </fieldset>
+
+  <div class="buttons">
+    <button id="runBtn">Run</button>
+    <span id="spinner">running…</span>
+  </div>
+
+  <details class="examples">
+    <summary>Examples</summary>
+    <table>
+      <tr><td><code>star trek next generation s02e9</code></td><td>episode: guest + main cast</td></tr>
+      <tr><td><code>hope street</code></td><td>series: main cast</td></tr>
+      <tr><td><code>the godfather (1972)</code></td><td>movie cast (TMDB, OMDb fallback)</td></tr>
+      <tr><td><code>Diana Muldaur</code></td><td>actor: TV + movie credits</td></tr>
+    </table>
+    <p>Everything is a direct API lookup — no web scraping, no LLM; answers in
+    about a second. Actor names in cast tables are clickable.</p>
+  </details>
+
+  <div id="out">
+    <fieldset>
+      <legend>Result</legend>
+      <div id="result"></div>
+    </fieldset>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+const mode = () => document.querySelector('input[name=mode]:checked').value;
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function syncMode() {
+  document.querySelector('.castonly').classList.toggle('dim', mode() !== 'cast');
+}
+document.querySelectorAll('input[name=mode]').forEach(r =>
+  r.addEventListener('change', syncMode));
+syncMode();
+
+function pairTable(rows, leftHead, rightHead) {
+  if (!rows || !rows.length) return '';
+  return '<div class="tablewrap"><table>'
+    + `<tr><th>${leftHead}</th><th>${rightHead}</th></tr>`
+    + rows.map(r => {
+        const actor = r.actor ?? '';
+        const link = actor
+          ? `<a href="#" class="actorlink" data-actor="${esc(actor)}" title="look up ${esc(actor)}">${esc(actor)}</a>`
+          : '';
+        return leftHead === 'Character'
+          ? `<tr><td>${esc(r.character)}</td><td>${link}</td></tr>`
+          : `<tr><td>${link}</td><td>${esc(r.character)}</td></tr>`;
+      }).join('')
+    + '</table></div>';
+}
+
+function render(rec) {
+  let h = '';
+  if (rec.kind === 'tv') {
+    h += `<h2>${esc(rec.show)} (${esc((rec.premiered || '?').slice(0, 4))})</h2>`;
+    if (rec.episode) {
+      h += `<div class="meta">Episode: ${esc(rec.episode)} (${esc(rec.airdate || 'no airdate')})</div>`;
+      if (rec.guest_cast && rec.guest_cast.length)
+        h += '<h3>Guest cast</h3>' + pairTable(rec.guest_cast, 'Character', 'Actor');
+    }
+    h += '<h3>Main cast</h3>' + pairTable(rec.main_cast, 'Character', 'Actor');
+    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
+  } else if (rec.kind === 'movie') {
+    h += `<h2>${esc(rec.title)}</h2>`;
+    h += `<div class="meta">Released ${esc(rec.released || '?')} · source: ${esc(rec.source)}</div>`;
+    if (rec.plot) h += `<p>${esc(rec.plot)}</p>`;
+    h += '<h3>Cast</h3>' + pairTable(rec.cast, 'Actor', 'Character');
+  } else if (rec.kind === 'actor') {
+    h += `<h2>${esc(rec.name)}</h2>`;
+    if (rec.birthday) h += `<div class="meta">b. ${esc(rec.birthday)}</div>`;
+    if (rec.tv_credits && rec.tv_credits.length) {
+      h += '<h3>TV (TVmaze)</h3><div class="tablewrap"><table><tr><th>Show</th><th>Year</th><th>Character</th></tr>'
+        + rec.tv_credits.map(c =>
+            `<tr><td>${esc(c.show)}</td><td>${esc((c.premiered || '?').slice(0, 4))}</td><td>${esc(c.character)}</td></tr>`
+          ).join('') + '</table></div>';
+    }
+    if (rec.movie_credits && rec.movie_credits.length) {
+      h += '<h3>Movies (TMDB)</h3><div class="tablewrap"><table><tr><th>Title</th><th>Year</th><th>Character</th></tr>'
+        + rec.movie_credits.map(c =>
+            `<tr><td>${esc(c.title)}</td><td>${esc((c.released || '?').slice(0, 4))}</td><td>${esc(c.character)}</td></tr>`
+          ).join('') + '</table></div>';
+    }
+  } else if (rec.kind === 'show') {
+    h += `<h2>${esc(rec.show)} (${esc((rec.premiered || '?').slice(0, 4))})</h2>`;
+    h += `<div class="meta">${esc(rec.status || '')}`
+      + (rec.network ? ` · ${esc(rec.network)}` : '')
+      + (rec.genres && rec.genres.length ? ` · ${esc(rec.genres.join(', '))}` : '')
+      + '</div>';
+    if (rec.summary) h += `<p>${esc(rec.summary)}</p>`;
+    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
+  } else {
+    h += `<pre>${esc(JSON.stringify(rec, null, 2))}</pre>`;
+  }
+  h += `<div class="meta">${esc(rec.elapsed ?? '?')}s</div>`;
+  return h;
+}
+
+function show(html) { $('result').innerHTML = html; $('out').classList.add('on'); }
+
+async function run() {
+  if (!$('query').value.trim()) { show('<p class="error">Enter a query first.</p>'); return; }
+  $('runBtn').disabled = true;
+  $('spinner').classList.add('on'); $('out').classList.remove('on');
+  try {
+    const resp = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: mode(),
+        query: $('query').value,
+        movie: $('movie').checked,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { show(`<p class="error">${esc(data.error || resp.statusText)}</p>`); return; }
+    if (data.exit_code !== 0) {
+      show(`<p class="error">${data.exit_code === 1 ? 'Nothing found.' : 'search_shows exited with code ' + data.exit_code}</p>`
+        + (data.stderr.trim() ? `<pre>${esc(data.stderr.trim())}</pre>` : ''));
+      return;
+    }
+    let rec;
+    try { rec = JSON.parse(data.stdout); }
+    catch { show(`<p class="error">Could not parse JSON output.</p><pre>${esc(data.stdout)}</pre>`); return; }
+    let html = render(rec);
+    if (data.stderr && data.stderr.trim())
+      html += `<details><summary class="meta">warnings</summary><pre>${esc(data.stderr)}</pre></details>`;
+    show(html);
+  } catch (e) {
+    show(`<p class="error">${esc(String(e))}</p>`);
+  } finally {
+    $('runBtn').disabled = false;
+    $('spinner').classList.remove('on');
+  }
+}
+
+$('result').addEventListener('click', e => {
+  const a = e.target.closest('a.actorlink');
+  if (!a) return;
+  e.preventDefault();
+  document.querySelector('input[name=mode][value=actor]').checked = true;
+  syncMode();
+  $('query').value = a.dataset.actor;
+  run();
+});
+
+$('runBtn').addEventListener('click', run);
+$('query').addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+</script>
+</body>
+</html>
