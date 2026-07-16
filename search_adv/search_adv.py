@@ -79,9 +79,13 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Timeout in seconds for Ollama generation requests")
     p.add_argument("--no-cache", action="store_true", help="Disable page cache")
     p.add_argument("--actor", default=None, metavar="REF",
-                   help="Actor lookup: 'Show S1E1 Character' or 'Actor Name'")
+                   help="Actor lookup: 'Show S1E1 Character' or 'Actor Name'. "
+                        "Prefer search_shows (http://mb.ldmathes.cc:5020) for this — "
+                        "direct API lookups, no LLM, answers in under a second.")
     p.add_argument("--cast", default=None, metavar="REF",
-                   help="Cast list: 'Show S1E1' or 'Movie Title Year'")
+                   help="Cast list: 'Show S1E1' or 'Movie Title Year'. "
+                        "Prefer search_shows (http://mb.ldmathes.cc:5020) for this — "
+                        "direct API lookups, no LLM, answers in under a second.")
     p.add_argument("--validate", action="store_true",
                    help="With --cast: resolve/parse the reference, print it, and exit (no search)")
     p.add_argument("--no-resolve", action="store_true", dest="no_resolve",

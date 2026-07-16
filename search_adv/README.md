@@ -4,8 +4,17 @@ Created: 2025-07-15 14:00 UTC
 Updated: 2026-07-15 21:00 UTC — documented --cast / --actor modes, --validate, --no-resolve
 Updated: 2026-07-15 21:15 UTC — documented cast/actor pipeline modules (actor, castref, show_resolver, structured_cast, browser, utils)
 Updated: 2026-07-15 22:30 UTC — documented --quiet, --ollama-timeout, parallel downloads
+Updated: 2026-07-16 — note: use `../search_shows` for cast/actor lookups instead
 
 **Local RAG search tool — DuckDuckGo + full web retrieval + Ollama**
+
+> **For cast lists and actor lookups, use [`search_shows`](../search_shows/)
+> instead** — web GUI at http://mb.ldmathes.cc:5020. It's direct API lookups
+> (TVmaze/TMDB/OMDb), no scraping, no LLM, answers in under a second, and
+> handles disambiguation (partial names, misspellings, same-titled movies)
+> that this tool's `--cast`/`--actor` modes never did. Those modes are kept
+> here only until search_shows fully replaces them — general search (the
+> `query` mode / web GUI's "general search" radio) is still this tool's job.
 
 search_adv is a command-line utility that answers questions by:
 
