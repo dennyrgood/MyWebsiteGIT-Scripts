@@ -31,6 +31,12 @@ def favicon():
     return send_file(HERE / "favicon.ico")
 
 
+@app.get("/apple-touch-icon.png")
+@app.get("/apple-touch-icon-precomposed.png")
+def apple_touch_icon():
+    return send_file(HERE / "apple-touch-icon.png")
+
+
 def _build_args(body: dict) -> list[str]:
     """Build the CLI arg list from named fields — never a raw shell string."""
     args: list[str] = []
