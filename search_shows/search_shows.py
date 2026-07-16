@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/Users/dennishmathes/repos/scripts/search_shows/.venv/bin/python
 # search_shows.py — cast / actor / show lookup via structured APIs (TVmaze, OMDb, TMDB)
 # 2026-07-16 — replaces search_adv's scrape+LLM pipeline with direct API calls.
 #
