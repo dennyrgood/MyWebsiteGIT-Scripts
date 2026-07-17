@@ -13,8 +13,8 @@ import json
 import logging
 import os
 import time
+import urllib.request
 from datetime import datetime, timezone
-from pathlib import Path
 
 from config import (
     FLEET,
@@ -24,10 +24,10 @@ from config import (
     TIMEOUT_TCP_MS,
     TIMEOUT_HTTP_MS,
     TIMEOUT_PUBLIC_MS,
-    ONEDRIVE_PATH,
+    METRICS_PORT,
 )
 from checkers import tcp_checker, http_checker
-from checkers import ollama_checker, comfyui_checker, openwebui_checker, flask_checker, plex_checker, onedrive_heartbeat_checker, syncthing_checker, immich_checker
+from checkers import ollama_checker, comfyui_checker, openwebui_checker, flask_checker, plex_checker, http_heartbeat_checker, syncthing_checker, immich_checker
 from reporters import json_reporter
 
 logger = logging.getLogger(__name__)
@@ -39,28 +39,24 @@ CHECKER_MAP = {
     "openwebui": openwebui_checker,
     "flask": flask_checker,
     "plex": plex_checker,
-    "onedrive_heartbeat": onedrive_heartbeat_checker,
+    "http_heartbeat": http_heartbeat_checker,
     "syncthing": syncthing_checker,
     "immich": immich_checker,
 }
 
-# OneDrive _sync_monitor path — imported from config for consistency
-_SYNC_MONITOR = ONEDRIVE_PATH / "_sync_monitor"
-
 
 def _read_machine_info(tailscale_name: str) -> dict | None:
     """
-    Read machine_info_{tailscale_name}.json from OneDrive _sync_monitor.
-    Checks host-specific subdirectory first (Mac writers), falls back to root (Windows writers).
-    Returns parsed dict or None if missing or unreadable — never raises.
+    Fetch machine_info_{tailscale_name}.json from the target machine's fleet_metrics_server
+    over Tailscale HTTP. The checker's own box is reached via 127.0.0.1. Returns the parsed
+    dict, or None if unreachable/unreadable — never raises. Callers should only invoke this
+    when the host is already known reachable, so a down machine doesn't cost a timeout.
     """
-    subdir = _SYNC_MONITOR / tailscale_name
-    base = subdir if subdir.is_dir() else _SYNC_MONITOR
-    info_file = base / f"machine_info_{tailscale_name}.json"
-    if not info_file.exists():
-        return None
+    host = "127.0.0.1" if tailscale_name == CHECKER_HOST else tailscale_name
+    url = f"http://{host}:{METRICS_PORT}/machine_info_{tailscale_name}.json"
     try:
-        return json.loads(info_file.read_text(encoding="utf-8-sig"))
+        with urllib.request.urlopen(url, timeout=TIMEOUT_HTTP_MS / 1000) as resp:
+            return json.loads(resp.read().decode("utf-8-sig"))
     except Exception:
         return None
 
@@ -131,9 +127,9 @@ def _check_machine(machine_cfg: dict, cycle_timestamp: str) -> dict:
 
         service_results.append(svc_result)
 
-    # Read machine_info sidecar directly from OneDrive _sync_monitor
-    # Works for all machines regardless of whether they have a heartbeat service
-    machine_info = _read_machine_info(tailscale_name)
+    # Pull machine_info from the target's fleet_metrics_server over Tailscale.
+    # Only when the host is reachable — otherwise the GET would just burn a timeout.
+    machine_info = _read_machine_info(tailscale_name) if host_up else None
 
     # Strip any _machine_info keys left by heartbeat checker (legacy path, no-op if absent)
     for svc_result in service_results:

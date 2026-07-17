@@ -1,7 +1,8 @@
 # onedrive_heartbeat_writer_server.ps1
 # Fleet FLEET_OPS - Heartbeat + Machine Info + Metrics History Writer
 # Writes heartbeat_{host}.txt, machine_info_{host}.json, and metrics_history_{host}.json
-# to OneDrive _sync_monitor (flat root, Windows machines)
+# to the local C:\fleet_monitor dir, served over Tailscale by fleet_metrics_server.py.
+# (Filename keeps the "onedrive" prefix for Task Scheduler compatibility; OneDrive is no longer used.)
 # Main loop: 150s — heartbeat + machine_info
 # History: every 30s tick (every 5th tick = 150s triggers machine_info write)
 # Last updated: 2026-06-16 14:12 UTC
@@ -15,13 +16,9 @@ $hostnameMap = @{
 $rawHost     = $env:COMPUTERNAME.ToLower()
 $checkerHost = if ($hostnameMap.ContainsKey($rawHost)) { $hostnameMap[$rawHost] } else { $rawHost }
 
-# ── OneDrive path resolution ───────────────────────────────────
+# ── Local metrics dir (served over Tailscale; no OneDrive) ─────
 
-$onedrivePath = if ($env:OneDriveConsumer) { $env:OneDriveConsumer }
-                elseif ($env:OneDrive)     { $env:OneDrive }
-                else                       { Join-Path $env:USERPROFILE "OneDrive" }
-
-$heartbeatDir  = Join-Path $onedrivePath "_sync_monitor"
+$heartbeatDir  = if ($env:FLEET_METRICS_DIR) { $env:FLEET_METRICS_DIR } else { "C:\fleet_monitor" }
 $heartbeatFile = Join-Path $heartbeatDir "heartbeat_$checkerHost.txt"
 $infoFile      = Join-Path $heartbeatDir "machine_info_$checkerHost.json"
 $historyFile   = Join-Path $heartbeatDir "metrics_history_$checkerHost.json"

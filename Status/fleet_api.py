@@ -6,7 +6,7 @@
 import os
 import json
 import time
-from pathlib import Path
+import urllib.request
 from datetime import datetime
 from flask import Flask, jsonify, make_response, request, send_file, send_from_directory
 
@@ -77,42 +77,30 @@ def get_status():
 def get_history(host):
     """
     Returns the metrics history for a host as a JSON array.
-    Reads metrics_history_{host}.json from OneDrive _sync_monitor.
-    Path resolution: checks {host}/ subdirectory first (Mac), falls back to root (Windows).
-    Returns all entries — no timestamp filtering (file holds at most 120 entries = 1 hour).
+    Pulls metrics_history_{host}.json from that host's fleet_metrics_server over Tailscale
+    (the checker's own box via 127.0.0.1). The file is JSON-lines; at most 120 entries
+    (~1 hour). Unreachable target → empty array, so the dashboard degrades gracefully.
     """
-    sync_root = Path(config.ONEDRIVE_PATH) / "_sync_monitor"
-    filename  = f"metrics_history_{host}.json"
+    fetch_host = "127.0.0.1" if host == getattr(config, "CHECKER_HOST", "") else host
+    url = f"http://{fetch_host}:{config.METRICS_PORT}/metrics_history_{host}.json"
 
-    # Mac: subdirectory path
-    subdir_path = sync_root / host / filename
-    # Windows: flat root path
-    root_path   = sync_root / filename
-
-    if subdir_path.exists():
-        history_path = subdir_path
-    elif root_path.exists():
-        history_path = root_path
-    else:
+    try:
+        with urllib.request.urlopen(url, timeout=3) as r:
+            text = r.read().decode("utf-8-sig")
+    except Exception:
         response = make_response(jsonify([]), 200)
         response.headers['Access-Control-Allow-Origin'] = '*'
         return response
 
     entries = []
-    try:
-        lines = history_path.read_text(encoding="utf-8").splitlines()
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue  # skip any malformed lines silently
-    except IOError as e:
-        response = make_response(jsonify({"error": f"Failed to read history: {str(e)}"}), 503)
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return response
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue  # skip any malformed lines silently
 
     response = make_response(jsonify(entries), 200)
     response.headers['Access-Control-Allow-Origin'] = '*'

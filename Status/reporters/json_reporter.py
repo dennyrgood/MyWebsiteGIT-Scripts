@@ -1,7 +1,7 @@
 """
 reporters/json_reporter.py — JSON file reporter
 Receives completed state from the engine.
-Writes one JSON file per machine + one master JSON file to OneDrive STATUS_DIR.
+Writes one JSON file per machine + one master JSON file to the local STATUS_DIR.
 Also writes an append-only log file per checker instance.
 Standard interface: report(state) — called by engine after every poll cycle.
 """
