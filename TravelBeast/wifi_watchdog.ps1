@@ -34,9 +34,9 @@ if (Test-Ping) {
     Write-Log "Connectivity lost - toggling adapter"
 
     # Stage 1: disable/enable adapter
-    Disable-NetAdapter -Name $adapterName -Confirm:$false
+    netsh interface set inteface $adapterName disable
     Start-Sleep -Seconds 5
-    Enable-NetAdapter -Name $adapterName -Confirm:$false
+    netsh interface set interface $adapterName enable
     Start-Sleep -Seconds 10
 
     if (Test-Ping) {
