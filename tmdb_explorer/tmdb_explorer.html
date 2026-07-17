@@ -353,6 +353,7 @@ async function showDetail(type, id) {
   let d;
   try { d = await api("/api/details", { type, id }); }
   catch (e) { out.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
+  window._detail = { d, type };  // for the "copy spreadsheet row" button
   out.innerHTML = type === "movie" ? renderMovie(d) : renderTv(d);
 }
 
@@ -368,6 +369,107 @@ function money(n) { return n ? "$" + n.toLocaleString("en-US") : ""; }
 function runtimeStr(mins) {
   if (!mins) return "";
   return mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+}
+
+/* ---------- spreadsheet clipboard row ----------
+   One tab-separated row per title, for pasting a new row into the
+   Movies-and-Shows sheet at column A. SHEET_COLUMNS lists the sheet's columns
+   left to right: a field name = the app fills that column, null = leave it
+   blank (your manual / formula columns). This array is the ONE thing to change
+   when the sheet layout changes. Current mapping is a PLACEHOLDER for testing:
+   the 14 existing columns A–N blank, then the 22 TMDB columns O–AJ. */
+
+function castTop5(d, isTv) {
+  const cast = isTv
+    ? (d.aggregate_credits?.cast || [])
+    : (d.credits?.cast || []).slice().sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9));
+  return cast.slice(0, 5).map(c => {
+    const ch = isTv ? (c.roles?.[0]?.character || "") : (c.character || "");
+    return ch ? `${c.name} (${ch})` : c.name;
+  }).filter(Boolean).join("; ");
+}
+
+function epText(e) {
+  if (!e) return "";
+  const s = `S${e.season_number}E${e.episode_number} — ${e.name || ""}`;
+  return e.air_date ? `${s} (${e.air_date})` : s;
+}
+
+const ROW_FIELDS = {
+  tmdb_id: d => d.id,
+  tmdb_url: (d, tv) => `https://www.themoviedb.org/${tv ? "tv" : "movie"}/${d.id}`,
+  title: (d, tv) => tv ? d.name : d.title,
+  seasons_made: (d, tv) => tv ? (d.number_of_seasons ?? "") : 0,  // 0 for movies
+  original_language: d => d.original_language,
+  origin_country: d => (d.origin_country || []).join(", "),
+  overview: d => d.overview,
+  genres: d => (d.genres || []).map(g => g.name).join(", "),
+  certification: (d, tv) => tv ? usCertTv(d) : usCertMovie(d),
+  tmdb_status: d => d.status,
+  release_date: (d, tv) => tv ? d.first_air_date : d.release_date,
+  runtime: (d, tv) => tv ? (d.episode_run_time || [])[0] : d.runtime,
+  cast_top5: (d, tv) => castTop5(d, tv),
+  imdb_id: d => d.external_ids?.imdb_id,
+  type: (d, tv) => tv ? d.type : "",
+  in_production: (d, tv) => tv ? (d.in_production ? "Yes" : "No") : "",
+  last_air_date: (d, tv) => tv ? d.last_air_date : "",
+  number_of_seasons: (d, tv) => tv ? d.number_of_seasons : "",
+  number_of_episodes: (d, tv) => tv ? d.number_of_episodes : "",
+  last_episode_to_air: (d, tv) => tv ? epText(d.last_episode_to_air) : "",
+  next_episode_to_air: (d, tv) => tv ? epText(d.next_episode_to_air) : "",
+  created_by: (d, tv) => tv ? (d.created_by || []).map(c => c.name).join(", ") : "",
+  networks: (d, tv) => tv ? (d.networks || []).map(n => n.name).join(", ") : "",
+  tvdb_id: (d, tv) => tv ? d.external_ids?.tvdb_id : "",
+};
+
+const SHEET_COLUMNS = [
+  null,         // A  Code (manual)
+  null,         // B  Sub (formula)
+  "tmdb_url",   // C  TMDB API — TMDB page URL
+  null,         // D  With (formula)
+  null,         // E  Avail (formula)
+  "title",      // F  Title — clean title
+  null,         // G  Download from… (manual)
+  null,         // H  BROADCAST - DELETE (manual)
+  "seasons_made", // I  Seasons made — number_of_seasons (0 for movies)
+  null,         // J  where (manual)
+  null,         // K  Date Avail (manual)
+  "tmdb_url",   // L  TMDB — link col, TMDB page URL
+  null,         // M  Status (manual notes)
+  "overview",   // N  Synopsis — TMDB overview
+  "tmdb_id",           // O  tmdb_id
+  "title",             // P  title_tmdb (clean title)
+  "original_language", // Q
+  "origin_country",    // R
+  "overview",          // S  overview
+  "genres",            // T
+  "certification",     // U
+  "tmdb_status",       // V
+  "release_date",      // W
+  "runtime",           // X
+  "cast_top5",         // Y
+  "imdb_id",           // Z
+  "type",              // AA
+  "in_production",     // AB
+  "last_air_date",     // AC
+  "number_of_seasons", // AD
+  "number_of_episodes",// AE
+  "last_episode_to_air", // AF
+  "next_episode_to_air", // AG
+  "created_by",        // AH
+  "networks",          // AI
+  "tvdb_id",           // AJ
+];
+
+function sheetRow(d, type) {
+  const isTv = type === "tv";
+  const clean = v => (v === null || v === undefined ? "" : String(v)).replace(/[\t\r\n]+/g, " ").trim();
+  return SHEET_COLUMNS.map(key => key ? clean(ROW_FIELDS[key](d, isTv)) : "").join("\t");
+}
+
+function copyRow(btn) {
+  const cur = window._detail;
+  if (cur && cur.d) copyText(sheetRow(cur.d, cur.type), btn);
 }
 
 function headBlock(d, type, cert, extraMeta) {
@@ -388,6 +490,9 @@ function headBlock(d, type, cert, extraMeta) {
         <div>
           ${idChip("TMDB", d.id)}
           ${imdb ? idChip("IMDB", imdb) : ""}
+        </div>
+        <div style="margin:.35rem 0">
+          <button class="small" onclick="copyRow(this)">📋 Copy spreadsheet row</button>
         </div>
         <p>${esc(d.overview || "")}</p>
       </div>
