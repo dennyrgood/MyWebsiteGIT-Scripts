@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Show Searches</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#f5f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161614" media="(prefers-color-scheme: dark)">
+<style>
+  :root {
+    --bg: #f5f5f2; --panel: #ffffff; --ink: #1e1e1c; --muted: #6b6b66;
+    --line: #dcdcd6; --accent: #2f5f8f; --err: #a33a2e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --panel: #201f1d; --ink: #e8e6e0; --muted: #97948c;
+      --line: #38362f; --accent: #7aa8d4; --err: #d97b6c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.5rem; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 -apple-system, "Helvetica Neue", sans-serif;
+  }
+  main { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 1.2rem; margin: 0 0 1rem; }
+  h1 span { color: var(--muted); font-weight: normal; font-size: .85rem; }
+  fieldset {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    padding: 1rem; margin: 0 0 1rem;
+  }
+  legend { font-size: .8rem; color: var(--muted); padding: 0 .4rem; }
+  input[type=text] {
+    width: 100%; padding: .4rem .5rem; border: 1px solid var(--line);
+    border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit;
+    font-size: 16px; /* <16px makes iOS Safari zoom in on focus */
+  }
+  .modes { display: flex; flex-wrap: wrap; gap: 1.25rem; margin-bottom: .75rem; }
+  .modes label, .checks label {
+    display: inline-flex; align-items: center; gap: .35rem;
+    font-size: .9rem; color: var(--ink); margin: 0; cursor: pointer;
+  }
+  .checks { margin-top: .6rem; }
+  .castonly.dim { opacity: .45; pointer-events: none; }
+  .buttons { display: flex; gap: .75rem; align-items: center; margin-bottom: 1.25rem; }
+  button {
+    padding: .5rem 1.1rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--accent); color: #fff; font: inherit; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  #spinner { display: none; color: var(--muted); font-size: .9rem; }
+  #spinner.on { display: inline-block; }
+  #spinner::before {
+    content: ""; display: inline-block; width: .8em; height: .8em;
+    border: 2px solid var(--muted); border-top-color: transparent;
+    border-radius: 50%; margin-right: .4rem; vertical-align: -0.1em;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #out { display: none; }
+  #out.on { display: block; }
+  h2 { font-size: 1rem; margin: .2rem 0 .4rem; }
+  h3 { font-size: .85rem; margin: .9rem 0 .3rem; color: var(--muted); }
+  .tablewrap { overflow-x: auto; margin: .3rem 0; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid var(--line); padding: .25rem .6rem; text-align: left; }
+  a { color: var(--accent); }
+  .meta { color: var(--muted); font-size: .85rem; margin-top: .75rem; }
+  pre {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: .6rem; overflow-x: auto; font-size: .82rem; white-space: pre-wrap;
+  }
+  .error { color: var(--err); font-weight: 600; }
+  details.examples {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    padding: .6rem 1rem; margin-bottom: 1.25rem; font-size: .9rem;
+  }
+  details.examples summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
+  details.examples table { border-collapse: collapse; margin: .4rem 0; }
+  details.examples td { border: none; padding: .1rem 1rem .1rem 0; color: var(--muted); }
+  details.examples td:first-child { color: var(--ink); }
+  details.examples code { background: var(--bg); padding: 0 .25em; border-radius: 3px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Show Searches <span>Casts, Actors, and Show Info — TVmaze / TMDB / OMDb</span></h1>
+
+  <fieldset>
+    <legend>Query</legend>
+    <div class="modes">
+      <label><input type="radio" name="mode" value="cast" checked> cast list</label>
+      <label><input type="radio" name="mode" value="actor"> actor</label>
+      <label><input type="radio" name="mode" value="show"> show info</label>
+    </div>
+    <input type="text" id="query" autofocus>
+    <div class="meta" id="modehint"></div>
+    <div class="checks castonly">
+      <label><input type="checkbox" id="movie"> movie</label>
+      <span class="meta">force movie lookup (otherwise TV is tried first)</span>
+    </div>
+    <div class="checks">
+      <label><input type="checkbox" id="list_matches"> list all matches</label>
+      <span class="meta">show every match instead of auto-picking the best one</span>
+    </div>
+  </fieldset>
+
+  <div class="buttons">
+    <button id="runBtn">Run</button>
+    <span id="spinner">running…</span>
+  </div>
+
+  <details class="examples">
+    <summary>Examples</summary>
+    <table>
+      <tr><td><code>star trek next generation s02e9</code></td><td>episode: guest + main cast</td></tr>
+      <tr><td><code>medium s0101</code> / <code>the office 4x10</code> / <code>medium season 4 episode 10</code></td><td>equivalent notations</td></tr>
+      <tr><td><code>medium season 4</code></td><td>season: episode list + main cast</td></tr>
+      <tr><td><code>hope street</code></td><td>series: main cast</td></tr>
+      <tr><td><code>the godfather (1972)</code></td><td>movie cast (TMDB, OMDb fallback)</td></tr>
+      <tr><td><code>Diana Muldaur</code></td><td>actor: TV + movie credits</td></tr>
+      <tr><td><code>star trek next gen s02e9 Maddox</code></td><td>actor mode: who played a character</td></tr>
+    </table>
+    <p>Everything is a direct API lookup — no web scraping, no LLM; answers in
+    about a second. Actor names in cast tables are clickable.</p>
+  </details>
+
+  <div id="out">
+    <fieldset>
+      <legend>Result</legend>
+      <div id="result"></div>
+    </fieldset>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+const mode = () => document.querySelector('input[name=mode]:checked').value;
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+const MODE_HELP = {
+  cast: {
+    ph: "medium s0101 · the office 4x10 · medium season 4 · the godfather (1972)",
+    hint: ["Show + episode → guest & main cast",
+           "Show + episode title (the office dinner party) also works",
+           "Season only → episode list",
+           "Movie + year → movie cast",
+           "Add a character after the show or episode (medium s0101 joe) to see who played them"],
+  },
+  actor: {
+    ph: "Diana Muldaur · medium s0101 joe · chicago pd voight",
+    hint: ["An actor's name → their TV & movie credits",
+           "Or show + character (episode optional) → who played them"],
+  },
+  show: {
+    ph: "hope street",
+    hint: ["A show title → summary, network, genres, status"],
+  },
+};
+
+function syncMode() {
+  document.querySelector('.castonly').classList.toggle('dim', mode() !== 'cast');
+  $('query').placeholder = MODE_HELP[mode()].ph;
+  $('modehint').innerHTML = MODE_HELP[mode()].hint.map(esc).join('<br>');
+}
+document.querySelectorAll('input[name=mode]').forEach(r =>
+  r.addEventListener('change', syncMode));
+syncMode();
+
+function pairTable(rows, leftHead, rightHead) {
+  if (!rows || !rows.length) return '';
+  return '<div class="tablewrap"><table>'
+    + `<tr><th>${leftHead}</th><th>${rightHead}</th></tr>`
+    + rows.map(r => {
+        const actor = r.actor ?? '';
+        const link = actor
+          ? `<a href="#" class="actorlink" data-actor="${esc(actor)}" title="look up ${esc(actor)}">${esc(actor)}</a>`
+          : '';
+        return leftHead === 'Character'
+          ? `<tr><td>${esc(r.character)}</td><td>${link}</td></tr>`
+          : `<tr><td>${link}</td><td>${esc(r.character)}</td></tr>`;
+      }).join('')
+    + '</table></div>';
+}
+
+function render(rec) {
+  let h = '';
+  if (rec.kind === 'choices') {
+    h += `<p>Multiple possible matches for <strong>${esc(rec.query)}</strong>`
+      + (rec.corrected ? ` (spelling suggestion: <strong>${esc(rec.corrected)}</strong>)` : '')
+      + ' — pick one:</p>';
+    if (rec.choice_of === 'actor') {
+      h += '<div class="tablewrap"><table><tr><th>Name</th><th>Detail</th></tr>'
+        + rec.candidates.map(c =>
+            `<tr><td><a href="#" class="choicelink actor" data-query="${esc(c.requery)}">${esc(c.name)}</a></td>`
+            + `<td>${esc(c.detail || '')}</td></tr>`
+          ).join('') + '</table></div>';
+    } else {
+      h += '<div class="tablewrap"><table><tr><th></th><th>Title</th><th>Year</th></tr>'
+        + rec.candidates.map(c =>
+            `<tr><td>${esc(c.type)}</td>`
+            + `<td><a href="#" class="choicelink${c.type === 'movie' ? ' movie' : ''}" data-query="${esc(c.requery)}">${esc(c.name)}</a></td>`
+            + `<td>${esc(c.year || '')}</td></tr>`
+          ).join('') + '</table></div>';
+    }
+    h += `<div class="meta">${esc(rec.elapsed ?? '?')}s</div>`;
+    return h;
+  }
+  if (rec.kind === 'tv') {
+    if (rec.resolved_via) h += `<div class="meta">Resolved: ${esc(rec.resolved_via)}</div>`;
+    h += `<h2>${esc(rec.show)} (${esc((rec.premiered || '?').slice(0, 4))})</h2>`;
+    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
+    if (rec.episode) {
+      h += `<div class="meta">Episode: ${esc(rec.episode)} (${esc(rec.airdate || 'no airdate')})</div>`;
+      if (rec.episode_summary) h += `<p>${esc(rec.episode_summary)}</p>`;
+      if (rec.guest_cast && rec.guest_cast.length)
+        h += '<h3>Guest cast</h3>' + pairTable(rec.guest_cast, 'Character', 'Actor');
+    }
+    if (rec.episodes) {
+      h += `<h3>Season ${esc(rec.season)} episodes</h3><div class="tablewrap"><table><tr><th>#</th><th>Title</th><th>Airdate</th></tr>`
+        + rec.episodes.map(e => {
+            const q = `${rec.show} s${String(rec.season).padStart(2, '0')}e${String(e.number).padStart(2, '0')}`;
+            return `<tr><td>E${String(e.number).padStart(2, '0')}</td>`
+              + `<td><a href="#" class="eplink" data-query="${esc(q)}" title="cast of ${esc(q)}">${esc(e.name)}</a></td>`
+              + `<td>${esc(e.airdate || '')}</td></tr>`;
+          }).join('') + '</table></div>';
+    }
+    if (rec.seasons && rec.seasons.length) {
+      h += `<h3>Seasons</h3><div class="tablewrap"><table><tr><th>Season</th><th>Year</th><th>Episodes</th></tr>`
+        + rec.seasons.map(s => {
+            const q = `${rec.show} season ${s.number}`;
+            return `<tr><td><a href="#" class="seasonlink" data-query="${esc(q)}" title="episodes of ${esc(q)}">Season ${s.number}</a></td>`
+              + `<td>${esc((s.premiered || '?').slice(0, 4))}</td><td>${esc(s.episode_count ?? '')}</td></tr>`;
+          }).join('') + '</table></div>';
+    }
+    h += '<h3>Main cast</h3>' + pairTable(rec.main_cast, 'Character', 'Actor');
+  } else if (rec.kind === 'movie') {
+    if (rec.resolved_via) h += `<div class="meta">Resolved: ${esc(rec.resolved_via)}</div>`;
+    h += `<h2>${esc(rec.title)}</h2>`;
+    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">${esc(rec.source === 'OMDb' ? 'IMDb page' : 'TMDB page')}</a></div>`;
+    h += `<div class="meta">Released ${esc(rec.released || '?')} · source: ${esc(rec.source)}</div>`;
+    if (rec.plot) h += `<p>${esc(rec.plot)}</p>`;
+    h += '<h3>Cast</h3>' + pairTable(rec.cast, 'Actor', 'Character');
+    if (rec.other_matches && rec.other_matches.length) {
+      h += '<div class="meta">Not it? Other matches: '
+        + rec.other_matches.map(mname =>
+            `<a href="#" class="titlelink movie" data-query="${esc(mname)}" title="cast of ${esc(mname)}">${esc(mname)}</a>`
+          ).join(' · ') + '</div>';
+    }
+  } else if (rec.kind === 'actor') {
+    if (rec.error) {
+      h += `<p class="error">${esc(rec.error)}</p>`;
+      if (rec.characters_seen && rec.characters_seen.length)
+        h += '<div class="meta">Characters found: '
+          + rec.characters_seen.map(c => rec.requery_prefix
+              ? `<a href="#" class="charlink" data-query="${esc(rec.requery_prefix + ' ' + c)}" title="who played ${esc(c)}">${esc(c)}</a>`
+              : esc(c)
+            ).join(', ') + '</div>';
+      h += `<div class="meta">${esc(rec.elapsed ?? '?')}s</div>`;
+      return h;
+    }
+    if (rec.character_match) {
+      const cm = rec.character_match;
+      h += `<p><strong>${esc(cm.character)}</strong> in ${esc(cm.show)}`
+        + (cm.episode ? ` ${esc(cm.episode)}` : '')
+        + ` was played by <strong>${esc(cm.actor)}</strong></p>`;
+    }
+    h += `<h2>${esc(rec.name)}</h2>`;
+    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
+    if (rec.birthday) h += `<div class="meta">b. ${esc(rec.birthday)}${rec.deathday ? ` &middot; d. ${esc(rec.deathday)}` : ''}</div>`;
+    if (rec.tv_credits && rec.tv_credits.length) {
+      h += '<h3>TV (TVmaze)</h3><div class="tablewrap"><table><tr><th>Show</th><th>Year</th><th>Character</th></tr>'
+        + rec.tv_credits.map(c =>
+            `<tr><td><a href="#" class="titlelink" data-query="${esc(c.show)}" title="cast of ${esc(c.show)}">${esc(c.show)}</a></td>`
+            + `<td>${esc((c.premiered || '?').slice(0, 4))}</td><td>${esc(c.character)}</td></tr>`
+          ).join('') + '</table></div>';
+    }
+    if (rec.movie_credits && rec.movie_credits.length) {
+      h += '<h3>Movies (TMDB)</h3><div class="tablewrap"><table><tr><th>Title</th><th>Year</th><th>Character</th></tr>'
+        + rec.movie_credits.map(c => {
+            const q = `${c.title} (${(c.released || '').slice(0, 4)})`;
+            return `<tr><td><a href="#" class="titlelink movie" data-query="${esc(q)}" title="cast of ${esc(q)}">${esc(c.title)}</a></td>`
+              + `<td>${esc((c.released || '?').slice(0, 4))}</td><td>${esc(c.character)}</td></tr>`;
+          }).join('') + '</table></div>';
+    }
+  } else if (rec.kind === 'show') {
+    if (rec.resolved_via) h += `<div class="meta">Resolved: ${esc(rec.resolved_via)}</div>`;
+    if (rec.query && rec.query.toLowerCase() !== rec.show.toLowerCase())
+      h += `<div class="meta">Best match for “${esc(rec.query)}”:</div>`;
+    h += `<h2>${esc(rec.show)} (${esc((rec.premiered || '?').slice(0, 4))})</h2>`;
+    if (rec.url) h += `<div class="meta"><a href="${esc(rec.url)}" target="_blank" rel="noopener">TVmaze page</a></div>`;
+    h += `<div class="meta">${esc(rec.status || '')}`
+      + (rec.network ? ` · ${esc(rec.network)}` : '')
+      + (rec.genres && rec.genres.length ? ` · ${esc(rec.genres.join(', '))}` : '')
+      + '</div>';
+    if (rec.summary) h += `<p>${esc(rec.summary)}</p>`;
+    h += `<div class="meta"><a href="#" class="titlelink" data-query="${esc(rec.show)}">Show cast</a></div>`;
+    if (rec.seasons && rec.seasons.length) {
+      h += `<h3>Seasons</h3><div class="tablewrap"><table><tr><th>Season</th><th>Year</th><th>Episodes</th></tr>`
+        + rec.seasons.map(s => {
+            const q = `${rec.show} season ${s.number}`;
+            return `<tr><td><a href="#" class="seasonlink" data-query="${esc(q)}" title="episodes of ${esc(q)}">Season ${s.number}</a></td>`
+              + `<td>${esc((s.premiered || '?').slice(0, 4))}</td><td>${esc(s.episode_count ?? '')}</td></tr>`;
+          }).join('') + '</table></div>';
+    }
+    if (rec.other_matches && rec.other_matches.length) {
+      h += '<div class="meta">Not it? Other matches: '
+        + rec.other_matches.map(mname =>
+            `<a href="#" class="showlink" data-query="${esc(mname.replace(/\s*\(\?\)$/, ''))}">${esc(mname)}</a>`
+          ).join(' · ') + '</div>';
+    }
+  } else {
+    h += `<pre>${esc(JSON.stringify(rec, null, 2))}</pre>`;
+  }
+  h += `<div class="meta">${esc(rec.elapsed ?? '?')}s</div>`;
+  return h;
+}
+
+function show(html) { $('result').innerHTML = html; $('out').classList.add('on'); }
+
+// Mirrors search_shows.py's episode-notation patterns (COMPACT_RE/SHORTHAND_RE/NXM_RE) —
+// a query naming a specific episode means "resolve straight to it", not "browse titles".
+const EPISODE_REF_RE = /\bs(\d{2})(\d{2})\b|\bs(\d{1,2})\s*e(\d{1,3})\b|\b(\d{1,2})x(\d{1,3})\b/i;
+
+async function run() {
+  if (!$('query').value.trim()) { show('<p class="error">Enter a query first.</p>'); return; }
+  if ($('list_matches').checked && EPISODE_REF_RE.test($('query').value))
+    $('list_matches').checked = false;
+  $('runBtn').disabled = true;
+  $('spinner').classList.add('on'); $('out').classList.remove('on');
+  try {
+    const resp = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: mode(),
+        query: $('query').value,
+        movie: $('movie').checked,
+        list_matches: $('list_matches').checked,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { show(`<p class="error">${esc(data.error || resp.statusText)}</p>`); return; }
+    if (data.exit_code !== 0) {
+      show(`<p class="error">${data.exit_code === 1 ? 'Nothing found.' : 'search_shows exited with code ' + data.exit_code}</p>`
+        + (data.stderr.trim() ? `<pre>${esc(data.stderr.trim())}</pre>` : ''));
+      return;
+    }
+    let rec;
+    try { rec = JSON.parse(data.stdout); }
+    catch { show(`<p class="error">Could not parse JSON output.</p><pre>${esc(data.stdout)}</pre>`); return; }
+    let html = render(rec);
+    if (data.stderr && data.stderr.trim())
+      html += `<details><summary class="meta">warnings</summary><pre>${esc(data.stderr)}</pre></details>`;
+    show(html);
+  } catch (e) {
+    show(`<p class="error">${esc(String(e))}</p>`);
+  } finally {
+    $('runBtn').disabled = false;
+    $('spinner').classList.remove('on');
+  }
+}
+
+$('result').addEventListener('click', e => {
+  const actor = e.target.closest('a.actorlink');
+  if (actor) {
+    e.preventDefault();
+    document.querySelector('input[name=mode][value=actor]').checked = true;
+    syncMode();
+    $('query').value = actor.dataset.actor;
+    run();
+    return;
+  }
+  const ch = e.target.closest('a.charlink');
+  if (ch) {
+    e.preventDefault();
+    document.querySelector('input[name=mode][value=actor]').checked = true;
+    syncMode();
+    $('query').value = ch.dataset.query;
+    run();
+    return;
+  }
+  const link = e.target.closest('a.eplink, a.titlelink, a.seasonlink');
+  if (link) {
+    e.preventDefault();
+    document.querySelector('input[name=mode][value=cast]').checked = true;
+    syncMode();
+    $('movie').checked = link.classList.contains('movie');
+    $('query').value = link.dataset.query;
+    run();
+    return;
+  }
+  const choice = e.target.closest('a.choicelink');
+  if (choice) {
+    e.preventDefault();
+    // keep the current mode; a movie candidate flips the movie checkbox
+    if (mode() === 'cast') $('movie').checked = choice.classList.contains('movie');
+    // picking a specific candidate means "resolve this one", not "list again"
+    $('list_matches').checked = false;
+    $('query').value = choice.dataset.query;
+    run();
+    return;
+  }
+  const sl = e.target.closest('a.showlink');
+  if (sl) {
+    e.preventDefault();
+    document.querySelector('input[name=mode][value=show]').checked = true;
+    syncMode();
+    $('query').value = sl.dataset.query;
+    run();
+  }
+});
+
+$('runBtn').addEventListener('click', run);
+$('query').addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+</script>
+</body>
+</html>

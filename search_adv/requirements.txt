@@ -1,0 +1,24 @@
+# requirements.txt — search_adv dependencies
+# 2025-07-15 14:00 UTC
+# 2025-07-15 17:30 UTC — added playwright as optional dependency for blocked domains
+
+duckduckgo-search>=6.2.0
+requests>=2.32.0
+urllib3>=2.2.0
+beautifulsoup4>=4.12.0
+lxml>=5.2.0
+readability-lxml>=0.8.1
+scikit-learn>=1.5.0
+numpy>=1.26.0
+pypdf>=4.2.0
+rich>=13.7.0
+diskcache>=5.6.0
+tqdm>=4.66.0
+
+# Web GUI (search_adv_web.py)
+flask>=3.0.0
+
+# Optional — enables browser fetch for IMDB, Fandom, Reddit, etc.
+# Install with:
+#   pip install playwright && playwright install chromium
+# playwright>=1.44.0

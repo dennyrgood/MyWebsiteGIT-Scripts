@@ -32,6 +32,9 @@ from pathlib import Path
 HOSTNAME_MAP = {
     "Denniss-MacBook-Air.local": "denniss-macbook-air",
     "Denniss-2ndMBA":            "denniss-2nd-macbook-air",
+    # mb2 renamed 2026-07-16 to match its tailnet name (fixes Ollama's
+    # DNS-rebinding 403 on hostname URLs); cover both raw spellings.
+    "denniss-2nd-macbook-air.local": "denniss-2nd-macbook-air",
     "Mathes-Mac-mini.local":     "mathes-mac-mini",
 }
 HOST = HOSTNAME_MAP.get(socket.gethostname(), socket.gethostname())
@@ -48,11 +51,11 @@ OUTPUT_DIR    = ONEDRIVE_PATH / "_sync_monitor" / HOST
 
 def get_ram() -> tuple[float, float]:
     """Returns (ram_total_gb, ram_used_gb) matching Activity Monitor methodology."""
-    out = subprocess.check_output(["sysctl", "-n", "hw.memsize"]).decode().strip()
+    out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], timeout=15).decode().strip()
     total_bytes = int(out)
     total_gb = round(total_bytes / (1024 ** 3), 1)
 
-    vm = subprocess.check_output(["vm_stat"]).decode()
+    vm = subprocess.check_output(["vm_stat"], timeout=15).decode()
 
     m = re.search(r"page size of (\d+) bytes", vm)
     page_size = int(m.group(1)) if m else 16384
@@ -74,7 +77,8 @@ def get_cpu_percent() -> float:
     try:
         out = subprocess.check_output(
             ["top", "-l", "2", "-n", "0", "-s", "1"],
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
+            timeout=15,
         ).decode()
         matches = re.findall(r"CPU usage:\s+([\d.]+)%\s+user,\s+([\d.]+)%\s+sys", out)
         if matches:
@@ -87,7 +91,7 @@ def get_cpu_percent() -> float:
 
 def get_disks() -> list[dict]:
     """Returns list of disk dicts. Includes /, /System/Volumes/Data, /Volumes/*."""
-    out = subprocess.check_output(["df", "-g"]).decode()
+    out = subprocess.check_output(["df", "-g"], timeout=15).decode()
     disks = []
     for line in out.splitlines()[1:]:
         parts = line.split()
@@ -114,7 +118,7 @@ def get_disks() -> list[dict]:
 def get_last_reboot() -> str:
     """Returns last reboot as 'Mon DD HH:MM' string."""
     try:
-        out = subprocess.check_output(["sysctl", "-n", "kern.boottime"]).decode()
+        out = subprocess.check_output(["sysctl", "-n", "kern.boottime"], timeout=15).decode()
         m = re.search(r"\}\s+(.+)$", out.strip())
         if m:
             dt = datetime.strptime(m.group(1).strip(), "%a %b %d %H:%M:%S %Y")
@@ -134,7 +138,8 @@ def get_os_info() -> tuple[str, str, str, bool]:
     try:
         out = subprocess.check_output(
             ["softwareupdate", "--history"],
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
+            timeout=20,
         ).decode()
         os_lines = [l for l in out.splitlines() if l.strip().startswith("macOS ")]
         if os_lines:
@@ -151,7 +156,8 @@ def get_os_info() -> tuple[str, str, str, bool]:
     try:
         out = subprocess.check_output(
             ["softwareupdate", "-l"],
-            stderr=subprocess.STDOUT
+            stderr=subprocess.STDOUT,
+            timeout=25,
         ).decode()
         if "restart" in out.lower() or "recommended" in out.lower():
             pending_reboot = True
@@ -163,8 +169,8 @@ def get_os_info() -> tuple[str, str, str, bool]:
 
 def get_os_build() -> str:
     try:
-        product = subprocess.check_output(["sw_vers", "-productVersion"]).decode().strip()
-        build   = subprocess.check_output(["sw_vers", "-buildVersion"]).decode().strip()
+        product = subprocess.check_output(["sw_vers", "-productVersion"], timeout=15).decode().strip()
+        build   = subprocess.check_output(["sw_vers", "-buildVersion"], timeout=15).decode().strip()
         return f"{product} ({build})"
     except Exception:
         return "unknown"

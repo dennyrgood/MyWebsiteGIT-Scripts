@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Advanced Searches</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#f5f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161614" media="(prefers-color-scheme: dark)">
+<style>
+  :root {
+    --bg: #f5f5f2; --panel: #ffffff; --ink: #1e1e1c; --muted: #6b6b66;
+    --line: #dcdcd6; --accent: #2f5f8f; --err: #a33a2e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --panel: #201f1d; --ink: #e8e6e0; --muted: #97948c;
+      --line: #38362f; --accent: #7aa8d4; --err: #d97b6c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.5rem; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 -apple-system, "Helvetica Neue", sans-serif;
+  }
+  main { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 1.2rem; margin: 0 0 1rem; }
+  h1 span { color: var(--muted); font-weight: normal; font-size: .85rem; }
+  fieldset {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    padding: 1rem; margin: 0 0 1rem;
+  }
+  legend { font-size: .8rem; color: var(--muted); padding: 0 .4rem; }
+  label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: .15rem; }
+  input[type=text], input[type=number] {
+    width: 100%; padding: .4rem .5rem; border: 1px solid var(--line);
+    border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit;
+    font-size: 16px; /* <16px makes iOS Safari zoom in on focus */
+  }
+  .row { display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: .75rem; }
+  .row > div { flex: 1 1 140px; }
+  .row:last-child { margin-bottom: 0; }
+  .modes { display: flex; gap: 1.25rem; margin-bottom: .75rem; }
+  .modes label, .checks label {
+    display: inline-flex; align-items: center; gap: .35rem;
+    font-size: .9rem; color: var(--ink); margin: 0; cursor: pointer;
+  }
+  .checks label.check {
+    display: inline-flex; align-items: center; gap: .35rem;
+    font-size: .9rem; color: var(--ink); margin: 0; cursor: pointer;
+  }
+  .castonly.dim { opacity: .45; pointer-events: none; }
+  .buttons { display: flex; gap: .75rem; align-items: center; margin-bottom: 1.25rem; }
+  button {
+    padding: .5rem 1.1rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--accent); color: #fff; font: inherit; cursor: pointer;
+  }
+  button.secondary { background: var(--panel); color: var(--ink); }
+  button:disabled { opacity: .5; cursor: default; }
+  #spinner { display: none; color: var(--muted); font-size: .9rem; }
+  #spinner.on { display: inline-block; }
+  #spinner::before {
+    content: ""; display: inline-block; width: .8em; height: .8em;
+    border: 2px solid var(--muted); border-top-color: transparent;
+    border-radius: 50%; margin-right: .4rem; vertical-align: -0.1em;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #out { display: none; }
+  #out.on { display: block; }
+  .answer .tablewrap { overflow-x: auto; margin: .5rem 0; }
+  .answer table { border-collapse: collapse; }
+  .answer th, .answer td { border: 1px solid var(--line); padding: .25rem .6rem; text-align: left; }
+  .answer ul { margin: .4rem 0; padding-left: 1.4rem; }
+  .answer code { background: var(--bg); padding: 0 .25em; border-radius: 3px; }
+  .meta { color: var(--muted); font-size: .85rem; margin-top: .75rem; }
+  ol.sources { padding-left: 1.4rem; margin: .4rem 0 0; }
+  ol.sources a { color: var(--accent); word-break: break-all; }
+  pre {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: .6rem; overflow-x: auto; font-size: .82rem; white-space: pre-wrap;
+  }
+  .error { color: var(--err); font-weight: 600; }
+  details.examples {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    padding: .6rem 1rem; margin-bottom: 1.25rem; font-size: .9rem;
+  }
+  details.examples summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
+  details.examples h3 { font-size: .85rem; margin: .8rem 0 .3rem; }
+  details.examples p { margin: .3rem 0; }
+  details.examples code { background: var(--bg); padding: 0 .25em; border-radius: 3px; }
+  details.examples table { border-collapse: collapse; margin: .4rem 0; }
+  details.examples td { padding: .1rem 1rem .1rem 0; color: var(--muted); }
+  details.examples td:first-child { color: var(--ink); }
+  .hint { font-size: .75rem; color: var(--muted); margin-top: .2rem; }
+  .hint code { background: var(--bg); padding: 0 .25em; border-radius: 3px; }
+  sup a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Advanced Searches <span>Show Casts, Actors, and General</span></h1>
+
+  <fieldset>
+    <legend>Query</legend>
+    <div class="modes">
+      <label><input type="radio" name="mode" value="query" checked> general search</label>
+      <label><input type="radio" name="mode" value="cast"> cast list</label>
+      <label><input type="radio" name="mode" value="actor"> actor</label>
+    </div>
+    <p class="hint">For cast list / actor lookups, use
+      <a href="http://mb.ldmathes.cc:5020" target="_blank" rel="noopener">Show Searches</a>
+      instead — direct API lookups (TVmaze/TMDB/OMDb), no LLM, answers in under a second.
+      Cast/actor here are kept only until that page fully replaces them.</p>
+    <input type="text" id="query" placeholder="query, 'Show S1E1', or 'Actor Name'" autofocus>
+  </fieldset>
+
+  <fieldset>
+    <legend>Options</legend>
+    <div class="row">
+      <div style="flex:2 1 220px"><label for="model">model</label>
+        <input type="text" id="model" value="gemma4:26b-a4b-it-qat"></div>
+      <div style="flex:2 1 220px"><label for="endpoint">endpoint</label>
+        <input type="text" id="endpoint" value="http://imagebeast:11434"></div>
+    </div>
+    <div class="row">
+      <div><label for="results">results</label><input type="number" id="results" value="8" min="1"></div>
+      <div><label for="chunks">chunks</label><input type="number" id="chunks" value="5" min="1"></div>
+      <div><label for="timeout">timeout (s)</label><input type="number" id="timeout" value="15" min="1"></div>
+      <div><label for="ollama_timeout">ollama-timeout (s)</label><input type="number" id="ollama_timeout" value="135" min="1"></div>
+    </div>
+    <div class="row">
+      <div><label for="site">site - general only</label><input type="text" id="site" placeholder="restrict to domain">
+        <div class="hint">one domain only, e.g. <code>docs.python.org</code></div></div>
+      <div><label for="exclude">exclude - general only</label><input type="text" id="exclude" placeholder="domains, space-separated">
+        <div class="hint">space-separated, e.g. <code>amazon.com ebay.com</code></div></div>
+    </div>
+    <div class="row checks">
+      <div>
+        <label class="check"><input type="checkbox" id="no_cache"> no-cache</label>
+        <div class="hint">bypass the page cache, fetch everything fresh</div>
+      </div>
+      <div class="castonly">
+        <label class="check"><input type="checkbox" id="no_resolve"> no-resolve</label>
+        <div class="hint">skip show-name resolution; search title as typed (cast only)</div>
+      </div>
+    </div>
+  </fieldset>
+
+  <div class="buttons">
+    <button id="runBtn">Run</button>
+    <button id="valBtn" class="secondary" disabled title="cast mode only">Validate</button>
+    <span id="spinner">running…</span>
+  </div>
+
+  <details class="examples">
+    <summary>Examples</summary>
+    <h3>Cast list</h3>
+    <p>Enter a show + episode or a movie. Episode notation is flexible:</p>
+    <table>
+      <tr><td><code>medium s0101</code></td><td>compact SSEE</td></tr>
+      <tr><td><code>medium s04e10</code></td><td>SxxExx</td></tr>
+      <tr><td><code>the office 4x10</code></td><td>NxM</td></tr>
+      <tr><td><code>The Godfather 1972</code></td><td>movie + year</td></tr>
+    </table>
+    <p>The show title is resolved against TVmaze/DuckDuckGo, so abbreviations
+    and typos are corrected — <code>star trek next gen</code> becomes
+    <em>Star Trek: The Next Generation</em>. If the show can't be confidently
+    resolved, it stops with a suggestion instead of searching garbage.</p>
+    <h3>Actor</h3>
+    <table>
+      <tr><td><code>Bryan Cranston</code></td><td>an actor's filmography</td></tr>
+      <tr><td><code>Medium S1E1 Cynthia</code></td><td>episode + character, to find who played them</td></tr>
+    </table>
+    <h3>Validate</h3>
+    <p><strong>Validate</strong> is a cheap dry-run: it shows how the reference
+    was parsed and resolved without searching; see the Result box for the
+    findings.</p>
+  </details>
+
+  <div id="out">
+    <fieldset id="resultBox">
+      <legend>Result</legend>
+      <div id="result"></div>
+    </fieldset>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+const mode = () => document.querySelector('input[name=mode]:checked').value;
+
+// Persist settings across reloads (query and checkboxes stay per-run).
+const SAVED = ['model', 'endpoint', 'results', 'chunks', 'timeout',
+               'ollama_timeout', 'site', 'exclude'];
+for (const id of SAVED) {
+  const v = localStorage.getItem('search_adv.' + id);
+  if (v !== null) $(id).value = v;
+  $(id).addEventListener('change', () =>
+    localStorage.setItem('search_adv.' + id, $(id).value));
+}
+
+function syncMode() {
+  const cast = mode() === 'cast';
+  $('valBtn').disabled = !cast;
+  document.querySelector('.castonly').classList.toggle('dim', !cast);
+}
+document.querySelectorAll('input[name=mode]').forEach(r =>
+  r.addEventListener('change', syncMode));
+syncMode();
+
+function esc(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+}
+
+// Minimal markdown-ish renderer: **bold**, `code`, - bullets, | tables |,
+// [n] citations → anchors to the source list.
+function renderAnswer(text) {
+  const lines = text.split('\n');
+  let html = '', list = [], table = [];
+  const inline = s => esc(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\[(\d+)\]/g, '<sup><a href="#src-$1">[$1]</a></sup>');
+  const flushList = () => { if (list.length) { html += '<ul>' + list.map(l => `<li>${inline(l)}</li>`).join('') + '</ul>'; list = []; } };
+  const flushTable = () => {
+    if (!table.length) return;
+    const raw = table.filter(r => !/^[\s|:-]+$/.test(r))
+      .map(r => r.replace(/^\||\|$/g, '').split('|').map(c => c.trim()));
+    if (raw.length) {
+      // Cast tables get actor hot-links: clicking an actor re-runs in --actor mode.
+      const actorCol = raw[0].findIndex(h => /actor/i.test(h));
+      html += '<div class="tablewrap"><table><tr>' + raw[0].map(c => `<th>${inline(c)}</th>`).join('') + '</tr>';
+      html += raw.slice(1).map(r => '<tr>' + r.map((c, i) => {
+        let cell = inline(c);
+        if (i === actorCol && actorCol > -1) {
+          const name = c.replace(/\[\d+\]/g, '').replace(/\*\*/g, '').trim();
+          if (name) cell = `<a href="#" class="actorlink" data-actor="${esc(name)}" title="look up ${esc(name)} (--actor)">${cell}</a>`;
+        }
+        return `<td>${cell}</td>`;
+      }).join('') + '</tr>').join('');
+      html += '</table></div>';
+    }
+    table = [];
+  };
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^[-*•]\s+/.test(t)) { flushTable(); list.push(t.replace(/^[-*•]\s+/, '')); }
+    else if (t.startsWith('|')) { flushList(); table.push(t); }
+    else { flushList(); flushTable(); if (t) html += `<p>${inline(t)}</p>`; }
+  }
+  flushList(); flushTable();
+  return html;
+}
+
+function collectBody(validate) {
+  return {
+    mode: mode(),
+    query: $('query').value,
+    model: $('model').value,
+    endpoint: $('endpoint').value,
+    results: $('results').value,
+    chunks: $('chunks').value,
+    timeout: $('timeout').value,
+    ollama_timeout: $('ollama_timeout').value,
+    site: $('site').value,
+    exclude: $('exclude').value,
+    no_cache: $('no_cache').checked,
+    no_resolve: $('no_resolve').checked,
+    validate: !!validate,
+  };
+}
+
+function show(html) { $('result').innerHTML = html; $('out').classList.add('on'); }
+
+async function run(validate) {
+  if (!$('query').value.trim()) { show('<p class="error">Enter a query first.</p>'); return; }
+  $('runBtn').disabled = true; $('valBtn').disabled = true;
+  $('spinner').classList.add('on'); $('out').classList.remove('on');
+  const t0 = Date.now();
+  $('spinner').textContent = 'running…';
+  const tick = setInterval(() => {
+    $('spinner').textContent = `running… ${Math.round((Date.now() - t0) / 1000)}s`;
+  }, 1000);
+  try {
+    const resp = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(collectBody(validate)),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { show(`<p class="error">${esc(data.error || resp.statusText)}</p>`); return; }
+    if (data.exit_code !== 0) {
+      show(`<p class="error">search_adv exited with code ${data.exit_code}</p>`
+        + (data.stderr ? `<pre>${esc(data.stderr)}</pre>` : '')
+        + (data.stdout ? `<pre>${esc(data.stdout)}</pre>` : ''));
+      return;
+    }
+    // The CLI reports "no confident show match" on stderr with exit 0 —
+    // don't render an empty result when stdout came back blank.
+    if (!data.stdout.trim()) {
+      show(`<p class="error">${data.stderr.trim() ? 'Could not resolve the reference:' : 'No output — could not parse the reference.'}</p>`
+        + (data.stderr.trim() ? `<pre>${esc(data.stderr.trim())}</pre>` : ''));
+      return;
+    }
+    if (validate) { show(`<pre>${esc(data.stdout.trim())}</pre>`); return; }
+    // Cast mode prints "Resolved show →" / "Interpreting →" status lines
+    // before the JSON — slice out the JSON object and keep the preamble.
+    const start = data.stdout.indexOf('{'), end = data.stdout.lastIndexOf('}');
+    let rec;
+    try { rec = JSON.parse(data.stdout.slice(start, end + 1)); }
+    catch { show(`<p class="error">Could not parse JSON output.</p><pre>${esc(data.stdout)}</pre>`); return; }
+    const preamble = start > 0 ? data.stdout.slice(0, start).trim() : '';
+    let html = preamble ? `<div class="meta">${esc(preamble).replace(/\n/g, '<br>')}</div>` : '';
+    html += `<div class="answer">${renderAnswer(rec.answer || '')}</div>`;
+    if (rec.sources && rec.sources.length) {
+      html += '<div class="meta">Sources</div><ol class="sources">'
+        + rec.sources.map(s =>
+            `<li id="src-${s.n}" value="${s.n}"><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title || s.url)}</a></li>`
+          ).join('') + '</ol>';
+    }
+    html += `<div class="meta">Confidence: <strong>${esc(String(rec.confidence_label ?? ''))}</strong>`
+      + ` (${rec.confidence ?? '?'}) &middot; ${rec.elapsed ?? '?'}s</div>`;
+    if (data.stderr && data.stderr.trim())
+      html += `<details><summary class="meta">stderr</summary><pre>${esc(data.stderr)}</pre></details>`;
+    show(html);
+  } catch (e) {
+    show(`<p class="error">${esc(String(e))}</p>`);
+  } finally {
+    clearInterval(tick);
+    $('runBtn').disabled = false;
+    syncMode();
+    $('spinner').classList.remove('on');
+  }
+}
+
+$('result').addEventListener('click', e => {
+  const a = e.target.closest('a.actorlink');
+  if (!a) return;
+  e.preventDefault();
+  document.querySelector('input[name=mode][value=actor]').checked = true;
+  syncMode();
+  $('query').value = a.dataset.actor;
+  run(false);
+});
+
+$('runBtn').addEventListener('click', () => run(false));
+$('valBtn').addEventListener('click', () => run(true));
+$('query').addEventListener('keydown', e => { if (e.key === 'Enter') run(false); });
+</script>
+</body>
+</html>

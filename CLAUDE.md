@@ -32,6 +32,21 @@ Per git history in both this repo and the sibling frontend repos:
 - `SRC/` — git helper shell functions (`git_helper_scripts.sh`) with a companion guide (`git_helper_scripts.sh`, `git_helpers_guide.md`); the top-level `git-tools`, `git-undo` scripts are the user-facing entry points.
 - `MyEverything/` — has its own `build/`/`dist/` output (via `Setup_py2app.py` at repo root, a py2app packaging script), i.e. a packaged Mac app, not a script.
 
+## Git sync scripts (`sync-this` / `sync-all`, + PowerShell twins)
+
+Top-level scripts that commit + `pull --rebase` + push, in two parallel sets:
+
+- **Mac/Ubuntu:** `sync-this` (current repo) and `sync-all` (every repo under `$HOME/repos`, `.git` up to 3 levels deep, skipping `.bkup`/`.bak`/`_backup`/`_bak` dirs). `sync-ck` is a read-only status peek.
+- **Win11:** `sync-this.ps1` / `sync-all.ps1` — added 2026-07-15 as PowerShell equivalents of the two bash scripts, replacing the deleted `git-sync.bat` (which hardcoded `main`, had no commit message, and had no multi-repo analog).
+
+Behavior shared by all four: they act on the **current branch** (not a hardcoded `main`), take the commit message as the first positional arg and prompt only if it's omitted, push with `-u` so new branches work, and abort the transaction rather than pushing if the commit or pull fails. `sync-all`/`sync-all.ps1` also skip repos that are clean *and* up-to-date unless passed `--all`/`-All`, and support `--dry-run`/`-DryRun`.
+
+`sync-this`/`sync-this.ps1` resolve the repo from the **current working directory** — the script itself can live anywhere on PATH; you just have to be `cd`'d inside the target repo. `sync-all*` never uses cwd.
+
+Repo roots differ per platform, which is why `sync-all.ps1` doesn't just reuse `$HOME/repos`: on the Windows fleet repos live at `C:\repos` on every machine **except amsterdamdesktop, which uses `D:\repos`**. Rather than branching on hostname, `sync-all.ps1` probes `C:\repos` → `D:\repos` → `$HOME\repos` and takes the first that exists (override with `-RepoRoot`). If a box ever has both `C:\repos` and `D:\repos`, `C:` wins — revisit if that becomes true on amsdt.
+
+The `.ps1` pair uses plain ASCII status glyphs instead of the bash scripts' `↑ ↓ ✓ 📂`, since the default `powershell.exe` console mangles them. They were written on a Mac with no `pwsh` available, so **they have never been executed or even syntax-checked** — first Windows run should be `.\sync-all.ps1 -DryRun`. Also note `.ps1` files need an execution-policy exception (`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`) and, to run by bare name from any dir, `.PS1` in `$env:PATHEXT` or a profile wrapper function.
+
 ## dms_util / `dms` Doc-index tool — only checks one level up for `.git`
 
 `dms` (and the underlying `dms_util/dms_render.py`, `dms_scan.py`, etc.) manages a `Doc/` folder's `index.html` via `.dms_state.json`/`.dms_scan.json`. Its docstring says it "must be run from the ROOT of a repository," and `dms:283` enforces a version of that: `has_git = (cwd / ".git").exists() or (cwd.parent / ".git").exists()` — it accepts being run either at a repo root, or one level down inside `Doc/` itself, but goes no further than that. It does not walk upward to find a repo root the way `git rev-parse --show-toplevel` would.
@@ -54,3 +69,4 @@ No lint/test/build commands exist anywhere in this repo — there is no test sui
 - `comfyui/comfy_fleet.sh` — run ComfyUI fleet scan/report on Mac (after running the per-machine `.bat` scanners on Windows).
 - `python3 Flask/weather/weather-dashboard/weather_backend.py` / `python3 Flask/movies_shows/excel-web-interface/excel_backend.py` — run the Flask backends directly (dependencies must be installed manually; no requirements file).
 - `tasks/run.sh` / `tasks/run-g.sh` — run the Google Tasks export scripts (uses `tasks/venv`).
+- `./sync-this "msg"` / `./sync-all "msg" [--dry-run|--all]` — git commit/pull/push for the current repo or every repo under `$HOME/repos` (Mac/Ubuntu). Windows equivalents: `.\sync-this.ps1 "msg"` / `.\sync-all.ps1 "msg" [-DryRun|-All|-RepoRoot <path>]`.

@@ -1,104 +1,17 @@
 {
-  "timestamp": "2026-07-06T20:37:16.118095",
+  "timestamp": "2026-07-16T16:11:19.495006",
   "summaries": [
     {
       "file": {
-        "path": "./cross_reference_models.md",
-        "hash": "sha256:6182359adb98b811f0b644204f701922f42d33116181872aa804c41c1caae1f0",
-        "size": 9217
+        "path": "./macmini-m4-migration.md",
+        "hash": "sha256:0bcd44cb2d5b0af33dc247a578ac1b1ac1090074bb57a7dfb255ec2570b3bcdf",
+        "size": 11054
       },
-      "summary": "This document describes a Python script for cross-referencing ComfyUI model inventory and workflow references, identifying missing, unused, and used models.",
-      "category": "Scripts",
-      "is_new_category": false,
-      "title": "cross_reference_models",
-      "timestamp": "2026-07-06T20:36:41.890253"
-    },
-    {
-      "file": {
-        "path": "./scan_safetensors.md",
-        "hash": "sha256:4ba28a425754f8caedf184e0a3f6a18714e7f8a6e92052feb83550d18461e6b4",
-        "size": 3870
-      },
-      "summary": "A script for scanning ComfyUI workflow files and extracting references to safetensor model files, generating a CSV report.",
-      "category": "Scripts",
-      "is_new_category": false,
-      "title": "scan_safetensors",
-      "timestamp": "2026-07-06T20:36:46.763707"
-    },
-    {
-      "file": {
-        "path": "./StatusFleetConfigCheatsheet.md",
-        "hash": "sha256:6c1109fc43f9044f1d9fe56e0799a4cafeaae2c2a7ce2f1799dc2dcfc088f900",
-        "size": 4541
-      },
-      "summary": "This document serves as a cheatsheet for maintaining fleet configurations in a system, detailing the structure of machine and service entries, check types, priority codes, and common tasks.",
-      "category": "QuickRefs",
-      "is_new_category": false,
-      "title": "StatusFleetConfigCheatsheet",
-      "timestamp": "2026-07-06T20:36:52.379053"
-    },
-    {
-      "file": {
-        "path": "./fleet_phase2_handoff.docx",
-        "hash": "sha256:28bbb17e2a4ae7684e24630c7c171e79607b7884e180871a4bb33772b4b05e06",
-        "size": 31020,
-        "readable_version": "./md_outputs/fleet_phase2_handoff.md"
-      },
-      "summary": "Instructions for configuring firewall rules and server status monitoring in Phase 2 of fleet management.",
+      "summary": "Plan for migrating amsterdamdesktop (Flask backends, OpenWebUI, fleet status checker) and the laptop's LaunchAgent services to a new Mac Mini M4.",
       "category": "Guides",
       "is_new_category": false,
-      "title": "fleet_phase2_handoff",
-      "timestamp": "2026-07-06T20:36:56.553394"
-    },
-    {
-      "file": {
-        "path": "./find_model_duplicates.md",
-        "hash": "sha256:8b901303e5399579e70a62e26b57984f752c612f830da94ca9d5ea4e88f3d204",
-        "size": 11424
-      },
-      "summary": "Script for identifying duplicate ComfyUI models based on filename and size, aiding in disk space management.",
-      "category": "Scripts",
-      "is_new_category": false,
-      "title": "find_model_duplicates",
-      "timestamp": "2026-07-06T20:37:00.794202"
-    },
-    {
-      "file": {
-        "path": "./OneDriveSyncMonitor_Guide_v1.docx",
-        "hash": "sha256:fe4d0d624b70b467f1f48670d0526f384f94909021ba6668b5a610ce3941e39b",
-        "size": 26675,
-        "readable_version": "./md_outputs/OneDriveSyncMonitor_Guide_v1.md"
-      },
-      "summary": "This guide describes the installation and operation of OneDrive Sync Monitor, which uses Python scripts to ensure that files are being synchronized across multiple machines by monitoring a timestamp file.",
-      "category": "Guides",
-      "is_new_category": false,
-      "title": "OneDriveSyncMonitor_Guide_v1",
-      "timestamp": "2026-07-06T20:37:06.267737"
-    },
-    {
-      "file": {
-        "path": "./scan_models.md",
-        "hash": "sha256:43e15465468f718b6e3d0aff476b2a9bd7700593452da6ea881ab3243ba94ef4",
-        "size": 5056
-      },
-      "summary": "This document details a Python script that scans a directory for .safetensors files and creates a CSV inventory of these model files.",
-      "category": "Scripts",
-      "is_new_category": false,
-      "title": "scan_models",
-      "timestamp": "2026-07-06T20:37:11.221327"
-    },
-    {
-      "file": {
-        "path": "./OneDriveSyncMonitor_Guide_macOS_Checker.docx",
-        "hash": "sha256:3f781d2ab5aed25c2473d40049476db7e03515331a65a927c9f82441c3954fcd",
-        "size": 10709,
-        "readable_version": "./md_outputs/OneDriveSyncMonitor_Guide_macOS_Checker.md"
-      },
-      "summary": "This document details the successful implementation of a macOS background process that checks for OneDrive sync issues every five minutes and alerts via desktop notifications.",
-      "category": "Guides",
-      "is_new_category": false,
-      "title": "OneDriveSyncMonitor_Guide_macOS_Checker",
-      "timestamp": "2026-07-06T20:37:16.118011"
+      "title": "macmini-m4-migration",
+      "timestamp": "2026-07-16T16:11:19.494975"
     }
   ]
 }

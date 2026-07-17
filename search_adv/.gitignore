@@ -1,0 +1,33 @@
+# .gitignore — search_adv
+# 2025-07-15 14:00 UTC
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Cache
+.search_adv_cache/
+
+# Output files (reports are written to explicitly named paths via --html /
+# batch CSV; don't blanket-ignore doc/source extensions like .md or .html)
+*.json
+*.csv
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo

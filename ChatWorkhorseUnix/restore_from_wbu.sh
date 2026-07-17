@@ -17,6 +17,7 @@
 # mount, separate UUID, on /dev/sdb1 — a VM vdi). LIVE_IMAGES, DUMP_STAGING, and the
 # local Postgres wipe path below updated to match. Both machines now use immich-data
 # consistently; no win-d mounts remain on either host.
+# 2026-07-14 15:30 UTC: Save psql restore log to ~/.cache/cwhu-warm-sync/ with datestamp (alongside sync_log/sync_errors), replacing ephemeral /tmp path.
 set -e
 WBU_HOST="workbenchunix"   # Tailscale name
 WBU_USER="dhm"
@@ -71,9 +72,10 @@ echo "Bringing up Postgres only, to restore into it..."
 docker compose up -d database
 until docker exec immich_postgres pg_isready -U postgres; do sleep 2; done
 echo "Restoring dump..."
-cat "$DUMP_STAGING_FILE" | docker exec -i immich_postgres psql -U postgres > /tmp/warm-sync-restore.log 2>&1 || true
-if grep -qi error /tmp/warm-sync-restore.log; then
-    echo "WARNING: possible errors during restore — check /tmp/warm-sync-restore.log on CWHU."
+RESTORE_LOG="$HOME/.cache/cwhu-warm-sync/restore_log_$(date -u +%Y%m%d_%H%M%S).txt"
+cat "$DUMP_STAGING_FILE" | docker exec -i immich_postgres psql -U postgres > "$RESTORE_LOG" 2>&1 || true
+if grep -qi error "$RESTORE_LOG"; then
+    echo "WARNING: possible errors during restore — check $RESTORE_LOG on CWHU."
     echo "(Note: 'role already exists' / 'database already exists' lines are expected and harmless.)"
 fi
 # 6. Bring the full stack back up.

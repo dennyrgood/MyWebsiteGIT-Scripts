@@ -1,0 +1,148 @@
+#!/Library/Frameworks/Python.framework/Versions/3.13/bin/python3
+# search.py
+# Created: 2025-07-15 16:30 UTC
+# 2025-07-15 16:45 UTC: expanded usage block comment
+# 2025-07-15 17:00 UTC: fix multi-line answer extraction (was truncating at first line)
+# Purpose: General DDG search + local Ollama Q&A
+# Usage:
+#   Single query:   ./search.py "what is the official website of Unilever"
+#   File mode:      ./search.py queries.txt output.csv
+#   Override model: ./search.py "your query" --model qwen3.6:latest
+#   Override both:  ./search.py queries.txt out.csv --endpoint http://cwh:11434 --model llama3.2:3b
+#
+# Options:
+#   --model MODEL        Ollama model name (default: gemma4:26b-a4b-it-qat)
+#   --endpoint URL       Ollama base URL (default: http://imagebeast:11434)
+#
+# Output:
+#   Single query:   prints Q/A/Confidence to terminal
+#   File mode:      writes query,answer,confidence CSV to output file, flushed per row
+
+import sys
+import csv
+import time
+import argparse
+import requests
+from ddgs import DDGS
+
+DEFAULT_ENDPOINT = "http://imagebeast:11434"
+DEFAULT_MODEL    = "gemma4:26b-a4b-it-qat"
+SEARCH_RESULTS   = 5
+SLEEP_BETWEEN    = 2  # seconds between DDG requests
+
+
+def search(query: str) -> str:
+    """Search DuckDuckGo and return concatenated snippets."""
+    with DDGS() as ddgs:
+        results = list(ddgs.text(query, max_results=SEARCH_RESULTS))
+    if not results:
+        return "No search results found."
+    snippets = []
+    for r in results:
+        snippets.append(f"- {r.get('title', '')}: {r.get('body', '')}")
+    return "\n".join(snippets)
+
+
+def ask_ollama(query: str, snippets: str, endpoint: str, model: str) -> tuple[str, str]:
+    """Send query + search snippets to Ollama. Returns (answer, confidence)."""
+    prompt = f"""Answer the following question using the web search results provided.
+
+Question: {query}
+
+Search results:
+{snippets}
+
+Reply in this exact format, nothing else:
+ANSWER: <your answer>
+CONFIDENCE: <high|medium|low>
+
+If the search results do not contain enough information to answer, say so in ANSWER and set CONFIDENCE to low.
+"""
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": 0.1}
+    }
+    response = requests.post(f"{endpoint}/api/generate", json=payload, timeout=60)
+    response.raise_for_status()
+    text = response.json().get("response", "").strip()
+
+    answer = "No answer extracted."
+    confidence = "low"
+
+    lines = text.splitlines()
+    answer_lines = []
+    in_answer = False
+    for line in lines:
+        if line.upper().startswith("ANSWER:"):
+            answer_lines.append(line.split(":", 1)[1].strip())
+            in_answer = True
+        elif line.upper().startswith("CONFIDENCE:"):
+            confidence = line.split(":", 1)[1].strip().lower()
+            in_answer = False
+        elif in_answer:
+            answer_lines.append(line)
+    if answer_lines:
+        answer = " ".join(a for a in answer_lines if a)
+
+    return answer, confidence
+
+
+def run_single(query: str, endpoint: str, model: str):
+    """Run a single query and print result to terminal."""
+    print(f"\nQ: {query}")
+    print("Searching...")
+    snippets = search(query)
+    answer, confidence = ask_ollama(query, snippets, endpoint, model)
+    print(f"A: {answer}")
+    print(f"Confidence: {confidence}\n")
+
+
+def run_file(input_file: str, output_file: str, endpoint: str, model: str):
+    """Process a file of queries and write results to CSV."""
+    with open(input_file, "r", encoding="utf-8") as f:
+        queries = [l.strip() for l in f if l.strip()]
+
+    with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=["query", "answer", "confidence"])
+        writer.writeheader()
+
+        for query in queries:
+            print(f"[searching] {query}")
+            try:
+                snippets = search(query)
+                time.sleep(SLEEP_BETWEEN)
+                answer, confidence = ask_ollama(query, snippets, endpoint, model)
+                print(f"  → {answer} ({confidence})")
+                writer.writerow({"query": query, "answer": answer, "confidence": confidence})
+                csvfile.flush()
+            except Exception as e:
+                print(f"  [ERROR] {e}")
+                writer.writerow({"query": query, "answer": "", "confidence": f"ERROR: {e}"})
+                csvfile.flush()
+
+    print(f"\nDone. Output: {output_file}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="DDG search + Ollama Q&A")
+    parser.add_argument("input", help="A query string or path to a query file")
+    parser.add_argument("output", nargs="?", help="Output CSV file (file mode only)")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Ollama model name")
+    parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT, help="Ollama base URL")
+    args = parser.parse_args()
+
+    # Detect file vs single query
+    import os
+    if os.path.isfile(args.input):
+        if not args.output:
+            print("Error: output CSV path required for file mode.")
+            sys.exit(1)
+        run_file(args.input, args.output, args.endpoint, args.model)
+    else:
+        run_single(args.input, args.endpoint, args.model)
+
+
+if __name__ == "__main__":
+    main()
