@@ -6,8 +6,8 @@
   SID-free: runs as BUILTIN\Users (S-1-5-32-545) so the same file imports on any
   machine, unlike the per-box exports whose <UserId> SID is machine-specific.
 
-  Assumes pythonw.exe at c:\misc\pythonw.exe — verify with `where pythonw.exe`
-  and edit the <Command> line below if it differs.
+  Assumes pythonw.exe at c:\misc\Python313\pythonw.exe (fleet standard on the
+  C:\repos Windows boxes) — edit the <Command> line below if a box differs.
 
   Register:  schtasks /Create /TN "FleetMetricsServer" /XML "C:\repos\scripts\Status\FleetMetricsServer.Crepos.xml"
 -->
@@ -52,7 +52,7 @@
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>c:\misc\pythonw.exe</Command>
+      <Command>c:\misc\Python313\pythonw.exe</Command>
       <Arguments>"c:\repos\scripts\status\fleet_metrics_server.py"</Arguments>
     </Exec>
   </Actions>
