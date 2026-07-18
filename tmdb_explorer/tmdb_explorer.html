@@ -376,8 +376,9 @@ function runtimeStr(mins) {
    Movies-and-Shows sheet at column A. SHEET_COLUMNS lists the sheet's columns
    left to right: a field name = the app fills that column, null = leave it
    blank (your manual / formula columns). This array is the ONE thing to change
-   when the sheet layout changes. Current mapping is a PLACEHOLDER for testing:
-   the 14 existing columns A–N blank, then the 22 TMDB columns O–AJ. */
+   when the sheet layout changes. Mapped to the 29-column "ReadyForDHM" layout
+   (A–AC); manual columns (Code, Sub, With, Avail, Download, File Location,
+   Next BROADCAST, TMDB_hyperlink) stay blank. */
 
 function castTop5(d, isTv) {
   const cast = isTv
@@ -400,6 +401,7 @@ const ROW_FIELDS = {
   tmdb_url: (d, tv) => `https://www.themoviedb.org/${tv ? "tv" : "movie"}/${d.id}`,
   title: (d, tv) => tv ? d.name : d.title,
   seasons_made: (d, tv) => tv ? (d.number_of_seasons ?? "") : 0,  // 0 for movies
+  download_from: (d, tv) => tv ? "" : "Movie",  // movies get "Movie"; shows filled by hand
   original_language: d => d.original_language,
   origin_country: d => (d.origin_country || []).join(", "),
   overview: d => d.overview,
@@ -423,42 +425,35 @@ const ROW_FIELDS = {
 };
 
 const SHEET_COLUMNS = [
-  null,         // A  Code (manual)
-  null,         // B  Sub (formula)
-  "tmdb_url",   // C  TMDB API — TMDB page URL
-  null,         // D  With (formula)
-  null,         // E  Avail (formula)
-  "title",      // F  Title — clean title
-  null,         // G  Download from… (manual)
-  null,         // H  BROADCAST - DELETE (manual)
-  "seasons_made", // I  Seasons made — number_of_seasons (0 for movies)
-  null,         // J  where (manual)
-  null,         // K  Date Avail (manual)
-  "tmdb_url",   // L  TMDB — link col, TMDB page URL
-  null,         // M  Status (manual notes)
-  "overview",   // N  Synopsis — TMDB overview
-  "tmdb_id",           // O  tmdb_id
-  "title",             // P  title_tmdb (clean title)
-  "original_language", // Q
-  "origin_country",    // R
-  "overview",          // S  overview
-  "genres",            // T
-  "certification",     // U
-  "tmdb_status",       // V
-  "release_date",      // W
-  "runtime",           // X
-  "cast_top5",         // Y
-  "imdb_id",           // Z
-  "type",              // AA
-  "in_production",     // AB
-  "last_air_date",     // AC
-  "number_of_seasons", // AD
-  "number_of_episodes",// AE
-  "last_episode_to_air", // AF
-  "next_episode_to_air", // AG
-  "created_by",        // AH
-  "networks",          // AI
-  "tvdb_id",           // AJ
+  null,            // A  Code (manual)
+  null,            // B  Sub (manual/formula)
+  null,            // C  With (manual/formula)
+  null,            // D  Avail (manual/formula)
+  "title",         // E  title_tmdb — clean title
+  "genres",        // F  genres
+  "seasons_made",  // G  Seasons made (Movie=0)
+  "download_from", // H  Download from S##E## or Movie ("Movie" for movies)
+  null,            // I  File Location Status (manual)
+  "last_air_date", // J  last_air_date (TV)
+  null,            // K  Next BROADCAST - DELETE (manual)
+  "tmdb_status",   // L  tmdb_status
+  "certification", // M  certification
+  "overview",      // N  overview
+  "cast_top5",     // O  cast_top5
+  "networks",      // P  networks (TV)
+  "runtime",       // Q  runtime
+  "type",          // R  type (TV)
+  "origin_country",// S  origin_country
+  "in_production", // T  in_production (TV)
+  "created_by",    // U  created_by (TV)
+  "last_episode_to_air",  // V  last_episode_to_air (TV)
+  "next_episode_to_air",  // W  next_episode_to_air (TV)
+  "number_of_seasons",    // X  number_of_seasons (TV)
+  "number_of_episodes",   // Y  number_of_episodes (TV)
+  "tmdb_url",      // Z  TMDB_hyperlink — TMDB page URL
+  "tmdb_id",       // AA tmdb_id
+  "imdb_id",       // AB imdb_id
+  "tvdb_id",       // AC tvdb_id (TV)
 ];
 
 function sheetRow(d, type) {
