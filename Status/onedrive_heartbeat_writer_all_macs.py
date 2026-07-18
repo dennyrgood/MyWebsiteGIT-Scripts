@@ -2,7 +2,8 @@
 """
 onedrive_heartbeat_writer_all_macs.py — macOS heartbeat + machine info + metrics history writer
 Writes heartbeat_{host}.txt, machine_info_{host}.json, and metrics_history_{host}.json
-to OneDrive _sync_monitor/{host}/
+to the local ~/fleet_monitor dir, served over Tailscale by fleet_metrics_server.py.
+(Name retains the "onedrive" prefix for LaunchAgent compatibility; OneDrive is no longer used.)
 Main loop: 150s (every 5th 30s tick) — heartbeat + machine_info
 History:   every 30s tick
 
@@ -28,7 +29,7 @@ from pathlib import Path
 # ── Configuration ──────────────────────────────────────────────
 
 # Maps each Mac's raw socket.gethostname() to the canonical fleet host name
-# already used as the OneDrive _sync_monitor/{host}/ directory name.
+# used as the {host} suffix on the metrics filenames served over Tailscale.
 HOSTNAME_MAP = {
     "Denniss-MacBook-Air.local": "denniss-macbook-air",
     "Denniss-2ndMBA":            "denniss-2nd-macbook-air",
@@ -43,8 +44,9 @@ TICK_SECONDS       = 30
 MACHINE_INFO_EVERY = 5   # ticks — 5 × 30s = 150s
 HISTORY_MAX_LINES  = 120
 
-ONEDRIVE_PATH = Path.home() / "OneDrive"
-OUTPUT_DIR    = ONEDRIVE_PATH / "_sync_monitor" / HOST
+# Local metrics dir served over Tailscale by fleet_metrics_server.py (no OneDrive).
+# Files are host-suffixed, so the dir is flat — no per-host subdirectory.
+OUTPUT_DIR = Path(os.environ.get("FLEET_METRICS_DIR") or (Path.home() / "fleet_monitor"))
 
 
 # ── Data collection ────────────────────────────────────────────

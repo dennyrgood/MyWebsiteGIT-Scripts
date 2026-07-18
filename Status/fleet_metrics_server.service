@@ -1,0 +1,33 @@
+# fleet_metrics_server.service — systemd unit for the Ubuntu fleet boxes
+# (WorkBenchUnix, ChatWorkhorseUnix). Serves ~/fleet_monitor to the checker
+# over Tailscale — the Ubuntu counterpart of the macOS LaunchAgent
+# com.dennis.fleet-metrics-server.plist (see ../launchagents/).
+#
+# The cron heartbeat writer (run_heartbeat.sh) still populates ~/fleet_monitor;
+# this unit only serves it. Adjust User and the two paths if your layout differs.
+#
+# Install:
+#   sudo cp fleet_metrics_server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now fleet_metrics_server
+# Manage:
+#   systemctl status fleet_metrics_server
+#   journalctl -u fleet_metrics_server -f
+#   sudo systemctl restart fleet_metrics_server
+
+[Unit]
+Description=Fleet metrics server (serves ~/fleet_monitor over Tailscale)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dhm
+Environment=PYTHONUNBUFFERED=1
+# FLEET_METRICS_DIR defaults to ~/fleet_monitor; FLEET_METRICS_PORT defaults to 9100.
+ExecStart=/usr/bin/python3 /home/dhm/repos/scripts/Status/fleet_metrics_server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

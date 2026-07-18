@@ -10,19 +10,17 @@ import os
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# OneDrive / output paths
+# Output paths / metrics transport
 # ---------------------------------------------------------------------------
 
 # Which machine is running this checker instance
 CHECKER_HOST = os.environ.get("FLEET_CHECKER_HOST") or os.environ.get("COMPUTERNAME", "unknown").lower()
 
-ONEDRIVE_PATH = Path(
-    os.environ.get("OneDriveConsumer")
-    or os.environ.get("OneDrive")
-    or Path.home() / "OneDrive"
-)
+# Per-machine self-reported metrics (heartbeat / machine_info / history) are written
+# locally on each machine and served over Tailscale by fleet_metrics_server.py. The
+# checker pulls them via HTTP on this port — no OneDrive, no file sync.
+METRICS_PORT = int(os.environ.get("FLEET_METRICS_PORT", "9100"))
 
-# STATUS_DIR = ONEDRIVE_PATH / "_sync_monitor" / CHECKER_HOST
 STATUS_DIR = Path("c:/fleet_monitor") / CHECKER_HOST
 MASTER_STATUS_FILE = STATUS_DIR / "server_status_all.json"
 
@@ -100,7 +98,7 @@ IMMICH_CONFIG = {
 #   "comfyui"   — ComfyUI API (/system_stats + /queue)
 #   "openwebui" — OpenWebUI health (/health)
 #   "flask"     — Flask alive (GET /)
-#   "onedrive_heartbeat" — OneDrive sync heartbeat check (requires check_params: {target_host})
+#   "http_heartbeat" — writer-liveness check over Tailscale HTTP (requires check_params: {target_host})
 #
 # priority: service display priority
 #   "P"  — primary service for this host; featured on tile with full metrics
@@ -176,7 +174,7 @@ FLEET = [
                 "name": "Amsterdam Desktop Heartbeat Check",
                 "port": 0,  # Not applicable for heartbeat check
                 "priority": "S",
-                "check_type": "onedrive_heartbeat",
+                "check_type": "http_heartbeat",
                 "public_url": None,
                 "check_params": {"target_host": "amsterdamdesktop"}
             },
@@ -251,7 +249,7 @@ FLEET = [
                 "name": "ChatWorkhorse Heartbeat Check",
                 "port": 0,  # Not applicable for heartbeat check
                 "priority": "S",
-                "check_type": "onedrive_heartbeat",
+                "check_type": "http_heartbeat",
                 "public_url": None,
                 "check_params": {"target_host": "chatworkhorse"}
             },

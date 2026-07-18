@@ -26,6 +26,7 @@ TIMEOUT = 15
 
 MOVIE_APPEND = "credits,release_dates,videos,external_ids,watch/providers,keywords,recommendations"
 TV_APPEND = "aggregate_credits,content_ratings,videos,external_ids,watch/providers,keywords,recommendations"
+PERSON_APPEND = "combined_credits,external_ids"
 
 app = Flask(__name__)
 _cache: dict[str, dict] = {}
@@ -147,6 +148,14 @@ def details():
         raise TmdbError(400, f"bad id: {tmdb_id}")
     append = MOVIE_APPEND if mt == "movie" else TV_APPEND
     return jsonify(tmdb_get(f"/{mt}/{tmdb_id}", append_to_response=append))
+
+
+@app.get("/api/person")
+def person():
+    tmdb_id = request.args.get("id", "")
+    if not tmdb_id.isdigit():
+        raise TmdbError(400, f"bad id: {tmdb_id}")
+    return jsonify(tmdb_get(f"/person/{tmdb_id}", append_to_response=PERSON_APPEND))
 
 
 @app.get("/api/season")

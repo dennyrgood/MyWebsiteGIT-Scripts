@@ -16,18 +16,8 @@ CHECKER_HOST = hostname_map.get(CHECKER_HOST_IN, CHECKER_HOST_IN)
 
 #print(f"DEBUG: CHECKER_HOST detected: {CHECKER_HOST}", file=sys.stderr)
 
-ONEDRIVE_PATH = Path(
-    os.environ.get("OneDriveConsumer")
-    or os.environ.get("OneDrive")
-    or Path.home() / "OneDrive"
-)
-
-#print(f"DEBUG: ONEDRIVE_PATH resolved to: {ONEDRIVE_PATH}", file=sys.stderr)
-#print(f"DEBUG: OneDriveConsumer env: {os.environ.get('OneDriveConsumer', 'NOT SET')}", file=sys.stderr)
-#print(f"DEBUG: OneDrive env: {os.environ.get('OneDrive', 'NOT SET')}", 
-#file=sys.stderr)
-
-HEARTBEAT_DIR = ONEDRIVE_PATH / "_sync_monitor"
+# Local metrics dir served over Tailscale by fleet_metrics_server.py (no OneDrive).
+HEARTBEAT_DIR = Path(os.environ.get("FLEET_METRICS_DIR") or r"C:\fleet_monitor")
 HEARTBEAT_FILE = HEARTBEAT_DIR / f"heartbeat_{CHECKER_HOST}.txt"
 
 #print(f"DEBUG: Heartbeat file path: {HEARTBEAT_FILE}", file=sys.stderr)

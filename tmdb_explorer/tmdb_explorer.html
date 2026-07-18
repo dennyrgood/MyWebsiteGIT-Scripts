@@ -257,6 +257,18 @@ function img(path, size, cls) {
     : `<div class="noimg ${cls || ""}">🎬</div>`;
 }
 
+/* Returns pre-escaped HTML. Credits occasionally lack an id, so fall back to
+   plain text rather than linking to #person/undefined. */
+function personLink(id, name) {
+  return id ? `<a href="#person/${id}">${esc(name)}</a>` : esc(name);
+}
+
+function titleLink(mediaType, id, text) {
+  return `<a href="#${mediaType}/${id}">${esc(text)}</a>`;
+}
+
+const byId = list => [...new Map(list.map(c => [c.id, c])).values()];
+
 /* ---------- routing ---------- */
 
 window.addEventListener("hashchange", route);
@@ -283,6 +295,7 @@ function route() {
   const h = location.hash.slice(1);
   let m;
   if ((m = h.match(/^(movie|tv)\/(\d+)$/))) { showDetail(m[1], m[2]); return; }
+  if ((m = h.match(/^person\/(\d+)$/))) { showPerson(m[1]); return; }
   $("#viewDetail").style.display = "none";
   $("#viewSearch").style.display = "";
   if (h.startsWith("q&")) {
@@ -340,6 +353,7 @@ async function showDetail(type, id) {
   let d;
   try { d = await api("/api/details", { type, id }); }
   catch (e) { out.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
+  window._detail = { d, type };  // for the "copy spreadsheet row" button
   out.innerHTML = type === "movie" ? renderMovie(d) : renderTv(d);
 }
 
@@ -355,6 +369,102 @@ function money(n) { return n ? "$" + n.toLocaleString("en-US") : ""; }
 function runtimeStr(mins) {
   if (!mins) return "";
   return mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+}
+
+/* ---------- spreadsheet clipboard row ----------
+   One tab-separated row per title, for pasting a new row into the
+   Movies-and-Shows sheet at column A. SHEET_COLUMNS lists the sheet's columns
+   left to right: a field name = the app fills that column, null = leave it
+   blank (your manual / formula columns). This array is the ONE thing to change
+   when the sheet layout changes. Mapped to the 29-column "ReadyForDHM" layout
+   (A–AC); manual columns (Code, Sub, With, Avail, Download, File Location,
+   Next BROADCAST, TMDB_hyperlink) stay blank. */
+
+function castTop5(d, isTv) {
+  const cast = isTv
+    ? (d.aggregate_credits?.cast || [])
+    : (d.credits?.cast || []).slice().sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9));
+  return cast.slice(0, 5).map(c => {
+    const ch = isTv ? (c.roles?.[0]?.character || "") : (c.character || "");
+    return ch ? `${c.name} (${ch})` : c.name;
+  }).filter(Boolean).join("; ");
+}
+
+function epText(e) {
+  if (!e) return "";
+  const s = `S${e.season_number}E${e.episode_number} — ${e.name || ""}`;
+  return e.air_date ? `${s} (${e.air_date})` : s;
+}
+
+const ROW_FIELDS = {
+  tmdb_id: d => d.id,
+  tmdb_url: (d, tv) => `https://www.themoviedb.org/${tv ? "tv" : "movie"}/${d.id}`,
+  title: (d, tv) => tv ? d.name : d.title,
+  seasons_made: (d, tv) => tv ? (d.number_of_seasons ?? "") : 0,  // 0 for movies
+  download_from: (d, tv) => tv ? "" : "Movie",  // movies get "Movie"; shows filled by hand
+  original_language: d => d.original_language,
+  origin_country: d => (d.origin_country || []).join(", "),
+  overview: d => d.overview,
+  genres: d => (d.genres || []).map(g => g.name).join(", "),
+  certification: (d, tv) => tv ? usCertTv(d) : usCertMovie(d),
+  tmdb_status: d => d.status,
+  release_date: (d, tv) => tv ? d.first_air_date : d.release_date,
+  runtime: (d, tv) => tv ? (d.episode_run_time || [])[0] : d.runtime,
+  cast_top5: (d, tv) => castTop5(d, tv),
+  imdb_id: d => d.external_ids?.imdb_id,
+  type: (d, tv) => tv ? d.type : "",
+  in_production: (d, tv) => tv ? (d.in_production ? "Yes" : "No") : "",
+  last_air_date: (d, tv) => tv ? (d.last_air_date || "") : (d.release_date || ""),  // movie: primary release date
+  number_of_seasons: (d, tv) => tv ? d.number_of_seasons : "",
+  number_of_episodes: (d, tv) => tv ? d.number_of_episodes : "",
+  last_episode_to_air: (d, tv) => tv ? epText(d.last_episode_to_air) : "",
+  next_episode_to_air: (d, tv) => tv ? epText(d.next_episode_to_air) : "",
+  created_by: (d, tv) => tv ? (d.created_by || []).map(c => c.name).join(", ") : "",
+  networks: (d, tv) => tv ? (d.networks || []).map(n => n.name).join(", ") : "",
+  tvdb_id: (d, tv) => tv ? d.external_ids?.tvdb_id : "",
+};
+
+const SHEET_COLUMNS = [
+  null,            // A  Code (manual)
+  null,            // B  Sub (manual/formula)
+  null,            // C  With (manual/formula)
+  null,            // D  Avail (manual/formula)
+  "title",         // E  title_tmdb — clean title
+  "genres",        // F  genres
+  "seasons_made",  // G  Seasons made (Movie=0)
+  "download_from", // H  Download from S##E## or Movie ("Movie" for movies)
+  null,            // I  File Location Status (manual)
+  "last_air_date", // J  last_air_date (TV)
+  null,            // K  Next BROADCAST - DELETE (manual)
+  "tmdb_status",   // L  tmdb_status
+  "certification", // M  certification
+  "overview",      // N  overview
+  "cast_top5",     // O  cast_top5
+  "networks",      // P  networks (TV)
+  "runtime",       // Q  runtime
+  "type",          // R  type (TV)
+  "origin_country",// S  origin_country
+  "in_production", // T  in_production (TV)
+  "created_by",    // U  created_by (TV)
+  "last_episode_to_air",  // V  last_episode_to_air (TV)
+  "next_episode_to_air",  // W  next_episode_to_air (TV)
+  "number_of_seasons",    // X  number_of_seasons (TV)
+  "number_of_episodes",   // Y  number_of_episodes (TV)
+  "tmdb_url",      // Z  TMDB_hyperlink — TMDB page URL
+  "tmdb_id",       // AA tmdb_id
+  "imdb_id",       // AB imdb_id
+  "tvdb_id",       // AC tvdb_id (TV)
+];
+
+function sheetRow(d, type) {
+  const isTv = type === "tv";
+  const clean = v => (v === null || v === undefined ? "" : String(v)).replace(/[\t\r\n]+/g, " ").trim();
+  return SHEET_COLUMNS.map(key => key ? clean(ROW_FIELDS[key](d, isTv)) : "").join("\t");
+}
+
+function copyRow(btn) {
+  const cur = window._detail;
+  if (cur && cur.d) copyText(sheetRow(cur.d, cur.type), btn);
 }
 
 function headBlock(d, type, cert, extraMeta) {
@@ -375,6 +485,9 @@ function headBlock(d, type, cert, extraMeta) {
         <div>
           ${idChip("TMDB", d.id)}
           ${imdb ? idChip("IMDB", imdb) : ""}
+        </div>
+        <div style="margin:.35rem 0">
+          <button class="small" onclick="copyRow(this)">📋 Copy spreadsheet row</button>
         </div>
         <p>${esc(d.overview || "")}</p>
       </div>
@@ -404,7 +517,7 @@ function castGrid(cast, isTv) {
       : c.character;
     const eps = isTv && c.total_episode_count ? `${c.total_episode_count} ep` : "";
     return `<div class="card">${img(c.profile_path, "w185")}
-      <div class="pad"><b>${esc(c.name)}</b>
+      <div class="pad"><b>${personLink(c.id, c.name)}</b>
       <span class="sub">${esc(role || "")}${eps ? ` · ${eps}` : ""}</span></div></div>`;
   };
   const first = cast.slice(0, 12).map(card).join("");
@@ -418,18 +531,19 @@ function castGrid(cast, isTv) {
 
 function crewBlock(d, type) {
   let entries = [];
+  const linked = list => list.map(c => personLink(c.id, c.name)).join(", ");
   if (type === "movie") {
     const crew = d.credits?.crew || [];
-    const directors = crew.filter(c => c.job === "Director").map(c => c.name);
-    const writers = [...new Set(crew.filter(c => c.department === "Writing").map(c => c.name))];
-    if (directors.length) entries.push(["Directed by", directors.join(", ")]);
-    if (writers.length) entries.push(["Written by", writers.join(", ")]);
+    const directors = byId(crew.filter(c => c.job === "Director"));
+    const writers = byId(crew.filter(c => c.department === "Writing"));
+    if (directors.length) entries.push(["Directed by", linked(directors)]);
+    if (writers.length) entries.push(["Written by", linked(writers)]);
   } else if (d.created_by?.length) {
-    entries.push(["Created by", d.created_by.map(c => c.name).join(", ")]);
+    entries.push(["Created by", linked(d.created_by)]);
   }
   if (!entries.length) return "";
   return `<h3>Key crew</h3>` + entries.map(([k, v]) =>
-    `<div><span class="muted">${k}:</span> ${esc(v)}</div>`).join("");
+    `<div><span class="muted">${k}:</span> ${v}</div>`).join("");
 }
 
 function trailerBlock(d) {
@@ -516,7 +630,7 @@ function castRows(cast, isTv) {
     const role = isTv
       ? (c.roles || []).map(r => r.character).filter(Boolean).join(" / ")
       : c.character;
-    return [esc(c.name), esc(role || ""), isTv && c.total_episode_count ? `${c.total_episode_count} ep` : ""];
+    return [personLink(c.id, c.name), esc(role || ""), isTv && c.total_episode_count ? `${c.total_episode_count} ep` : ""];
   });
 }
 
@@ -531,7 +645,7 @@ function crewRows(crew, isTv) {
     const jobs = isTv ? (c.jobs || []).map(j => j.job).filter(Boolean).join(" / ") : c.job;
     const dept = c.department || "";
     const rank = DEPT_ORDER.indexOf(dept);
-    return [esc(c.name), esc(jobs || ""), esc(dept), rank < 0 ? DEPT_ORDER.length : rank, dept];
+    return [personLink(c.id, c.name), esc(jobs || ""), esc(dept), rank < 0 ? DEPT_ORDER.length : rank, dept];
     // job tiebreak is alphabetical, which usefully lands "Director" above
     // "First/Second Assistant Director" within Directing
   }).sort((a, b) => a[3] - b[3] || a[4].localeCompare(b[4]) || a[1].localeCompare(b[1]));
@@ -611,7 +725,7 @@ function dataPointsTable(d, type) {
   const cast = d[src]?.cast || [], crew = d[src]?.crew || [];
   F(`${src}.cast`, personGrid(castRows(cast, isTv), 10));
   F(`${src}.crew`, personGrid(crewRows(crew, isTv), 10));
-  if (isTv) F("created_by", names(d.created_by));
+  if (isTv) F("created_by", (d.created_by || []).map(c => personLink(c.id, c.name)).join(", "));
 
   G("Companies & languages");
   if (isTv) F("networks", names(d.networks));
@@ -703,6 +817,94 @@ function renderTv(d) {
     dataPointsTable(d, "tv") + rawBlock(d);
 }
 
+/* ---------- person ---------- */
+
+async function showPerson(id) {
+  $("#viewSearch").style.display = "none";
+  $("#viewDetail").style.display = "";
+  const out = $("#detail");
+  out.innerHTML = `<p class="muted">loading…</p>`;
+  window.scrollTo(0, 0);
+  let d;
+  try { d = await api("/api/person", { id }); }
+  catch (e) { out.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
+  out.innerHTML = renderPerson(d);
+}
+
+const GENDER = { 1: "female", 2: "male", 3: "non-binary" };
+
+function age(birthday, deathday) {
+  if (!birthday) return "";
+  const end = deathday ? new Date(deathday) : new Date();
+  const born = new Date(birthday);
+  let a = end.getFullYear() - born.getFullYear();
+  const m = end.getMonth() - born.getMonth();
+  if (m < 0 || (m === 0 && end.getDate() < born.getDate())) a--;
+  return a >= 0 ? `${a}` : "";
+}
+
+/* combined_credits mixes movie and tv; each entry carries its own media_type. */
+function creditRows(credits, roleKey) {
+  return credits
+    .map(c => {
+      const date = c.release_date || c.first_air_date || "";
+      return { c, date, year: date.slice(0, 4) };
+    })
+    .sort((a, b) => (b.date || "0").localeCompare(a.date || "0"))
+    .map(({ c, year }) => [
+      titleLink(c.media_type, c.id, c.title || c.name || "(untitled)") +
+        (year ? ` <span class="muted">(${year})</span>` : ""),
+      esc(c[roleKey] || ""),
+      c.media_type === "tv" && c.episode_count ? `${c.episode_count} ep` : "",
+    ]);
+}
+
+function personExtLinks(d) {
+  const links = [`<a href="https://www.themoviedb.org/person/${d.id}" target="_blank">TMDB page</a>`];
+  const imdb = d.imdb_id || d.external_ids?.imdb_id;
+  if (imdb) links.push(`<a href="https://www.imdb.com/name/${esc(imdb)}/" target="_blank">IMDB</a>`);
+  if (d.homepage) links.push(`<a href="${esc(d.homepage)}" target="_blank">homepage</a>`);
+  return links.join(" · ");
+}
+
+function renderPerson(d) {
+  const yrs = age(d.birthday, d.deathday);
+  const meta = [d.known_for_department, GENDER[d.gender],
+                d.birthday ? `b. ${d.birthday}${yrs && !d.deathday ? ` (age ${yrs})` : ""}` : "",
+                d.deathday ? `d. ${d.deathday}${yrs ? ` (aged ${yrs})` : ""}` : "",
+                d.place_of_birth]
+               .filter(Boolean).join(" · ");
+  const bio = (d.biography || "").trim();
+  const head = `
+    <div class="head">
+      ${img(d.profile_path, "w342")}
+      <div>
+        <h2>${esc(d.name)}</h2>
+        <div class="metaline">${esc(meta)}</div>
+        <div>
+          ${idChip("TMDB", d.id)}
+          ${d.imdb_id ? idChip("IMDB", d.imdb_id) : ""}
+        </div>
+        ${bio ? bio.split(/\n\n+/).map(p => `<p>${esc(p)}</p>`).join("") : `<p class="muted">No biography.</p>`}
+      </div>
+    </div>`;
+
+  const cast = d.combined_credits?.cast || [];
+  const crew = d.combined_credits?.crew || [];
+  const aka = (d.also_known_as || []).map(esc).join(", ");
+
+  return head +
+    factsTable([
+      ["Known for", esc(d.known_for_department || "")],
+      ["Credits", `${cast.length} acting · ${crew.length} crew`],
+      ["Also known as", aka],
+      ["Links", personExtLinks(d)],
+    ]) +
+    (cast.length ? `<h3>Acting (${cast.length})</h3>` + personGrid(creditRows(cast, "character"), 15) : "") +
+    (crew.length ? `<h3>Crew (${crew.length})</h3>` + personGrid(creditRows(crew, "job"), 10) : "") +
+    rawBlock(d);
+}
+
 /* ---------- seasons ---------- */
 
 function seasonsBlock(d) {
@@ -727,7 +929,7 @@ async function toggleSeason(el) {
     const data = await api("/api/season", { id: el.dataset.show, season: el.dataset.season });
     eps.innerHTML = (data.episodes || []).map(e => {
       const guests = (e.guest_stars || []).map(g =>
-        `${esc(g.name)}${g.character ? ` <span class="muted">as ${esc(g.character)}</span>` : ""}`);
+        `${personLink(g.id, g.name)}${g.character ? ` <span class="muted">as ${esc(g.character)}</span>` : ""}`);
       const title = `<b>${e.episode_number}.</b> ${esc(e.name)}` +
         (e.air_date ? ` <span class="muted">(${e.air_date})</span>` : "");
       const overview = e.overview ? `<div class="muted">${esc(e.overview)}</div>` : "";
