@@ -1,6 +1,14 @@
 """
 checkers/syncthing_checker.py — Syncthing sync status check (Layer 2 API)
 Returns standard service result with detail string.
+
+CHANGELOG:
+  2026-07-18: Failed items ("pull errors") no longer force the whole service
+              DOWN. They now warn (service stays UP, "⚠ N failed item(s)" in
+              detail) until the total across folders exceeds
+              FAILED_ITEMS_DOWN_THRESHOLD, then escalate to DOWN. Genuine folder
+              state=="error" and connection loss still go DOWN immediately.
+              ^ If this line is absent, this box is running the OLD version.
 """
 
 import time
