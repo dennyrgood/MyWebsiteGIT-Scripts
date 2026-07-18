@@ -14,6 +14,13 @@ except ImportError:
     RequestsConnectionError = object
     ConnectTimeout = object
 
+# Failed items ("pull errors") on otherwise-idle folders are usually benign and
+# transient (locked / permission-denied / deleted-on-one-side files), so a few
+# are surfaced as a warning while the service stays UP. But if the total across
+# all folders climbs past this threshold, something is genuinely wrong (a whole
+# folder unwritable, a bad mount) and the service is escalated to DOWN.
+FAILED_ITEMS_DOWN_THRESHOLD = 5
+
 
 def check(tailscale_name: str, port: int, timeout_ms: int) -> dict:
     """
@@ -86,13 +93,18 @@ def check(tailscale_name: str, port: int, timeout_ms: int) -> dict:
             headers=headers, timeout=timeout, verify=False,
         )
         cfg_resp.raise_for_status()
-        folder_ids = [f["id"] for f in cfg_resp.json().get("folders", [])]
+        cfg_folders = cfg_resp.json().get("folders", [])
+        folder_ids  = [f["id"] for f in cfg_folders]
+        # Human-readable label per folder id (falls back to the id itself)
+        labels      = {f["id"]: (f.get("label") or f["id"]) for f in cfg_folders}
 
         # 5. Per-folder sync status
         total_need_files = 0
         total_need_bytes = 0
         active_folders   = 0   # folders currently syncing/scanning
         error_parts      = []  # hard errors only → status=down
+        warn_parts       = []  # failed items / pull errors → up but noted
+        total_pull_errs  = 0   # sum of pull errors across all folders
 
         for fid in folder_ids:
             db_resp = requests.get(
@@ -112,19 +124,36 @@ def check(tailscale_name: str, port: int, timeout_ms: int) -> dict:
 
             if state in ("syncing", "scanning", "sync-preparing"):
                 active_folders += 1
+            # A folder stuck in the 'error' state is a genuine outage → down.
             if state == "error":
-                error_parts.append(f"Folder '{fid}' error state")
-            if pe:
-                error_parts.append(f"{pe} pull error(s) in '{fid}'")
+                error_parts.append(f"Folder '{labels[fid]}' error state")
+            # Pull errors ("Failed Items") on an otherwise-idle folder are
+            # usually benign/transient (locked/permission-denied/deleted files).
+            # Surface them as a warning but DON'T take the whole service down.
+            elif pe:
+                total_pull_errs += pe
+                warn_parts.append(
+                    f"{pe} failed item{'s' if pe != 1 else ''} in '{labels[fid]}'"
+                )
 
         elapsed = round((time.monotonic() - start_time) * 1000)
         now_z   = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         n       = len(folder_ids)
+        warn    = "  ⚠ " + " • ".join(warn_parts) if warn_parts else ""
 
-        # Hard errors → down
+        # Hard errors (folder error state) → down
         if error_parts:
             return _result("down", elapsed,
-                           "ERROR • " + " • ".join(error_parts), now_z)
+                           "ERROR • " + " • ".join(error_parts) + warn, now_z)
+
+        # Too many failed items across folders → escalate to down
+        if total_pull_errs > FAILED_ITEMS_DOWN_THRESHOLD:
+            return _result(
+                "down", elapsed,
+                f"ERROR • {total_pull_errs} failed items across folders"
+                f" (threshold {FAILED_ITEMS_DOWN_THRESHOLD}){warn}",
+                now_z,
+            )
 
         # Actively syncing → up but show progress
         if active_folders > 0 or total_need_files > 0:
@@ -133,12 +162,12 @@ def check(tailscale_name: str, port: int, timeout_ms: int) -> dict:
                 f"Syncing • {active_folders or '?'} folder(s) active"
                 f" • {total_need_files} items"
                 f" • {mb:.1f} MB remaining"
-                f" • {bw}"
+                f" • {bw}{warn}"
             )
             return _result("up", elapsed, detail, now_z)
 
-        # All idle and fully in sync
-        detail = f"Synced • {n} folder{'s' if n != 1 else ''} • {version} • {bw}"
+        # All idle and fully in sync (possibly with benign failed items)
+        detail = f"Synced • {n} folder{'s' if n != 1 else ''} • {version} • {bw}{warn}"
         return _result("up", elapsed, detail, now_z)
 
     except ConnectTimeout:
