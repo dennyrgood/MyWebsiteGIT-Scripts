@@ -125,6 +125,13 @@ def _names(items, key="name") -> str:
 
 # (header, kind, extractor). kind "n" -> numeric cell, "s" -> inline string.
 # The first 12 apply to both; the rest are TV-only and stay blank for movies.
+#
+# NOTE: this is the BULK enricher's field set. The interactive "copy spreadsheet
+# row" button in tmdb_explorer.html has its own parallel mapping (ROW_FIELDS +
+# SHEET_COLUMNS) that has since evolved to the "ReadyForDHM" sheet layout. The
+# two are independent by design (bulk vs paste-one-row) but the field extraction
+# mirrors each other — if you change a field's meaning here, consider updating
+# the button too. See COPY_ROW_GUIDE.md.
 COLUMNS = [
     ("tmdb_id", "n", lambda d, tv: d.get("id")),
     ("title", "s", lambda d, tv: (d.get("name") if tv else d.get("title")) or ""),

@@ -268,6 +268,22 @@ uncommitted work elsewhere in the repo.)
 
 ---
 
+## Related: the bulk enricher (`enrich_xlsx.py`)
+
+There is a **second** tool that maps the same TMDB fields: the standalone
+`enrich_xlsx.py` CLI, which enriches an **existing** `.xlsx` in bulk (adds
+columns to every row) rather than copying one row at a time. It has its own
+parallel mapping — a `COLUMNS` list (with `CLEAR_COLS`) near the top of that
+file — using the same field logic (`_cast_top5`, `_us_cert_*`, etc.).
+
+The two are **independent by design** — different jobs (bulk file vs paste one
+row) and, currently, different target layouts (the CLI reflects the older
+bulk-enrichment column set; this button reflects the ReadyForDHM layout). They
+are **not** auto-synced. If you change what a field *means* (e.g. "certification
+should prefer the UK rating"), update it in **both** places so bulk and
+interactive output agree. Pure layout/column changes usually only affect
+whichever tool's target sheet changed.
+
 ## Driving changes from a session
 
 Open this file (or `@tmdb_explorer/COPY_ROW_GUIDE.md`) and give a one-line
