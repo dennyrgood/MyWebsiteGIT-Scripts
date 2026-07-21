@@ -9,12 +9,12 @@
 # name, so a display name with spaces (e.g. "Fleet Metrics Server") is found fine.
 #
 # Hardened: one stale or protected task never aborts the run.
-#   - Do NOT set $ErrorActionPreference='Stop' — it turns schtasks' stderr into a
+#   - Do NOT set $ErrorActionPreference='Stop' -- it turns schtasks' stderr into a
 #     terminating error and kills the loop.
 #   - Each export is wrapped and checks $LASTEXITCODE, so a stale XML name (no such
 #     task) or a protected task ("Access is denied", e.g. OpenWebUI) is skipped with
 #     a warning instead of crashing.
-# NOTE: amsterdamdesktop's repos live on D:\ — the repo probe handles that.
+# NOTE: amsterdamdesktop's repos live on D:\ -- the repo probe handles that.
 
 $Machine = "AmsterdamDesktop"    # fleet-configs folder name for this box
 
@@ -43,7 +43,7 @@ foreach ($t in $wanted) {
             $xml | Out-File -FilePath $out -Encoding Unicode   # UTF-16, as schtasks /Create /XML requires
             Write-Host "exported: $t"
         } else {
-            Write-Warning "skipped '$t' (missing, protected, or inaccessible — exit $LASTEXITCODE; try an elevated shell)"
+            Write-Warning "skipped '$t' (missing, protected, or inaccessible -- exit $LASTEXITCODE; try an elevated shell)"
         }
     } catch {
         Write-Warning "skipped '$t' ($($_.Exception.Message))"

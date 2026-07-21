@@ -38,7 +38,7 @@ foreach ($t in $wanted) {
             $xml | Out-File -FilePath $out -Encoding Unicode
             Write-Host "exported: $t"
         } else {
-            Write-Warning "skipped '$t' (missing, protected, or inaccessible — exit $LASTEXITCODE; try an elevated shell)"
+            Write-Warning "skipped '$t' (missing, protected, or inaccessible -- exit $LASTEXITCODE; try an elevated shell)"
         }
     } catch {
         Write-Warning "skipped '$t' ($($_.Exception.Message))"

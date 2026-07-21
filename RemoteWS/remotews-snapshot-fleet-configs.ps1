@@ -41,7 +41,7 @@ foreach ($t in $wanted) {
     try {
         $xml = & schtasks /Query /TN "\$t" /XML 2>$null
         if ($LASTEXITCODE -eq 0 -and $xml) { $xml | Out-File -FilePath $out -Encoding Unicode; Write-Host "exported: $t" }
-        else { Write-Warning "skipped '$t' (protected or inaccessible — exit $LASTEXITCODE)" }
+        else { Write-Warning "skipped '$t' (protected or inaccessible -- exit $LASTEXITCODE)" }
     } catch { Write-Warning "skipped '$t' ($($_.Exception.Message))" }
 }
 
