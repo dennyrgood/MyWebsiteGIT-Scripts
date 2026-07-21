@@ -141,7 +141,7 @@ if [ "$STATUS" = "✅ OK" ]; then
     fi
 fi
 
-SUBJECT="Nightly Health Summary - WorkBenchUnix - $(date '+%Y-%m-%d') - ${STATUS}"
+SUBJECT="${STATUS} - Nightly Health Summary - WorkBenchUnix - $(date '+%Y-%m-%d')"
 
 {
     echo "To: $TO"
