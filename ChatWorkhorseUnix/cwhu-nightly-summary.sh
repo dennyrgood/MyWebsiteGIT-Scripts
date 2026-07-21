@@ -100,7 +100,7 @@ if [ -f "$MONITOR_STATE" ]; then
 else
     BODY+="(state file not found — health monitor may not have run yet)\n"
 fi
-SUBJECT="Nightly Health Summary - ChatWorkhorseUnix - $(date '+%Y-%m-%d') - ${STATUS}"
+SUBJECT="${STATUS} - Nightly Health Summary - ChatWorkhorseUnix - $(date '+%Y-%m-%d')"
 {
     echo "To: $TO"
     echo "Subject: $SUBJECT"

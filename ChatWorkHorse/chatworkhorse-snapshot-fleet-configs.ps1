@@ -1,0 +1,43 @@
+# chatworkhorse-snapshot-fleet-configs.ps1
+# Created: 2026-07-21 — Re-exports this box's curated fleet Task Scheduler tasks
+# into the fleet-configs repo snapshot. Manual-run; review `git diff` and commit.
+#
+# Task set = every task that already has an XML in this box's fleet-configs
+# TaskSched/ folder, PLUS FleetMetricsServer, PLUS any task whose action references
+# the fleet writer/metrics paths (so a not-yet-exported HeartbeatWriter is caught).
+# The writer .ps1 / run_hidden.vbs / fleet_metrics_server.py themselves live in the
+# scripts repo, so there are no loose scripts to copy for a repo box — only the XMLs.
+
+$ErrorActionPreference = "Stop"
+$Machine = "ChatWorkHorse"      # fleet-configs folder name for this box
+
+$repoRoot = @("D:\repos", "C:\repos", "$env:USERPROFILE\repos") |
+            Where-Object { Test-Path "$_\fleet-configs" } | Select-Object -First 1
+if (-not $repoRoot) { throw "fleet-configs repo not found under D:\repos, C:\repos, or ~\repos" }
+
+$dest = Join-Path $repoRoot "fleet-configs\$Machine\TaskSched"
+New-Item -ItemType Directory -Force -Path $dest | Out-Null
+
+# 1) tasks that already have an XML here (preserves the curated set: Cloudflared, OpenWebUI, Flask*, Fleet Checker/Status, Heartbeat…)
+$tasks = @()
+$tasks += Get-ChildItem $dest -Filter *.xml -ErrorAction SilentlyContinue | ForEach-Object { $_.BaseName }
+# 2) always include the metrics server task
+$tasks += "Fleet Metrics Server"
+# 3) discover fleet tasks by action content (catches a HeartbeatWriter never exported before)
+$tasks += Get-ScheduledTask | Where-Object {
+    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet_metrics_server|fleet_monitor|run_hidden|heartbeat_writer'
+} | ForEach-Object { $_.TaskName }
+$tasks = $tasks | Select-Object -Unique
+
+foreach ($t in $tasks) {
+    $out = Join-Path $dest "$t.xml"
+    $xml = schtasks /Query /TN "\$t" /XML 2>$null
+    if ($LASTEXITCODE -eq 0 -and $xml) {
+        $xml | Out-File -FilePath $out -Encoding Unicode   # UTF-16, as schtasks /Create /XML requires
+        Write-Host "exported: $t"
+    } else {
+        Write-Warning "task not found (skipped): $t"
+    }
+}
+
+Write-Host "`nSnapshot complete. Review: cd $repoRoot\fleet-configs ; git status"

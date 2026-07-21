@@ -6,6 +6,8 @@
 #                         D-state check, check_condition_streak() helper.
 # 2026-07-14 21:00 UTC — updated footer: fixed compose path, added CWHU-specific
 #                         note on immich_machine_learning gunicorn hang / reboot fix.
+# 2026-07-18 20:10 UTC — removed immich_machine_learning from monitored containers;
+#                         intentionally stopped by user, no longer expected to run.
 # CWHU system health monitor. Runs every 5 minutes via cron.
 # Checks: iowait, D-state processes, disk usage, docker containers.
 # Emails on first detection and every 30 minutes while condition persists.
@@ -19,7 +21,9 @@ ALERT_INTERVAL=$((30 * 60))
 
 IOWAIT_THRESHOLD=20
 DISK_THRESHOLD=85
-DOCKER_CONTAINERS=(immich_machine_learning immich_server immich_postgres immich_redis)
+# immich_machine_learning removed 2026-07-18 — intentionally stopped by user
+# DOCKER_CONTAINERS=(immich_machine_learning immich_server immich_postgres immich_redis)
+DOCKER_CONTAINERS=(immich_server immich_postgres immich_redis)
 DOCKER_FAIL_THRESHOLD=2
 DSTATE_FAIL_THRESHOLD=2
 

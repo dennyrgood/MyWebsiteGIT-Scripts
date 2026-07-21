@@ -6,6 +6,12 @@
 #                 anti-flap threshold.
 # 2026-07-12 UTC: converted D-state check to same 2-consecutive-failure streak
 #                 model to suppress transient jbd2/postgres COPY blips.
+# 2026-07-21 UTC: gated D-state alert on iowait ALSO being over threshold. A
+#                 long-running but healthy backup (nightly rsync to
+#                 /mnt/backup-c) legitimately sits in D-state the whole time it
+#                 writes while keeping iowait moderate; only a genuinely
+#                 hung/failing device drives iowait high. This stops the backup
+#                 window from paging every night.
 # WBU system health monitor. Runs every 5 minutes via cron.
 # Checks: iowait, D-state processes, disk usage, missing mounts, docker containers.
 # Emails on first detection and every 30 minutes while condition persists.
@@ -46,10 +52,15 @@ IOWAIT=$(iostat -c 1 6 2>/dev/null | awk '
 IOWAIT_TRIGGERED=$(awk -v i="$IOWAIT" -v t="$IOWAIT_THRESHOLD" \
     'BEGIN{print (i+0 > t+0) ? 1 : 0}')
 
-# --- Check 2: D-state processes ---
+# --- Check 2: D-state processes (gated on iowait) ---
+# A process in D-state only matters if the storage subsystem is actually in
+# trouble. A healthy long-running backup (rsync -> /mnt/backup-c) sits in
+# D-state the entire time it writes yet keeps iowait moderate, whereas a hung
+# or failing device drives iowait high. So we only treat D-state as a problem
+# when iowait is ALSO over threshold. IOWAIT_TRIGGERED is computed above.
 DSTATE_PROCS=$(ps -eo pid,stat,comm,args --no-headers | awk '$2 ~ /^D/')
 DSTATE_TRIGGERED=0
-[ -n "$DSTATE_PROCS" ] && DSTATE_TRIGGERED=1
+[ -n "$DSTATE_PROCS" ] && [ "$IOWAIT_TRIGGERED" -eq 1 ] && DSTATE_TRIGGERED=1
 
 # --- Check 3: disk usage ---
 DISK_OVER=$(df -h | awk -v t="$DISK_THRESHOLD" \
@@ -143,7 +154,7 @@ case "$verdict" in
     alert)
         DSTATE_LAST_ALERT=$NOW; DSTATE_ACTIVE=1
         ALERT_BODY+="=== D-STATE PROCESSES ===\n"
-        ALERT_BODY+="Present for ${new_streak} consecutive checks (~$((new_streak * 5)) min).\n"
+        ALERT_BODY+="Present for ${new_streak} consecutive checks (~$((new_streak * 5)) min), with iowait at ${IOWAIT}% (threshold ${IOWAIT_THRESHOLD}%).\n"
         ALERT_BODY+="$(echo "$DSTATE_PROCS" | head -10)\n\n"
         ;;
     clear)   DSTATE_ACTIVE=0; CLEAR_BODY+="  - D-state processes cleared\n" ;;
@@ -239,11 +250,13 @@ What to do:
 D-STATE PROCESSES:
 A process in D-state (uninterruptible sleep) is blocked waiting for
 the kernel to complete an I/O operation. Normal processes pass through
-D-state for milliseconds. This monitor now requires D-state processes
-to be present for ${DSTATE_FAIL_THRESHOLD} consecutive samples (~$((DSTATE_FAIL_THRESHOLD * 5)) min) before alerting,
-which filters out transient jbd2/* and short-lived Postgres COPY blips.
-If the alert fires, the block device is likely hung or a process is
-genuinely stuck.
+D-state for milliseconds. This monitor requires D-state processes to be
+present for ${DSTATE_FAIL_THRESHOLD} consecutive samples (~$((DSTATE_FAIL_THRESHOLD * 5)) min) AND iowait to be over
+${IOWAIT_THRESHOLD}% at the same time before alerting. The streak filters out transient
+jbd2/* and short-lived Postgres COPY blips; the iowait gate filters out
+healthy long-running backups (nightly rsync to /mnt/backup-c), which sit
+in D-state for the whole copy but keep iowait moderate. If the alert
+fires, the block device is likely hung or a process is genuinely stuck.
 
 What to do:
   1. ps -eo pid,stat,comm,args | awk '\$2~/^D/'  -- see what is stuck
