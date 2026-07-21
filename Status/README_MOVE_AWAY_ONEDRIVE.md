@@ -178,6 +178,31 @@ curl http://<checker>:5010/api/status                 # machine_info present for
 
 ---
 
+## Capturing rebuild config → fleet-configs
+
+Each machine has a per-box snapshot script, `scripts/<Machine>/<host>-snapshot-fleet-configs.{ps1,sh}`,
+that copies its rebuild config into the **fleet-configs** private repo (following the
+original cwhu/wbu pattern). Run manually, review `git diff`, commit.
+
+- **Repo boxes** write straight into the local `fleet-configs` checkout:
+  - Windows (`.ps1`) — re-exports the curated `TaskSched/*.xml` set + `FleetMetricsServer`
+    + any discovered fleet writer/metrics task (UTF-16, as `schtasks` requires).
+  - Macs (`.sh`) — `launchctl` state, installed-agent list, `brew leaves`, `sw_vers`, and a
+    pointer to `launchagents/install.sh` (the plists are version-controlled there, not copied).
+  - Ubuntu (cwhu/wbu) — the existing files + the `fleet_metrics_server` systemd enabled-state
+    (writer/server/unit are already repo-tracked, cron already captured).
+
+- **No-repo boxes** (`surface3-gc`, `remotews`, `mathes-mac-mini`) can't commit to git, so
+  their snapshot scripts **stage** files into `OneDrive/ForFleetConfigs/<box>/`. The scripts
+  are delivered to those boxes through that same OneDrive folder. Then, on the MacBook Air:
+  ```bash
+  scripts/collect-fleet-configs-from-onedrive.sh   # OneDrive/ForFleetConfigs/* -> fleet-configs/
+  cd ~/repos/fleet-configs && git status           # review + commit
+  ```
+
+fleet-configs folders: `AmsterdamDesktop ChatWorkHorse ImageBeast TravelBeast Surface3GC
+RemoteWS MathesMacMini DennissMacBookAir Denniss2ndMacBookAir ChatWorkhorseUnix WorkBenchUnix`.
+
 ## Still-optional cleanup
 
 - Re-export the live Windows task XMLs into `fleet-configs` (the archived ones are stale).
