@@ -15,7 +15,7 @@
 $Machine = "ImageBeast"          # fleet-configs folder name for this box
 
 $repoRoot = @("D:\repos", "C:\repos", "$env:USERPROFILE\repos") |
-            Where-Object { Test-Path (Join-Path $_ "fleet-configs") } | Select-Object -First 1
+            Where-Object { Test-Path "$_\fleet-configs" } | Select-Object -First 1
 if (-not $repoRoot) { Write-Error "fleet-configs repo not found under D:\repos, C:\repos, or ~\repos"; return }
 
 $dest = Join-Path $repoRoot "fleet-configs\$Machine\TaskSched"
