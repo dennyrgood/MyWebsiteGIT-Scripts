@@ -22,7 +22,7 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 $tasks = @()
 $tasks += Get-ChildItem $dest -Filter *.xml -ErrorAction SilentlyContinue | ForEach-Object { $_.BaseName }
 # 2) always include the metrics server task
-$tasks += "FleetMetricsServer"
+$tasks += "Fleet Metrics Server"
 # 3) discover fleet tasks by action content (catches a HeartbeatWriter never exported before)
 $tasks += Get-ScheduledTask | Where-Object {
     ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet_metrics_server|fleet_monitor|run_hidden|heartbeat_writer'
