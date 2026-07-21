@@ -20,13 +20,18 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
 $tasks = @()
 $tasks += Get-ChildItem $dest -Filter *.xml -ErrorAction SilentlyContinue | ForEach-Object { $_.BaseName }
-$tasks += "FleetMetricsServer"
+$tasks += "Fleet Metrics Server"
 $tasks += Get-ScheduledTask | Where-Object {
     ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet_metrics_server|fleet_monitor|run_hidden|heartbeat_writer'
 } | ForEach-Object { $_.TaskName }
 $tasks = $tasks | Select-Object -Unique
 
+Write-Host "`nTasks to export:"
+$tasks | ForEach-Object { Write-Host "[$_]" }
+Write-Host ""
+
 foreach ($t in $tasks) {
+    Write-Host "Processing: $t"
     $out = Join-Path $dest "$t.xml"
     $xml = schtasks /Query /TN "\$t" /XML 2>$null
     if ($LASTEXITCODE -eq 0 -and $xml) {
