@@ -191,7 +191,7 @@
 
     /* ── ALERT STRIP ────────────────────────────────── */
     #alert-strip {
-      display: none;
+      display: flex;
       background: rgba(255,59,92,0.08);
       border-bottom: 1px solid rgba(255,59,92,0.3);
       padding: 6px 20px;
@@ -202,14 +202,38 @@
       gap: 6px;
       flex-wrap: wrap;
       align-items: center;
+      justify-content: space-between;
     }
-    #alert-strip.visible { display: flex; }
+    #alert-content {
+      display: none;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    #alert-content.visible { display: flex; }
     .alert-label {
       font-family: var(--display);
       font-size: 12px;
       letter-spacing: 2px;
       margin-right: 8px;
       flex-shrink: 0;
+    }
+    #fleet-transitions-link {
+      background: none;
+      border: 1px solid rgba(155,158,255,0.3);
+      color: var(--lcars-blue);
+      font-family: inherit;
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 2px;
+      cursor: pointer;
+      flex-shrink: 0;
+      margin-left: auto;
+    }
+    #fleet-transitions-link:hover {
+      background: rgba(155,158,255,0.1);
     }
     .alert-item {
       background: rgba(255,59,92,0.12);
@@ -713,7 +737,10 @@
   </div>
 
   <div id="alert-strip">
-    <span class="alert-label">⚠ SYSTEM ALERT</span>
+    <div id="alert-content">
+      <span class="alert-label">⚠ SYSTEM ALERT</span>
+    </div>
+    <button id="fleet-transitions-link">⚡ FLEET TRANSITIONS</button>
   </div>
 
   <div id="grid">
@@ -1274,8 +1301,8 @@
 
     // ── ALERT STRIP ──────────────────────────────────
     function updateAlertStrip(machines) {
-      const strip = document.getElementById('alert-strip');
-      strip.querySelectorAll('.alert-item').forEach(el => el.remove());
+      const content = document.getElementById('alert-content');
+      content.querySelectorAll('.alert-item').forEach(el => el.remove());
       const alerts = [];
       for (const machine of machines) {
         if (machine.host?.status !== 'up') {
@@ -1291,11 +1318,11 @@
           const el = document.createElement('span');
           el.className = 'alert-item';
           el.textContent = a;
-          strip.appendChild(el);
+          content.appendChild(el);
         });
-        strip.classList.add('visible');
+        content.classList.add('visible');
       } else {
-        strip.classList.remove('visible');
+        content.classList.remove('visible');
       }
     }
 
@@ -1461,6 +1488,57 @@
       const when  = t.ts ? new Date(t.ts).toLocaleString() : '–';
       return `<div class="m-svc-card ${toCls}">
         <div class="m-svc-head"><span class="m-svc-name">${label}</span><span class="m-svc-badge">${t.from}→${t.to}</span></div>
+        <div class="m-svc-row"><span class="lbl">WHEN</span><span class="val" style="font-size:10px">${when}</span></div>
+        ${t.detail ? `<div class="m-svc-row" style="flex-direction:column;gap:2px"><span class="lbl">DETAIL</span><span class="val" style="font-size:9px">${t.detail}</span></div>` : ''}
+      </div>`;
+    }
+
+    // ── FLEET-WIDE TRANSITIONS MODAL ─────────────────
+    async function openFleetTransitionsModal() {
+      const API_BASE = isBkp
+        ? 'https://fleet-bkp.ldmathes.cc'
+        : 'https://fleet.ldmathes.cc';
+
+      document.getElementById('modal-title').textContent = 'FLEET TRANSITIONS';
+      document.getElementById('modal-role').textContent  = 'ALL HOSTS — THIS CHECKER';
+
+      const badge = document.getElementById('modal-status-badge');
+      badge.textContent = '⚡';
+      badge.className   = 'unknown';
+
+      const modal = document.getElementById('modal');
+      modal.className = 'status-unknown';
+      document.querySelector('.modal-tb-pill-top').style.background = 'var(--lcars-blue)';
+      document.querySelector('.modal-tb-center').style.borderBottomColor = 'var(--lcars-blue)';
+
+      document.getElementById('modal-alert').classList.remove('visible');
+
+      document.getElementById('modal-body').innerHTML =
+        `<div class="m-section-title">RECENT TRANSITIONS</div><div class="m-info-val" style="color:var(--text-dim)">Loading…</div>`;
+      document.getElementById('modal').classList.add('open');
+      document.getElementById('overlay').classList.add('open');
+
+      try {
+        const res = await fetch(`${API_BASE}/api/transitions?limit=150`);
+        const entries = res.ok ? await res.json() : [];
+        const html = entries.length
+          ? `<div class="m-svc-grid">${entries.slice().reverse().map(renderModalTransitionFleet).join('')}</div>`
+          : `<div class="m-info-val" style="color:var(--text-dim)">No transitions recorded yet</div>`;
+        document.getElementById('modal-body').innerHTML =
+          `<div class="m-section-title">RECENT TRANSITIONS</div>${html}`;
+      } catch (e) {
+        document.getElementById('modal-body').innerHTML =
+          `<div class="m-section-title">RECENT TRANSITIONS</div><div class="m-info-val" style="color:var(--down)">Failed to load transitions</div>`;
+      }
+    }
+    document.getElementById('fleet-transitions-link').addEventListener('click', openFleetTransitionsModal);
+
+    function renderModalTransitionFleet(t) {
+      const label = t.scope === 'service' ? t.service : 'HOST';
+      const toCls = t.to === 'up' ? 'up' : t.to === 'down' ? 'down' : 'unknown';
+      const when  = t.ts ? new Date(t.ts).toLocaleString() : '–';
+      return `<div class="m-svc-card ${toCls}">
+        <div class="m-svc-head"><span class="m-svc-name">${t.host} — ${label}</span><span class="m-svc-badge">${t.from}→${t.to}</span></div>
         <div class="m-svc-row"><span class="lbl">WHEN</span><span class="val" style="font-size:10px">${when}</span></div>
         ${t.detail ? `<div class="m-svc-row" style="flex-direction:column;gap:2px"><span class="lbl">DETAIL</span><span class="val" style="font-size:9px">${t.detail}</span></div>` : ''}
       </div>`;
