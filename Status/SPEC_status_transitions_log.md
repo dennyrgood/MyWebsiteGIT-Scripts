@@ -1,9 +1,16 @@
 # Spec: status transition log + sparkline window label
 
 Written 2026-07-22, updated 2026-07-22 with a second, stronger motivating incident.
-Not implemented yet — this is a handoff spec for a future session. Read this whole file
-before touching code; it front-loads the context a fresh session won't have (file layout,
-deploy mechanics, recent related fixes).
+
+**STATUS (2026-07-22): Part B implemented, deployed to both checker hosts, and verified
+live** — `Status/reporters/transitions_reporter.py` (new), `Status/engine.py` (hooked in),
+`Status/fleet_api.py` (`/api/transitions` endpoint), and `Status/Web/ST/tiles.html` (per-tile
+"⚡N" flap badge, per-host modal "RECENT TRANSITIONS" section, and a persistent "FLEET
+TRANSITIONS" link/modal on the alert-strip line — all beyond what this spec originally
+scoped for the UI follow-up). Commits: `12afae1`, `7959837`, `b0afc08`.
+
+**Part A (sparkline time window label) was deemed unnecessary and will NOT be
+implemented.** Left below for reference only.
 
 ## Background / why this came up
 
@@ -74,7 +81,7 @@ the underlying script hung is a separate investigation the transition log doesn'
 with) — but it would have collapsed "when did this start and what was down" from ~20
 minutes of cross-referencing to one grep.
 
-## Part A — sparkline time window label (small, do this first)
+## Part A — sparkline time window label (NOT implemented, deemed unnecessary)
 
 **What the sparkline data actually is**, confirmed by reading the writers:
 - `Status/heartbeat_writer_linux.py` (Linux, run via cron) and
