@@ -18,12 +18,23 @@
 # local Postgres wipe path below updated to match. Both machines now use immich-data
 # consistently; no win-d mounts remain on either host.
 # 2026-07-14 15:30 UTC: Save psql restore log to ~/.cache/cwhu-warm-sync/ with datestamp (alongside sync_log/sync_errors), replacing ephemeral /tmp path.
+# 2026-07-22 UTC: Root-caused a ~2hr Immich outage — WBU had a transient SSH hang, and
+# the bare `ssh` call below (no ConnectTimeout/keepalive) sat there indefinitely, never
+# reaching the "no dump found" guard, so the stack stayed torn down with no recovery and
+# no error surfaced. Added SSH_OPTS (applied to the ssh call and every rsync's transport,
+# since rsync can hang mid-transfer the same way) so any future connectivity blip to WBU
+# fails within ~25s instead of hanging forever, and switched the LATEST_DUMP assignment to
+# explicit error-checking so set -e can't skip past the recovery block on failure.
 set -e
 WBU_HOST="workbenchunix"   # Tailscale name
 WBU_USER="dhm"
 LIVE_IMAGES="/mnt/immich-data/immich/images"
 DUMP_STAGING="/mnt/immich-data/immich/restore-dump"
 DUMP_STAGING_FILE="$DUMP_STAGING/latest-sync-dump.sql"
+# Fail fast rather than hang forever on a wedged/unreachable WBU connection —
+# ConnectTimeout bounds the initial connect, ServerAlive* detects a session that
+# connected but then went silent (the failure mode that caused the 2026-07-22 outage).
+SSH_OPTS="-o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
 cd /home/dhm/immich-app
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting warm-sync from WBU's immich-data."
 # 1. Stop CWHU's Immich stack first — avoids any race between the live
@@ -33,14 +44,22 @@ docker compose down
 # 2. Pull the latest Postgres dump from WBU's immich-data into local staging.
 #    Cheap and small enough to stage separately before touching anything live.
 mkdir -p "$DUMP_STAGING"
-LATEST_DUMP=$(ssh "$WBU_USER@$WBU_HOST" "ls -1t /mnt/immich-data/immich/postgres-dumps-latest/immich-dump_*.sql | head -1")
+# Explicit if-check, not `LATEST_DUMP=$(...)` on its own — under `set -e`, a failed
+# assignment like that exits the script immediately, before this recovery block ever
+# runs. That's what actually happened on 2026-07-22: the ssh call failed(/hung), the
+# script died silently, and the intended "bring the stack back up" never fired.
+if ! LATEST_DUMP=$(ssh $SSH_OPTS "$WBU_USER@$WBU_HOST" "ls -1t /mnt/immich-data/immich/postgres-dumps-latest/immich-dump_*.sql | head -1"); then
+    echo "ERROR: could not reach WBU or list dump files. Aborting before touching anything live."
+    docker compose up -d
+    exit 1
+fi
 if [ -z "$LATEST_DUMP" ]; then
     echo "ERROR: could not find a dump file on WBU's immich-data. Aborting before touching anything live."
     docker compose up -d
     exit 1
 fi
 echo "Pulling dump: $LATEST_DUMP"
-rsync -avh --checksum "$WBU_USER@$WBU_HOST:$LATEST_DUMP" "$DUMP_STAGING_FILE"
+rsync -avh --checksum -e "ssh $SSH_OPTS" "$WBU_USER@$WBU_HOST:$LATEST_DUMP" "$DUMP_STAGING_FILE"
 # 3. Verify the staged dump looks complete before doing anything destructive with it.
 #    Minimum bar: file exists, non-empty, and ends with the expected pg_dumpall
 #    closing marker rather than being truncated mid-transfer.
@@ -62,7 +81,7 @@ echo "Staged dump verified complete."
 echo "Re-checking UPLOAD_LOCATION ownership before rsync..."
 sudo chown -R 1000:1000 "$LIVE_IMAGES"
 echo "Syncing images from WBU's immich-data (live)..."
-rsync -avh --delete "$WBU_USER@$WBU_HOST:/mnt/immich-data/immich/images/" "$LIVE_IMAGES/"
+rsync -avh --delete -e "ssh $SSH_OPTS" "$WBU_USER@$WBU_HOST:/mnt/immich-data/immich/images/" "$LIVE_IMAGES/"
 # 5. Wipe and restore Postgres from the staged, verified dump.
 #    find -mindepth 1 -delete, not rm -rf */ — see runbook v5/v6 for why the
 #    glob version silently no-ops under sudo.
@@ -82,4 +101,4 @@ fi
 echo "Bringing up full stack..."
 docker compose up -d
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Warm-sync complete."
-rsync -aq --delete /home/dhm/.cache/cwhu-warm-sync/ "$WBU_USER@$WBU_HOST:/home/dhm/.cache/cwhu-warm-sync/"
+rsync -aq --delete -e "ssh $SSH_OPTS" /home/dhm/.cache/cwhu-warm-sync/ "$WBU_USER@$WBU_HOST:/home/dhm/.cache/cwhu-warm-sync/"
