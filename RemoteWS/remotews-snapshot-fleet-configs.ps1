@@ -26,12 +26,12 @@ New-Item -ItemType Directory -Force -Path $xmlDir | Out-Null
 
 # 1) bespoke fleet scripts (writer .ps1, launcher .vbs, metrics server .py)
 Get-ChildItem -Path "$src\*" -Include *.ps1, *.vbs, *.py -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -match 'heartbeat|fleet_metrics_server|run_hidden|Bekah|GC_' } |
+    Where-Object { $_.Name -match 'heartbeat|fleet_metrics_server|run_hidden|watchdog|Bekah|GC_' } |
     ForEach-Object { Copy-Item $_.FullName $dest -Force; Write-Host "copied: $($_.Name)" }
 
 # 2) fleet Task Scheduler tasks (found by action) -> UTF-16 XML
 $wanted = @(Get-ScheduledTask | Where-Object {
-    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat|run[-_ ]?hidden|bekah|gc_'
+    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat|run[-_ ]?hidden|watchdog|bekah|gc_'
 } | ForEach-Object { $_.TaskName } | Select-Object -Unique)
 
 Write-Host "Tasks to export:"; $wanted | ForEach-Object { Write-Host "  [$_]" }; Write-Host ""
