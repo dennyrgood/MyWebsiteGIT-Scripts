@@ -20,12 +20,20 @@
 # non-zero rsync exit here aborts cleanly with a clear log message, rather than
 # silently dying (the old behavior) or continuing to prune (which would be
 # actively dangerous).
+#
+# Edited: 2026-07-22 UTC — added ConnectTimeout/ServerAlive to every ssh/rsync call.
+# Root-caused a ~2hr Immich outage on CWHU the same week: a sibling script's bare ssh
+# call (no timeout) hung indefinitely on a transient SSH blip to a remote host, leaving
+# a destructive operation half-done with no recovery for hours (see restore_from_wbu.sh's
+# 2026-07-22 comment). This script has the same bare-ssh-to-remote-host shape and runs
+# unattended on a weekly cron with no one watching, so it gets the same treatment.
 set -e
 
 WBU_DUMP_DIR="/mnt/immich-data/immich/postgres-dumps-latest"
 DEST_HOST="dennishmathes@mathes-mac-mini"
 SSH_KEY="/home/dhm/.ssh/id_ed25519_macmini"
-SSH_OPTS="ssh -i $SSH_KEY"
+SSH_TIMEOUT_OPTS="-o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
+SSH_OPTS="ssh -i $SSH_KEY $SSH_TIMEOUT_OPTS"
 DEST_PATH="/Volumes/Expansion/Immich/backup/postgres-dumps"
 
 LOG_DIR="/home/dhm/.cache/export-sync"
@@ -47,7 +55,7 @@ fi
 LATEST_DUMP_NAME=$(basename "$LATEST_DUMP")
 log "Latest dump: $LATEST_DUMP_NAME"
 
-ssh -n -i "$SSH_KEY" "$DEST_HOST" "mkdir -p '$DEST_PATH'"
+ssh -n -i "$SSH_KEY" $SSH_TIMEOUT_OPTS "$DEST_HOST" "mkdir -p '$DEST_PATH'"
 
 log "Syncing dump to Mac Mini..."
 set +e
@@ -61,9 +69,9 @@ fi
 log "Sync complete."
 
 log "Pruning destination — keeping only $LATEST_DUMP_NAME..."
-ssh -n -i "$SSH_KEY" "$DEST_HOST" "find '$DEST_PATH' -maxdepth 1 -type f -name 'immich-dump_*.sql' ! -name '$LATEST_DUMP_NAME' -delete"
+ssh -n -i "$SSH_KEY" $SSH_TIMEOUT_OPTS "$DEST_HOST" "find '$DEST_PATH' -maxdepth 1 -type f -name 'immich-dump_*.sql' ! -name '$LATEST_DUMP_NAME' -delete"
 
-REMAINING=$(ssh -n -i "$SSH_KEY" "$DEST_HOST" "find '$DEST_PATH' -maxdepth 1 -type f -name 'immich-dump_*.sql'" | wc -l)
+REMAINING=$(ssh -n -i "$SSH_KEY" $SSH_TIMEOUT_OPTS "$DEST_HOST" "find '$DEST_PATH' -maxdepth 1 -type f -name 'immich-dump_*.sql'" | wc -l)
 log "Prune complete. $REMAINING dump file(s) remain at destination (expected: 1)."
 
 log "=== Postgres dump sync to Mac Mini complete ==="
