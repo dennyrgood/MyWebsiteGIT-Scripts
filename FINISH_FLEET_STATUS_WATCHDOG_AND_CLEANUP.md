@@ -1,0 +1,62 @@
+# Fleet metrics/watchdog cleanup — full rollout + OneDrive retirement
+
+Written 2026-07-23. Picks up after `FleetMetricsWatchdog.ps1` was built and
+live-tested on remotews (found + fixed: cross-task-kill bug, missing
+powershell.exe in process filter, duplicate-process pileup, wrong task name
+"Fleet Metrics Server" with a space). All three former no-repo boxes
+(surface3-gc, remotews, mmm) have since been converted to repo checkouts.
+
+## 1. Watchdog production rollout (remaining boxes)
+
+- `Status/FleetMetricsWatchdog.ps1` has only been live-tested on remotews.
+  Deploy to travelbeast (the original genuine-hang case — never actually
+  retested with this script), plus chatworkhorse, amsterdamdesktop,
+  imagebeast, surface3-gc.
+- Per box: Task Scheduler task, recurring trigger every 5 min indefinitely,
+  **"Run with highest privileges" checked** (required — CommandLine comes
+  back blank for other-session processes otherwise, which caused the
+  false-negative duplicate-writer bug on remotews), `MultipleInstancesPolicy
+  = IgnoreNew`.
+- Confirm `$staleThresholdMinutes` is at the production value (10) on every
+  deployed copy, not the `1` used for remotews testing.
+- Confirm each box's actual "Fleet Metrics Server"/"Heartbeat Writer" task
+  names match what `$taskProcessPattern`/`Restart-Task` expect (remotews's
+  task name had drifted to include a space — check others aren't drifted
+  differently).
+
+## 2. ST tiles dashboard integration
+
+- Add a button/link (matching the existing "FLEET TRANSITIONS" pattern) that
+  opens a modal/window pulling `http://<host>:9100/watchdog_<host>.log` per
+  box. **Keep it simple: raw log tail, same as transitions** — no special
+  formatting for restart vs. duplicate-kill events.
+
+## 3. Snapshot scripts — finish repo-based conversion
+
+- `Surface3GC/surface3-gc-snapshot-fleet-configs.ps1` and
+  `MathesMacMini/mathes-mac-mini-snapshot-fleet-configs.sh` still need
+  rewriting to the repo-based pattern (same as
+  `RemoteWS/remotews-snapshot-fleet-configs.ps1` was converted).
+- Add `watchdog` to the task-discovery regex in **all** repo-based Windows
+  snapshot scripts (travelbeast's currently lacks it too, not just the ones
+  being converted).
+
+## 4. Retire the OneDrive staging mess
+
+(After the overnight/reboot soak test confirms nothing regressed.)
+
+- Delete `push-snapshots-to-onedrive.sh`, `collect-fleet-configs-from-onedrive.sh`.
+- Clean up references in `HOWTO_TWEAK_FLEET_TASKS.md`, `CLAUDE.md`,
+  `Status/README_MOVE_AWAY_ONEDRIVE.md` (host table's "no repo" rows for
+  surface3-gc/remotews/mathes-mac-mini are now stale).
+- Delete leftover `C:\Misc\Bekah_*` files on remotews (superseded by repo
+  copies) and equivalent leftovers on surface3-gc.
+
+## 5. Loose ends found during this work
+
+- `launchagents/MMM-PROMPT.md` is now obsolete (describes the old
+  OneDrive-era, no-repo, heartbeat-only setup) — retire or rewrite now that
+  mmm is fully repo-based with host-aware `install.sh`.
+- Confirm the metrics server actually running on remotews is the repo copy,
+  not a stale leftover at the old `c:\misc\python313\fleet_metrics_server.py`
+  path.
