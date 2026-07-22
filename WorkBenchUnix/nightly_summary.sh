@@ -24,7 +24,7 @@ CWHU_ERRORS=$(ls -1t /home/dhm/.cache/cwhu-warm-sync/sync_errors_*.txt 2>/dev/nu
 EXPORT_ARCHIVE=$(cat /home/dhm/.cache/immich-export/export_archive.log 2>/dev/null | wc -l > /dev/null; echo /home/dhm/.cache/immich-export/export_archive.log)
 
 LOGS=(
-    "/var/log/immich-backup-c.log"
+    # "/var/log/immich-backup-c.log"  # 2026-07-22: backup-c drive retired (repeat failures), cron disabled — see WorkBenchUnix/backup_immich.sh comment
     "/var/log/immich-dump-for-cwhu.log"
     "$MACMINI_DB"
     "$MACMINI_IMG"
@@ -108,7 +108,7 @@ BODY="${TLDR}${BODY}"
 # Mac Mini logs are intentionally excluded — Friday-only, expected to be stale other days.
 STATUS="✅ OK"
 declare -A EXPECTED=(
-    ["/var/log/immich-backup-c.log"]="Backup to /mnt/backup-c finished."
+    # ["/var/log/immich-backup-c.log"]="Backup to /mnt/backup-c finished."  # 2026-07-22: backup-c drive retired (repeat failures), cron disabled
     ["/var/log/immich-dump-for-cwhu.log"]="Dump for CWHU complete."
     ["$CWHU_SYNC"]="Warm-sync complete."
 )
