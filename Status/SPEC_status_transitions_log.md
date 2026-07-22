@@ -1,8 +1,9 @@
 # Spec: status transition log + sparkline window label
 
-Written 2026-07-22. Not implemented yet — this is a handoff spec for a future session.
-Read this whole file before touching code; it front-loads the context a fresh session
-won't have (file layout, deploy mechanics, recent related fixes).
+Written 2026-07-22, updated 2026-07-22 with a second, stronger motivating incident.
+Not implemented yet — this is a handoff spec for a future session. Read this whole file
+before touching code; it front-loads the context a fresh session won't have (file layout,
+deploy mechanics, recent related fixes).
 
 ## Background / why this came up
 
@@ -16,6 +17,62 @@ caused a count to drop. That's the gap this spec addresses.
 Separately, the existing RAM/CPU/VRAM/GPU sparklines in `Web/ST/tiles.html` don't label
 what time window they cover — this spec includes a small fix for that too since it's the
 same "I can't tell what I'm looking at" problem in miniature.
+
+**Later the same day, a real (not hypothetical) incident made the case much stronger** —
+see "Case study" below. Diagnosing a ~2hr Immich outage on `chatworkhorseunix` required
+manually cross-referencing five separate, differently-shaped data sources by hand (two
+checker app logs, `server_status_all.json`, a health-monitor's own alert emails, and the
+failing script's own log files) because nothing anywhere records "service X changed from
+up to down at time Y, here's why." A transition log would have collapsed most of that
+into one query.
+
+## Case study: the 2026-07-22 CWHU/Immich outage (concrete evidence for Part B)
+
+Same day this spec was first written, a real outage happened that's a near-perfect
+illustration of the exact gap Part B addresses. Summarized here so a future
+implementer has a concrete "here's what this would have made easy" reference, not
+just an abstract goal.
+
+**What happened**: `ChatWorkhorseUnix/restore_from_wbu.sh` (a nightly cron job, `0 4 * * *`
+on `chatworkhorseunix`, tears down the local Immich stack, pulls a fresh Postgres dump +
+images from WorkBenchUnix, restores, brings the stack back up) hit a transient SSH hang
+connecting to WBU. Because the script had `set -e` and a bare `LATEST_DUMP=$(ssh ...)`
+assignment (no `ConnectTimeout`), the hang meant the script died silently right after
+tearing the stack down — never reaching its own "bring it back up" recovery logic. Immich
+stayed down for **~2 hours** before it was noticed and manually restarted
+(`docker compose up -d`). Root-caused and fixed same day: commit `a7cdd5c` (the script
+itself), then `0156b93` and `c87e8c4` (an audit found + fixed 6 more scripts across CWHU
+and WBU with the identical bare-ssh-no-timeout pattern, and retired 3 superseded/orphaned
+scripts). None of that fix work is part of this spec — it's mentioned here only because
+diagnosing it is what proved out the need for Part B.
+
+**What it actually took to diagnose**, all done by hand, cross-referencing five different
+sources with no shared schema or query:
+1. `checker_amsterdamdeskto_app.log` (note the truncated hostname) — raw poll-summary
+   lines like `machines 11/11 | services 26/27`, no indication *which* service.
+2. `server_status_all.json` — current snapshot only, had to grep for `status != "up"` to
+   find `chatworkhorseunix / Immich: connection refused` at the moment of inspection —
+   tells you *what's down now*, nothing about *when it started* or *history*.
+3. A forwarded nightly health-summary **email** from a completely separate monitor
+   (`WorkBenchUnix/wbu-health-monitor.sh`, root cron, alerts by email) — this is what
+   actually had the timeline (`HEALTH ALERT -- 04:05, 04:40, 05:15, 05:40, 06:15` — an
+   independent monitor on a different machine, escalating over the same window).
+4. `journalctl` on `chatworkhorseunix`, twice — first queried the wrong window entirely
+   (confused the script's UTC log timestamp with the box's local-time cron trigger,
+   CEST/UTC+2), then re-queried correctly to confirm the cron actually fired and the
+   system itself never rebooted/froze.
+5. The failing script's own `sync_log_*.txt` / `sync_errors_*.txt` output files, compared
+   line-by-line against the previous night's successful run to see exactly where it
+   stopped.
+
+**What Part B would have made trivial**: a single `status_transitions.jsonl` line —
+`{"ts": "...04:0Xish", "scope": "service", "host": "chatworkhorseunix", "service": "Immich", "from": "up", "to": "down", "detail": "connection refused"}`
+— would have given the exact transition moment and cause in one line, from one file,
+without needing the email, the second `journalctl` host, or manually diffing log files
+from two different nights. It would NOT have replaced steps 4/5 above (figuring out *why*
+the underlying script hung is a separate investigation the transition log doesn't help
+with) — but it would have collapsed "when did this start and what was down" from ~20
+minutes of cross-referencing to one grep.
 
 ## Part A — sparkline time window label (small, do this first)
 
