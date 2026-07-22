@@ -28,7 +28,7 @@ from config import (
 )
 from checkers import tcp_checker, http_checker
 from checkers import ollama_checker, comfyui_checker, openwebui_checker, flask_checker, plex_checker, http_heartbeat_checker, syncthing_checker, immich_checker
-from reporters import json_reporter
+from reporters import json_reporter, transitions_reporter
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,7 @@ def _poll_cycle() -> None:
 
     # Call all reporters
     json_reporter.report(state, STATUS_DIR, CHECKER_HOST)
+    transitions_reporter.report(state, STATUS_DIR, CHECKER_HOST)
 
     summary = state["summary"]
     logger.info(

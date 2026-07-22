@@ -107,6 +107,51 @@ def get_history(host):
     return response
 
 
+@app.route('/api/transitions', methods=['GET'])
+def get_transitions():
+    """
+    Returns recorded status transitions (host/service up<->down flaps) as a JSON
+    array, newest last. Reads status_transitions.jsonl from this checker's own
+    STATUS_DIR — each checker host maintains its own independent log (see
+    SPEC_status_transitions_log.md, Part B). Missing file -> empty array.
+
+    Query params:
+      host  - optional, filter to a single tailscale_name
+      limit - optional, max entries to return (default 50)
+    """
+    host = request.args.get('host')
+    try:
+        limit = int(request.args.get('limit', 50))
+    except ValueError:
+        limit = 50
+
+    transitions_file = os.path.join(config.STATUS_DIR, "status_transitions.jsonl")
+
+    entries = []
+    if os.path.exists(transitions_file):
+        try:
+            with open(transitions_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if host and entry.get('host') != host:
+                        continue
+                    entries.append(entry)
+        except IOError:
+            pass
+
+    entries = entries[-limit:]
+
+    response = make_response(jsonify(entries), 200)
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
+
 if __name__ == '__main__':
     print(f"Starting Fleet API for {getattr(config, 'CHECKER_HOST', 'unknown')}...")
     print(f"Serving data from: {STATUS_FILE}")
