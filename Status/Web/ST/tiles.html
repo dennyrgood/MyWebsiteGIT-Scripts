@@ -300,6 +300,8 @@
     .tile.status-unknown .tile-name { color: var(--unknown); }
 
     .tile-ping { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+    .tile-flap { font-size: 10px; color: var(--warn); flex-shrink: 0; margin-right: 4px; display: none; }
+    .tile-flap.visible { display: inline; }
     .tile-dot {
       width: 8px; height: 8px;
       border-radius: 50%; flex-shrink: 0;
@@ -1053,6 +1055,58 @@
       }
     }
 
+    // ── FETCH TRANSITIONS FOR ALL MACHINES ───────────
+    const transitionsCache = {};
+
+    function fetchAllTransitions(machines) {
+      for (const machine of machines) {
+        const host = machine.machine?.tailscale_name;
+        if (!host) continue;
+        fetchTransitions(host);
+      }
+    }
+
+    async function fetchTransitions(host, limit = 20) {
+      const API_BASE = isBkp
+        ? 'https://fleet-bkp.ldmathes.cc'
+        : 'https://fleet.ldmathes.cc';
+      try {
+        const res = await fetch(`${API_BASE}/api/transitions?host=${host}&limit=${limit}`);
+        if (!res.ok) return;
+        const entries = await res.json();
+        if (!Array.isArray(entries)) return;
+        transitionsCache[host] = entries;
+        applyTransitionBadge(host, entries);
+      } catch (e) {
+        // Transitions unavailable — badge just stays hidden, no crash
+      }
+    }
+
+    // Shows a small "⚡N" badge in the tile head when there's been at least one
+    // transition in the last hour — hover for how long ago the most recent was.
+    function applyTransitionBadge(host, entries) {
+      const tile = document.querySelector(`.tile[data-host="${host}"]`);
+      if (!tile) return;
+      const badge = tile.querySelector('.tile-flap');
+      if (!badge) return;
+
+      const oneHourAgo = Date.now() - 60 * 60 * 1000;
+      const recent = entries.filter(e => e.ts && new Date(e.ts).getTime() >= oneHourAgo);
+
+      if (!recent.length) {
+        badge.classList.remove('visible');
+        badge.textContent = '';
+        badge.title = '';
+        return;
+      }
+
+      const last = entries[entries.length - 1];
+      const ageMin = Math.round((Date.now() - new Date(last.ts).getTime()) / 60000);
+      badge.textContent = `⚡${recent.length}`;
+      badge.title = `${recent.length} transition(s) in last hour — most recent ${ageMin}m ago: ${last.scope === 'service' ? last.service : 'HOST'} ${last.from}→${last.to}`;
+      badge.classList.add('visible');
+    }
+
     // ── RENDER SYSINFO STRIP ─────────────────────────
     function renderSysInfo(machine) {
       try {
@@ -1204,6 +1258,7 @@
             <span class="tile-name-label">${machine.machine.display_name}</span>
             ${machine.machine.primary_role ? `<span class="tile-role">${machine.machine.primary_role}</span>` : ''}
           </span>
+          <span class="tile-flap" data-metric="flap" title=""></span>
           <span class="tile-ping">${ping != null ? ping+'ms' : '–'}</span>
           <span class="tile-dot"></span>
         </div>
@@ -1308,6 +1363,13 @@
         html += `<div><div class="m-section-title">SECONDARY SERVICES</div><div class="m-svc-grid">${sSvcs.map(s => renderModalService(s, machine)).join('')}</div></div>`;
       }
 
+      const host = machine.machine.tailscale_name;
+      const transitions = transitionsCache[host] || [];
+      html += `<div><div class="m-section-title">RECENT TRANSITIONS</div>
+        ${transitions.length ? `<div class="m-svc-grid">${transitions.slice().reverse().map(renderModalTransition).join('')}</div>`
+                              : `<div class="m-info-val" style="color:var(--text-dim)">No transitions recorded yet</div>`}
+      </div>`;
+
       html += `<div><div class="m-section-title">RAW DATA</div>
         <button class="m-raw-toggle" onclick="this.nextElementSibling.classList.toggle('open');this.textContent=this.nextElementSibling.classList.contains('open')?'▲ HIDE JSON':'▼ SHOW JSON'">▼ SHOW JSON</button>
         <pre class="m-raw-pre">${JSON.stringify(machine, null, 2)}</pre>
@@ -1393,6 +1455,17 @@
       </div>`;
     }
 
+    function renderModalTransition(t) {
+      const label = t.scope === 'service' ? t.service : 'HOST';
+      const toCls = t.to === 'up' ? 'up' : t.to === 'down' ? 'down' : 'unknown';
+      const when  = t.ts ? new Date(t.ts).toLocaleString() : '–';
+      return `<div class="m-svc-card ${toCls}">
+        <div class="m-svc-head"><span class="m-svc-name">${label}</span><span class="m-svc-badge">${t.from}→${t.to}</span></div>
+        <div class="m-svc-row"><span class="lbl">WHEN</span><span class="val" style="font-size:10px">${when}</span></div>
+        ${t.detail ? `<div class="m-svc-row" style="flex-direction:column;gap:2px"><span class="lbl">DETAIL</span><span class="val" style="font-size:9px">${t.detail}</span></div>` : ''}
+      </div>`;
+    }
+
     function closeModal() {
       document.getElementById('modal').classList.remove('open');
       document.getElementById('overlay').classList.remove('open');
@@ -1452,6 +1525,7 @@
         document.getElementById('error-msg').style.display = 'none';
         render(data);
         fetchAllHistory(data.machines || []);
+        fetchAllTransitions(data.machines || []);
       } catch (err) {
         const loading = document.getElementById('loading');
         if (loading) loading.style.display = 'none';
