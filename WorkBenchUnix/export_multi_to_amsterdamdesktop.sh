@@ -1,4 +1,4 @@
-i#!/bin/bash
+#!/bin/bash
 # Created: 2026-06-29 UTC — pushes Immich export_multi from WBU to AmsterdamDesktop, then verifies.
 # Runs ON WorkBenchUnix. One-way push (WBU is source, not pull). Flat-mirror, not versioned.
 #
@@ -16,12 +16,21 @@ i#!/bin/bash
 # no log output explaining why. Now the rsync exit code is captured and logged instead
 # of being allowed to kill the script — verification proceeds regardless, since it is
 # the actual mechanism for determining real scope of any problem.
+#
+# Edited: 2026-07-22 UTC — fixed a stray leading "i" corrupting the shebang line (script
+# wouldn't run via `./export_multi_to_amsterdamdesktop.sh`, only via explicit `bash ...`).
+# Also added ConnectTimeout/ServerAlive to every ssh/rsync call, same fix applied to
+# restore_from_wbu.sh and the Mac Mini backup scripts this week after a ~2hr Immich outage
+# caused by a bare ssh call hanging indefinitely on a transient SSH blip. This script is
+# manual-only (not cron-scheduled), so a hang here just freezes your terminal rather than
+# silently stalling unattended — lower stakes, but same cheap fix.
 
 set -e
 
 DEST_HOST="drden@amsterdamdesktop"
 SSH_KEY="/home/dhm/.ssh/id_ed25519_amsterdamdesktop"
-SSH_OPTS="ssh -i $SSH_KEY"
+SSH_TIMEOUT_OPTS="-o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
+SSH_OPTS="ssh -i $SSH_KEY $SSH_TIMEOUT_OPTS"
 
 SRC="/mnt/immich-data/immich/export_multi/"
 DEST="$DEST_HOST:/cygdrive/f/Media/Immich/export_multi/"
@@ -54,7 +63,7 @@ log "Sync complete. Starting verification (bulk scan + individual recheck of fla
 find "$SRC" -type f -printf '%P\n' | sort > "$WORK_DIR/src_relpaths.txt"
 SRC_COUNT=$(wc -l < "$WORK_DIR/src_relpaths.txt")
 
-ssh -n -i "$SSH_KEY" "$DEST_HOST" "dir /s /b /a-d \"$DEST_WIN_PATH\"" \
+ssh -n -i "$SSH_KEY" $SSH_TIMEOUT_OPTS "$DEST_HOST" "dir /s /b /a-d \"$DEST_WIN_PATH\"" \
     | tr -d '\r' \
     | sed "s|.*\\\\||" \
     | sort > "$WORK_DIR/dest_basenames.txt"
@@ -82,7 +91,7 @@ while IFS= read -r relpath; do
     win_full_path="${DEST_WIN_PATH}\\${win_relpath}"
 
     set +e
-    result=$(ssh -n -i "$SSH_KEY" "$DEST_HOST" "if exist \"$win_full_path\" (echo FOUND) else (echo NOTFOUND)" | tr -d '\r')
+    result=$(ssh -n -i "$SSH_KEY" $SSH_TIMEOUT_OPTS "$DEST_HOST" "if exist \"$win_full_path\" (echo FOUND) else (echo NOTFOUND)" | tr -d '\r')
     set -e
 
     if [ "$result" != "FOUND" ]; then
