@@ -23,7 +23,12 @@ DOMAIN="gui/$(id -u)"
 FLEET_ONLY="com.dennis.heartbeat-writer com.dennis.fleet-metrics-server"
 ALL_AGENTS="com.dennis.search-adv-web com.dennis.search-shows-web com.dennis.travel-http com.dennis.tmdb-explorer $FLEET_ONLY"
 
-HOST="$(scutil --get ComputerName 2>/dev/null || hostname -s)"
+RAW_HOST="$(scutil --get ComputerName 2>/dev/null || hostname -s)"
+# Normalize: lowercase, spaces -> hyphens. Not every Mac has been renamed to
+# match its Tailscale name exactly (e.g. mmm's ComputerName is "Mathes Mac
+# mini", not "mathes-mac-mini") — match on the normalized form instead of
+# requiring an exact rename everywhere.
+HOST="$(echo "$RAW_HOST" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')"
 case "$HOST" in
     denniss-macbook-air)
         LABELS="$ALL_AGENTS" ;;
@@ -33,7 +38,7 @@ case "$HOST" in
         if [[ "${1:-}" == "--all" ]]; then
             LABELS="$ALL_AGENTS"
         else
-            echo "error: unrecognized host '$HOST' — add it to the case statement in install.sh" >&2
+            echo "error: unrecognized host '$RAW_HOST' (normalized: '$HOST') — add it to the case statement in install.sh" >&2
             echo "       (or pass --all to force every agent, e.g. for debugging)" >&2
             exit 1
         fi
