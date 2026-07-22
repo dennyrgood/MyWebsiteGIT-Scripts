@@ -1,4 +1,5 @@
 dennishmathes@Mathes-Mac-mini launchagents % launchctl list | grep com.dennis
+
 62722	0	com.dennis.heartbeat-writer
 62726	0	com.dennis.fleet-metrics-server
 dennishmathes@Mathes-Mac-mini launchagents % tail ~/Library/Logs/heartbeat_writer.log ~/Library/Logs/fleet_metrics_server.log 
