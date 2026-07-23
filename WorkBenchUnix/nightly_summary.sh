@@ -11,6 +11,13 @@
 #                  Added wbu-health-monitor watchdog: freshness (>15 min = NOT OK),
 #                  active alerts by name in TLDR, state file dumped at bottom.
 #                  Corrected header path from /srv/immich/scripts/ to actual cron location.
+# 2026-07-23 UTC — added system-health section after an unrecoverable rcu_preempt
+#                  stall + hard reset: (1) NVMe SMART one-liner, (2) unclean-reboot
+#                  post-mortem (auto-dumps the prior boot's rcu/oom/lockup/error
+#                  lines, keyed by explicit boot ID to dodge post-crash clock skew),
+#                  (3) kernel crash-capture (/sys/fs/pstore) dump. Each contributes
+#                  a TLDR line and can flip STATUS to NOT OK. Pairs with the
+#                  kernel.panic_on_rcu_stall sysctl (99-wbu-crash-capture.conf).
 
 TO="dennyrgood@yahoo.com"
 LINES=5
@@ -88,8 +95,103 @@ if [ -f "$MONITOR_STATE" ]; then
     fi
 fi
 
+# ============================================================================
+# System-health checks (added 2026-07-23). This script runs from root's crontab,
+# so `nvme`, /sys/fs/pstore, and full journalctl are all readable here.
+# Each block sets: a *_BAD flag (feeds STATUS), a *_TLDR line, and appends detail
+# to BODY. None use `set -e`; a failing probe degrades to "(unavailable)".
+# ============================================================================
+
+# --- NVMe SMART health (#3) ---
+# Text output is parsed (not JSON) because the critical_warning field type varies
+# across nvme-cli versions; the human-readable "key : value" layout is stable.
+NVME_DEV="/dev/nvme0"
+SMART_BAD=0
+SMART_TLDR="  nvme-smart: (unavailable)"
+SMART_BLOCK="(nvme smart-log unavailable)"
+if command -v nvme >/dev/null 2>&1 && [ -e "$NVME_DEV" ]; then
+    SMART_TXT=$(nvme smart-log "$NVME_DEV" 2>/dev/null)
+    if [ -n "$SMART_TXT" ]; then
+        smart_get() { echo "$SMART_TXT" | awk -F: -v k="$1" 'index($0,k)==1 {gsub(/^[ \t]+/,"",$2); print $2; exit}'; }
+        cw=$(smart_get "critical_warning")
+        pu=$(smart_get "percentage_used")
+        asp=$(smart_get "available_spare")
+        aspt=$(smart_get "available_spare_threshold")
+        me=$(smart_get "media_errors")
+        us=$(smart_get "unsafe_shutdowns")
+        # Normalize to bare integers for comparison (strip %, hex prefixes, words).
+        cwn=$(echo "$cw"  | grep -oE '[0-9]+' | head -1); cwn=${cwn:-0}
+        pun=$(echo "$pu"  | grep -oE '[0-9]+' | head -1); pun=${pun:-0}
+        aspn=$(echo "$asp" | grep -oE '[0-9]+' | head -1); aspn=${aspn:-100}
+        asptn=$(echo "$aspt" | grep -oE '[0-9]+' | head -1); asptn=${asptn:-0}
+        men=$(echo "$me"  | grep -oE '[0-9]+' | head -1); men=${men:-0}
+        [ "$cwn" -ne 0 ]        && SMART_BAD=1   # any critical warning bit set
+        [ "$men" -gt 0 ]        && SMART_BAD=1   # media/data-integrity errors
+        [ "$pun" -ge 90 ]       && SMART_BAD=1   # endurance nearly exhausted
+        [ "$aspn" -le "$asptn" ] && SMART_BAD=1  # spare blocks at/below threshold
+        SMART_TLDR="  nvme-smart: crit_warn=${cwn} used=${pun}% spare=${aspn}% media_err=${men} unsafe_shutdowns=${us}"
+        [ "$SMART_BAD" -eq 1 ] && SMART_TLDR="⚠️${SMART_TLDR}" || SMART_TLDR="${SMART_TLDR} ✓"
+        SMART_BLOCK="critical_warning:        ${cw}\npercentage_used:         ${pu}\navailable_spare:         ${asp} (threshold ${aspt})\nmedia_errors:            ${me}\nunsafe_shutdowns:        ${us}"
+    fi
+fi
+BODY+="=== NVMe SMART ($NVME_DEV) ===\n${SMART_BLOCK}\n\n"
+
+# --- Kernel crash capture / pstore (#1, reporting half) ---
+# With kernel.panic_on_rcu_stall=1 (99-wbu-crash-capture.conf), a stall/panic
+# writes a backtrace here that survives the reboot. Anything present == a crash
+# was captured and should be reviewed.
+PSTORE_DIR="/sys/fs/pstore"
+PSTORE_BAD=0
+PSTORE_TLDR="  pstore: empty ✓"
+PSTORE_BLOCK="(none — no kernel crash captured)"
+if [ -d "$PSTORE_DIR" ]; then
+    PS_FILES=$(ls -1 "$PSTORE_DIR" 2>/dev/null)
+    if [ -n "$PS_FILES" ]; then
+        PSTORE_BAD=1
+        PS_N=$(echo "$PS_FILES" | grep -c .)
+        PSTORE_TLDR="⚠️  pstore: ${PS_N} captured crash record(s) — a kernel panic/oops was recorded"
+        PSTORE_BLOCK="Records present:\n${PS_FILES}\n"
+        PS_NEWEST=$(ls -1t "$PSTORE_DIR"/dmesg-* 2>/dev/null | head -1)
+        if [ -n "$PS_NEWEST" ]; then
+            PSTORE_BLOCK+="\n--- ${PS_NEWEST} (tail) ---\n$(tail -40 "$PS_NEWEST" 2>/dev/null)\n"
+        fi
+        PSTORE_BLOCK+="\nAfter reviewing, clear with:  sudo rm -f ${PSTORE_DIR}/*"
+    fi
+fi
+BODY+="=== Kernel crash capture ($PSTORE_DIR) ===\n${PSTORE_BLOCK}\n\n"
+
+# --- Unclean-reboot post-mortem (#2) ---
+# If the PREVIOUS boot ended within the last 24h WITHOUT a clean-shutdown marker,
+# dump its kernel crash signatures + last error-priority lines. Keyed by explicit
+# boot ID (not `-b -1`) because post-crash clock skew can make the relative offset
+# resolve to the wrong boot.
+REBOOT_BAD=0
+REBOOT_TLDR="  last-reboot: none/clean in last 24h ✓"
+REBOOT_BLOCK="(no unclean reboot detected in the last 24h)"
+PREV_BOOT_ID=$(journalctl --list-boots --no-pager 2>/dev/null | awk '$1=="-1"{print $2; exit}')
+if [ -n "$PREV_BOOT_ID" ]; then
+    PREV_LAST_EPOCH=$(journalctl --boot="$PREV_BOOT_ID" --no-pager -n1 -o short-unix 2>/dev/null | awk '{print int($1)}')
+    NOW_EPOCH=$(date +%s)
+    if [ -n "$PREV_LAST_EPOCH" ] && [ $(( NOW_EPOCH - PREV_LAST_EPOCH )) -lt 86400 ]; then
+        PREV_TAIL=$(journalctl --boot="$PREV_BOOT_ID" --no-pager 2>/dev/null | tail -25)
+        if ! echo "$PREV_TAIL" | grep -qE "systemd-shutdown|Reached target.*(Shutdown|Reboot|Power-Off|Halt)|Deactivated swap|Unmounted"; then
+            REBOOT_BAD=1
+            SIGS=$(journalctl --boot="$PREV_BOOT_ID" -k --no-pager 2>/dev/null | grep -iE "rcu.*stall|soft lockup|hung_task|blocked for more than|invoked oom-killer|Out of memory|Kernel panic|I/O error|EXT4-fs error|mce:|Hardware Error" | tail -15)
+            ERRS=$(journalctl --boot="$PREV_BOOT_ID" -p err --no-pager 2>/dev/null | tail -15)
+            REBOOT_TLDR="⚠️  last-reboot: UNCLEAN shutdown detected (prev boot ended $(date -d @${PREV_LAST_EPOCH} '+%Y-%m-%d %H:%M'))"
+            REBOOT_BLOCK="Previous boot ${PREV_BOOT_ID} ended UNCLEANLY at $(date -d @${PREV_LAST_EPOCH} '+%Y-%m-%d %H:%M') (no clean-shutdown marker in its final entries).\n\n"
+            REBOOT_BLOCK+="--- kernel crash signatures (rcu/lockup/oom/io/mce) ---\n${SIGS:-(none found)}\n\n"
+            REBOOT_BLOCK+="--- last 15 error-priority lines from that boot ---\n${ERRS:-(none)}"
+        fi
+    fi
+fi
+BODY+="=== Unclean-reboot post-mortem ===\n${REBOOT_BLOCK}\n\n"
+
 # --- Build TLDR (last line of each log, plus monitor watchdog lines) ---
 TLDR="============================= TLDR ===============================\n"
+TLDR+="${REBOOT_TLDR}\n"
+TLDR+="${PSTORE_TLDR}\n"
+TLDR+="${SMART_TLDR}\n"
 for LOG in "${LOGS[@]}"; do
     if [ -f "$LOG" ]; then
         TLDR+="  $(basename "$LOG"): $(tail -1 "$LOG")\n"
@@ -103,45 +205,74 @@ TLDR+="===================================================================\n\n"
 BODY="${TLDR}${BODY}"
 
 # --- Determine OK / NOT OK ---
+# OK is the gate (1 = still healthy, checks below only fire while it's 1, so the
+# highest-priority failure keeps the subject). REASON is the human phrase shown
+# in the subject — deliberately NOT a raw filename. Emoji conveys pass/fail, so
+# the subject reads: "<emoji> WorkBenchUnix nightly <date> — <REASON>".
+OK=1
+REASON="all healthy"
+
+# --- Top-priority signals (2026-07-23): a real hardware/kernel fault — captured
+# kernel crash, unclean reboot, or an NVMe SMART warning — outranks every softer
+# warning (stale sync, backup-log strings, monitor freshness) for the SUBJECT
+# line. Those are the headlines. Everything still appears in the TLDR/body
+# regardless of what wins the subject. ---
+if [ "$PSTORE_BAD" -eq 1 ]; then
+    OK=0; REASON="kernel crash captured"
+elif [ "$REBOOT_BAD" -eq 1 ]; then
+    OK=0; REASON="unclean reboot in last 24h"
+elif [ "$SMART_BAD" -eq 1 ]; then
+    OK=0; REASON="NVMe SMART warning"
+fi
+
 # Check each log for its expected success string rather than scanning for bad words.
 # sync_errors_*.txt is intentionally excluded — docker compose noise, no success string.
 # Mac Mini logs are intentionally excluded — Friday-only, expected to be stale other days.
-STATUS="✅ OK"
+# Guarded on OK so it can't clobber a higher-priority fault above. LABEL maps each
+# log to a human name so the subject never shows a raw timestamped filename.
 declare -A EXPECTED=(
     # ["/var/log/immich-backup-c.log"]="Backup to /mnt/backup-c finished."  # 2026-07-22: backup-c drive retired (repeat failures), cron disabled
     ["/var/log/immich-dump-for-cwhu.log"]="Dump for CWHU complete."
     ["$CWHU_SYNC"]="Warm-sync complete."
 )
-for LOG in "${!EXPECTED[@]}"; do
-    if [ ! -f "$LOG" ]; then
-        STATUS="⚠️ NOT OK (missing: $(basename "$LOG"))"
-        break
-    fi
-    if ! tail -5 "$LOG" | grep -q "${EXPECTED[$LOG]}"; then
-        STATUS="⚠️ NOT OK ($(basename "$LOG"))"
-        break
-    fi
-done
+declare -A LABEL=(
+    ["/var/log/immich-dump-for-cwhu.log"]="CWHU DB dump"
+    ["$CWHU_SYNC"]="CWHU warm-sync"
+)
+if [ "$OK" -eq 1 ]; then
+    for LOG in "${!EXPECTED[@]}"; do
+        if [ ! -f "$LOG" ]; then
+            OK=0; REASON="${LABEL[$LOG]:-$(basename "$LOG")} log missing"
+            break
+        fi
+        if ! tail -5 "$LOG" | grep -q "${EXPECTED[$LOG]}"; then
+            OK=0; REASON="${LABEL[$LOG]:-$(basename "$LOG")} did not complete"
+            break
+        fi
+    done
+fi
 
 # --- Staleness check for CWHU sync log (lives on remote machine, can go stale) ---
-if [ -f "$CWHU_SYNC" ]; then
+# Also guarded so a fresh fault outranks a stale-sync warning in the subject.
+if [ "$OK" -eq 1 ] && [ -f "$CWHU_SYNC" ]; then
     FILE_AGE=$(( $(date +%s) - $(stat -c %Y "$CWHU_SYNC") ))
     if [ "$FILE_AGE" -gt 21600 ]; then  # 6 hours
-        STATUS="⚠️ NOT OK (stale: $(basename "$CWHU_SYNC"))"
+        OK=0; REASON="CWHU warm-sync stale ($((FILE_AGE / 3600))h)"
     fi
 fi
 
 # --- Health monitor watchdog contributes to STATUS ---
-# Only override STATUS if it's still OK; don't clobber a more specific existing failure.
-if [ "$STATUS" = "✅ OK" ]; then
+# Only override if still OK; don't clobber a more specific existing failure.
+if [ "$OK" -eq 1 ]; then
     if [ "$MONITOR_FRESH_BAD" -eq 1 ]; then
-        STATUS="⚠️ NOT OK (health monitor stale/missing)"
+        OK=0; REASON="health monitor stale/missing"
     elif [ "$MONITOR_ACTIVE_BAD" -eq 1 ]; then
-        STATUS="⚠️ NOT OK (active health alerts)"
+        OK=0; REASON="active health alerts"
     fi
 fi
 
-SUBJECT="${STATUS} - Nightly Health Summary - WorkBenchUnix - $(date '+%Y-%m-%d')"
+if [ "$OK" -eq 1 ]; then EMOJI="✅"; else EMOJI="⚠️"; fi
+SUBJECT="${EMOJI} WorkBenchUnix nightly $(date '+%Y-%m-%d') — ${REASON}"
 
 {
     echo "To: $TO"
