@@ -66,17 +66,17 @@ for LOG in "${LOGS[@]}"; do
 done
 BODY="${TLDR}${BODY}"
 # --- Status check: warm-sync success string ---
-STATUS="✅ OK"
+REASON="all healthy"
 if [ ! -f "$SYNC_LOG" ]; then
-    STATUS="⚠️ NOT OK (missing: sync_log)"
+    REASON="sync_log missing"
 elif ! tail -5 "$SYNC_LOG" | grep -q "Warm-sync complete."; then
-    STATUS="⚠️ NOT OK ($(basename "$SYNC_LOG"))"
+    REASON="$(basename "$SYNC_LOG") did not complete"
 fi
 # --- Staleness check: sync log older than 26 hours ---
-if [ -f "$SYNC_LOG" ]; then
+if [ "$REASON" = "all healthy" ] && [ -f "$SYNC_LOG" ]; then
     FILE_AGE=$(( $(date +%s) - $(stat -c %Y "$SYNC_LOG") ))
     if [ "$FILE_AGE" -gt 93600 ]; then  # 26 hours
-        STATUS="⚠️ NOT OK (stale: $(basename "$SYNC_LOG"))"
+        REASON="$(basename "$SYNC_LOG") stale ($((FILE_AGE / 3600))h)"
     fi
 fi
 # --- Health monitor state ---
@@ -86,13 +86,13 @@ if [ -f "$MONITOR_STATE" ]; then
     STATE_AGE=$(( $(date +%s) - $(stat -c %Y "$MONITOR_STATE") ))
     if [ "$STATE_AGE" -gt 600 ]; then  # 10 minutes — should run every 5
         BODY+="⚠️ WARNING: state file is ${STATE_AGE}s old (monitor may not be running)\n"
-        STATUS="⚠️ NOT OK (stale health monitor state)"
+        [ "$REASON" = "all healthy" ] && REASON="health monitor stale/missing"
     fi
     # Active alerts
     ACTIVE=$(grep "_ACTIVE=1" "$MONITOR_STATE" 2>/dev/null)
     if [ -n "$ACTIVE" ]; then
         BODY+="ACTIVE ALERTS:\n$ACTIVE\n"
-        STATUS="⚠️ NOT OK (active health alerts)"
+        [ "$REASON" = "all healthy" ] && REASON="active health alerts"
     else
         BODY+="No active alerts.\n"
     fi
@@ -100,7 +100,8 @@ if [ -f "$MONITOR_STATE" ]; then
 else
     BODY+="(state file not found — health monitor may not have run yet)\n"
 fi
-SUBJECT="${STATUS} - Nightly Health Summary - ChatWorkhorseUnix - $(date '+%Y-%m-%d')"
+if [ "$REASON" = "all healthy" ]; then EMOJI="✅"; else EMOJI="⚠️"; fi
+SUBJECT="${EMOJI} ChatWorkhorseUnix nightly $(date '+%Y-%m-%d') — ${REASON}"
 {
     echo "To: $TO"
     echo "Subject: $SUBJECT"
