@@ -55,10 +55,20 @@ powershell.exe in process filter, duplicate-process pileup, wrong task name
   duplicate Heartbeat Writer processes and killed the stale one, confirming
   the whole mechanism works on the box where the original hang happened, not
   just remotews.
-- **DONE: travelbeast, remotews** (both fully deployed 2026-07-27 — script,
-  scheduled task, XML captured into fleet-configs).
-- **Remaining Windows (4):** chatworkhorse, amsterdamdesktop, imagebeast,
-  surface3-gc — straight repeat of the tb/rws deployment steps above.
+- **DONE, ALL 6 WINDOWS BOXES (2026-07-27/28):** travelbeast, remotews,
+  chatworkhorse, amsterdamdesktop, imagebeast, surface3-gc. Script deployed,
+  recurring task created, XML captured into fleet-configs on every one.
+  **6 for 6 caught a genuine duplicate process on the very first run**
+  (5x duplicate writer, 1x duplicate server on surface3-gc — an orphaned
+  process still running the old bespoke `C:\Misc\fleet_metrics_server.py`
+  even though the task itself had been repointed to the repo copy). This
+  was clearly a real, widespread problem across the fleet, not a one-off —
+  worth a root-cause look later at why boxes end up with duplicate
+  processes after reboot/relaunch in the first place, though the watchdog
+  now cleans it up regardless.
+- Also converted `Surface3GC/surface3-gc-snapshot-fleet-configs.ps1` from
+  the old OneDrive-staging pattern to repo-based while deploying there
+  (folds into item 3 below — that item is now only mmm's snapshot script).
 - **Not Windows / not directly applicable (5):** mb, mb2, mmm (launchd,
   `KeepAlive` already restarts a crashed process, but wouldn't catch a
   hung-but-alive process or a stale heartbeat) and workbenchunix/
@@ -77,13 +87,14 @@ powershell.exe in process filter, duplicate-process pileup, wrong task name
 
 ## 3. Snapshot scripts — finish repo-based conversion
 
-- `Surface3GC/surface3-gc-snapshot-fleet-configs.ps1` and
-  `MathesMacMini/mathes-mac-mini-snapshot-fleet-configs.sh` still need
-  rewriting to the repo-based pattern (same as
-  `RemoteWS/remotews-snapshot-fleet-configs.ps1` was converted).
-- Add `watchdog` to the task-discovery regex in **all** repo-based Windows
-  snapshot scripts (travelbeast's currently lacks it too, not just the ones
-  being converted).
+- ~~Surface3GC~~ **DONE 2026-07-28.**
+- `MathesMacMini/mathes-mac-mini-snapshot-fleet-configs.sh` still needs
+  rewriting to the repo-based pattern (same as `RemoteWS`/`Surface3GC` were
+  converted) — this is the last one.
+- ~~Add `watchdog` to the task-discovery regex in all repo-based Windows
+  snapshot scripts~~ **DONE 2026-07-27** — travelbeast, ImageBeast,
+  ChatWorkHorse, AmsterdamDesktop, Surface3GC all fixed (only RemoteWS had
+  it originally).
 
 ## 4. Retire the OneDrive staging mess
 
