@@ -29,7 +29,7 @@ Get-ChildItem -Path "$src\*" -Include *.ps1, *.vbs, *.py -File -ErrorAction Sile
 
 # 2) export fleet-related Task Scheduler tasks (found by action) as UTF-16 XML
 $wanted = @(Get-ScheduledTask | Where-Object {
-    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat|run[-_ ]?hidden|bekah|gc_'
+    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat|run[-_ ]?hidden|watchdog|bekah|gc_'
 } | ForEach-Object { $_.TaskName } | Select-Object -Unique)
 
 Write-Host "Tasks to export:"; $wanted | ForEach-Object { Write-Host "  [$_]" }; Write-Host ""

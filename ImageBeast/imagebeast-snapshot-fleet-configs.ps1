@@ -24,7 +24,7 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 $wanted = [System.Collections.Generic.List[string]]::new()
 Get-ChildItem $dest -Filter *.xml -ErrorAction SilentlyContinue | ForEach-Object { $wanted.Add($_.BaseName) }
 Get-ScheduledTask | Where-Object {
-    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat[-_ ]?writer|run[-_ ]?hidden'
+    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat[-_ ]?writer|run[-_ ]?hidden|watchdog'
 } | ForEach-Object { $wanted.Add($_.TaskName) }
 $wanted = @($wanted | Select-Object -Unique)
 
