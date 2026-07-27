@@ -1,13 +1,21 @@
 # FleetMetricsWatchdog.ps1
 #
 # Hardens both halves of the fleet-metrics pipeline on this box:
-#   1. "Fleet Metrics Server" (serves fleet_monitor/ over HTTP on port 9100)
-#   2. "Heartbeat Writer"     (writes heartbeat_/machine_info_/metrics_history_ files)
+#   1. Fleet Metrics Server (serves fleet_monitor/ over HTTP on port 9100)
+#   2. Heartbeat Writer     (writes heartbeat_/machine_info_/metrics_history_ files)
 #
 # A server that's down/hung fails the HTTP check outright. A writer that's died
 # (process gone, but server still up) looks like a normal 200 OK with a heartbeat
 # timestamp that stops advancing - so the two need separate detection and separate
 # fixes: restarting the server does nothing for a dead writer, and vice versa.
+#
+# Task DISPLAY NAMES drift across the fleet and are not trustworthy - confirmed
+# 2026-07-27: "Heartbeat Writer" (travelbeast, ImageBeast), "HeartbeatWriter"
+# (AmsterdamDesktop, no space), "Hearbeat Writer OneDrive" (ChatWorkHorse, typo'd
+# "Hearbeat" + OneDrive suffix left over from the old transport), "Heartbeat Write
+# OneDrive" (Surface3GC, typo'd "Write" not "Writer"). Task names are discovered
+# by ACTION (the script path each task actually runs), same trick the fleet-configs
+# snapshot scripts use, so display-name drift/typos never matter.
 #
 # Run on a recurring Task Scheduler trigger (e.g. every 5 min). Safe to run
 # even when everything is healthy - does nothing in that case.
@@ -16,8 +24,6 @@
 
 $ErrorActionPreference = "Stop"
 
-$serverTaskName = "Fleet Metrics Server"
-$writerTaskName = "Heartbeat Writer"
 $serverPort = 9100
 $staleThresholdMinutes = 10   # writer updates heartbeat every ~150s; 10 min = 4x margin
 
@@ -42,6 +48,32 @@ function Log($msg) {
     Add-Content -Path $logFile -Value $line
 }
 
+# Requires the watchdog task itself to "Run with highest privileges" - both
+# Get-ScheduledTask's action/argument visibility and Win32_Process's CommandLine
+# come back incomplete/blank for other-session processes otherwise (confirmed
+# 2026-07-22 on remotews: a non-elevated check silently found nothing, letting
+# duplicate writer processes pile up undetected).
+function Get-TaskNameByAction($pattern, $fallback) {
+    try {
+        $t = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
+            ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match $pattern
+        } | Select-Object -First 1
+        if ($t) { return $t.TaskName }
+    } catch {}
+    return $fallback
+}
+
+$serverTaskName = Get-TaskNameByAction "fleet_metrics_server" "Fleet Metrics Server"
+$writerTaskName = Get-TaskNameByAction "heartbeat_writer|onedrive_heartbeat_writer" "Heartbeat Writer"
+
+# Match patterns are per-role and must stay mutually exclusive - a shared/blanket
+# pattern here previously killed the server while trying to restart the writer
+# (both processes were visible in the same CIM query, and a loose OR matched both).
+$rolePattern = @{
+    "server" = "fleet_metrics_server"
+    "writer" = "heartbeat_writer"
+}
+
 # Returns: $null if unreachable, otherwise the heartbeat's UTC timestamp.
 function Get-HeartbeatTimestamp {
     try {
@@ -53,28 +85,12 @@ function Get-HeartbeatTimestamp {
     }
 }
 
-# Match patterns are per-task and must stay mutually exclusive - a shared/blanket
-# pattern here previously killed the server while trying to restart the writer
-# (both processes were visible in the same CIM query, and a loose OR matched both).
-$taskProcessPattern = @{
-    "Fleet Metrics Server" = "fleet_metrics_server"
-    "Heartbeat Writer"     = "heartbeat_writer"
-}
-
-function Restart-Task($taskName) {
+function Restart-Task($taskName, $role) {
     # schtasks /End only kills processes Task Scheduler is actively tracking. These
     # are launched via a hidden VBS wrapper, so the real process is detached from
     # Scheduler's tracking and /End silently no-ops, leaving an old process (if any)
     # still running when /Run tries to start a new one. Kill by command line instead.
-    # Requires the watchdog task itself to "Run with highest privileges" - CommandLine
-    # comes back blank for other-session processes otherwise, and these matches would
-    # silently find nothing (as happened testing this on remotews: two duplicate
-    # writer processes piled up because a non-elevated check couldn't see them).
-    $pattern = $taskProcessPattern[$taskName]
-    if (-not $pattern) {
-        Log "no process-match pattern configured for task '$taskName' - refusing to kill anything by command line"
-        return
-    }
+    $pattern = $rolePattern[$role]
     try {
         $procs = Get-CimInstance Win32_Process -Filter "Name = 'pythonw.exe' OR Name = 'python.exe' OR Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -match $pattern }
@@ -84,9 +100,9 @@ function Restart-Task($taskName) {
         }
     } catch {}
 
-    try { schtasks /End /TN $taskName 2>$null } catch {}
+    try { schtasks /End /TN "$taskName" 2>$null } catch {}
     Start-Sleep -Seconds 2
-    schtasks /Run /TN $taskName | Out-Null
+    schtasks /Run /TN "$taskName" | Out-Null
 }
 
 # ── Duplicate check: are there multiple copies of the same process running? ──
@@ -95,8 +111,8 @@ function Restart-Task($taskName) {
 # individually healthy - e.g. two writer processes both happily updating the
 # same heartbeat file. The staleness/reachability checks below wouldn't catch
 # this since the file still gets fresh writes. Keep the newest, kill the rest.
-foreach ($tn in $taskProcessPattern.Keys) {
-    $pattern = $taskProcessPattern[$tn]
+foreach ($role in $rolePattern.Keys) {
+    $pattern = $rolePattern[$role]
     try {
         $procs = @(Get-CimInstance Win32_Process -Filter "Name = 'pythonw.exe' OR Name = 'python.exe' OR Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -match $pattern })
@@ -106,7 +122,7 @@ foreach ($tn in $taskProcessPattern.Keys) {
     if ($procs.Count -gt 1) {
         $sorted = $procs | Sort-Object CreationDate -Descending
         $keep = $sorted[0]
-        Log "found $($procs.Count) duplicate processes for '$tn', keeping newest PID $($keep.ProcessId), killing the rest"
+        Log "found $($procs.Count) duplicate processes for '$role', keeping newest PID $($keep.ProcessId), killing the rest"
         foreach ($p in ($sorted | Select-Object -Skip 1)) {
             Log "killing duplicate PID $($p.ProcessId) ($($p.CommandLine))"
             Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
@@ -131,14 +147,14 @@ if (-not $heartbeat -and -not $serverConn) {
             Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue
         }
     } catch {}
-    try { schtasks /End /TN $serverTaskName 2>$null } catch {}
+    try { schtasks /End /TN "$serverTaskName" 2>$null } catch {}
     Start-Sleep -Seconds 2
 
     $maxAttempts = 3
     $restarted = $false
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         Log "server restart attempt $attempt/$maxAttempts"
-        schtasks /Run /TN $serverTaskName | Out-Null
+        schtasks /Run /TN "$serverTaskName" | Out-Null
         Start-Sleep -Seconds 5
         $heartbeat = Get-HeartbeatTimestamp
         if ($heartbeat) {
@@ -150,7 +166,7 @@ if (-not $heartbeat -and -not $serverConn) {
     }
 
     if (-not $restarted) {
-        $lastResult = (schtasks /Query /TN $serverTaskName /V /FO LIST | Select-String "Last Result")
+        $lastResult = (schtasks /Query /TN "$serverTaskName" /V /FO LIST | Select-String "Last Result")
         Log "SERVER RESTART FAILED after $maxAttempts attempts. Task status: $lastResult"
         exit 1
     }
@@ -162,7 +178,7 @@ if ($heartbeat) {
     $ageMinutes = (New-TimeSpan -Start $heartbeat -End (Get-Date).ToUniversalTime()).TotalMinutes
     if ($ageMinutes -gt $staleThresholdMinutes) {
         Log "heartbeat is stale (${ageMinutes} min old, threshold $staleThresholdMinutes), restarting '$writerTaskName'"
-        Restart-Task $writerTaskName
+        Restart-Task $writerTaskName "writer"
 
         Start-Sleep -Seconds 10
         $newHeartbeat = Get-HeartbeatTimestamp
@@ -171,7 +187,7 @@ if ($heartbeat) {
         if ($newHeartbeat -and $newAge -lt $ageMinutes) {
             Log "writer restart succeeded, heartbeat now ${newAge} min old"
         } else {
-            $lastResult = (schtasks /Query /TN $writerTaskName /V /FO LIST | Select-String "Last Result")
+            $lastResult = (schtasks /Query /TN "$writerTaskName" /V /FO LIST | Select-String "Last Result")
             Log "WRITER RESTART FAILED or not yet confirmed fresh. Task status: $lastResult"
             exit 1
         }
