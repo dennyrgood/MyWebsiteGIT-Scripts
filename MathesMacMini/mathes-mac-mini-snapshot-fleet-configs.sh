@@ -1,46 +1,41 @@
 #!/bin/bash
 # mathes-mac-mini-snapshot-fleet-configs.sh
-# Created: 2026-07-21
-# mac-mini is a NO-REPO Mac. It cannot commit to fleet-configs, so it STAGES its
-# bespoke fleet files into OneDrive/ForFleetConfigs/mathes-mac-mini/, for a repo
-# machine (your MacBook Air) to collect with collect-fleet-configs-from-onedrive.sh.
+# Created: 2026-07-21; converted to repo-based snapshot 2026-07-28 after mmm gained
+# a local repo checkout and its fleet agents were migrated from standalone $HOME
+# copies to the repo-versioned launchagents/install.sh setup (fleet-only: just
+# heartbeat-writer + fleet-metrics-server, no GUI/travel/tmdb agents - see
+# launchagents/README.md's host-aware install.sh section).
 #
-# Unlike the repo Macs, this box's writer + metrics server are standalone copies in
-# $HOME (not installed from scripts/launchagents), so we copy the actual files.
+# Fleet writer + metrics server + their LaunchAgent plists are now version-controlled
+# in the scripts repo (Status/ and launchagents/); `launchagents/install.sh` recreates
+# them, so we don't copy those - just capture live state + a rebuild pointer, same
+# pattern as the other repo Macs.
 #
-# Delivery: this script lives in the scripts repo (scripts/MathesMacMini/) as source
-# of truth; copy it into OneDrive so this box can run it. Run manually.
+# Manual-run; review `git diff` and commit yourself after.
 
 set -e
-
-# OneDrive root (personal)
-OD="${ONEDRIVE:-$HOME/OneDrive}"
-[ -d "$OD" ] || OD="$HOME/Library/CloudStorage/OneDrive-Personal"
-[ -d "$OD" ] || { echo "OneDrive folder not found ($OD)"; exit 1; }
-
-DEST="$OD/ForFleetConfigs/mathes-mac-mini"
+DEST=~/repos/fleet-configs/MathesMacMini
 mkdir -p "$DEST"
 
-# bespoke standalone files actually used on this box
-cp -p ~/onedrive_heartbeat_writer_all_macs.py "$DEST/" 2>/dev/null || echo "note: writer .py not at ~/ — adjust path"
-cp -p ~/fleet_metrics_server.py               "$DEST/" 2>/dev/null || echo "note: fleet_metrics_server.py not at ~/ — adjust path"
-cp -p ~/Library/LaunchAgents/com.dennis.heartbeat-writer.plist      "$DEST/" 2>/dev/null || true
-cp -p ~/Library/LaunchAgents/com.dennis.fleet-metrics-server.plist  "$DEST/" 2>/dev/null || true
-
-launchctl list | grep -i com.dennis > "$DEST/launchctl-com-dennis.txt" || true
-sw_vers                              > "$DEST/sw_vers.txt"
+launchctl list | grep -i com.dennis             > "$DEST/launchctl-com-dennis.txt" || true
+ls -1 ~/Library/LaunchAgents/com.dennis.*.plist > "$DEST/installed-launchagents.txt" 2>/dev/null || true
+command -v brew >/dev/null 2>&1 && brew leaves  > "$DEST/brew-leaves.txt" || true
+sw_vers                                         > "$DEST/sw_vers.txt"
 
 cat > "$DEST/README.md" <<'EOF'
-# MathesMacMini — rebuild notes (NO-REPO box)
+# MathesMacMini — rebuild notes
 
-Fleet-status role: Mac writer + metrics server, run as STANDALONE copies in $HOME
-(this box has no scripts-repo clone). To rebuild, place these files and load the agents:
-- `~/onedrive_heartbeat_writer_all_macs.py`  (writer → ~/fleet_monitor)
-- `~/fleet_metrics_server.py`                 (serves ~/fleet_monitor on :9100)
-- `~/Library/LaunchAgents/com.dennis.heartbeat-writer.plist`
-- `~/Library/LaunchAgents/com.dennis.fleet-metrics-server.plist`
-Then: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dennis.*.plist`
+Fleet-status role: Mac writer + metrics server ONLY (fleet-only box - no
+Ollama, no search_adv/search_shows/travel/tmdb GUI agents). Both version-controlled.
+
+Rebuild:
+1. Clone the `scripts` repo to `~/repos/scripts`.
+2. `cd ~/repos/scripts/launchagents && ./install.sh` — host-aware, resolves
+   this Mac's ComputerName ("Mathes Mac mini" -> normalized "mathes-mac-mini")
+   and installs only the fleet-only pair automatically.
+3. Writer/server code lives in `scripts/Status/`.
+
+Captured here: live `launchctl` state, installed agent list, `brew leaves`, `sw_vers`.
 EOF
 
-echo "Staged to $DEST"
-echo "Collect it from your MacBook Air: scripts/collect-fleet-configs-from-onedrive.sh"
+echo "Snapshot complete. Review: cd $DEST && git status"
