@@ -30,10 +30,18 @@ powershell.exe in process filter, duplicate-process pileup, wrong task name
   = IgnoreNew`.
 - Confirm `$staleThresholdMinutes` is at the production value (10) on every
   deployed copy, not the `1` used for remotews testing.
-- Confirm each box's actual "Fleet Metrics Server"/"Heartbeat Writer" task
-  names match what `$taskProcessPattern`/`Restart-Task` expect (remotews's
-  task name had drifted to include a space — check others aren't drifted
-  differently).
+- ~~Confirm each box's actual task names match~~ **RESOLVED 2026-07-27:**
+  confirmed the writer task's display name drifts across the fleet —
+  "Heartbeat Writer" (travelbeast, ImageBeast), "HeartbeatWriter" (no space,
+  AmsterdamDesktop), "Hearbeat Writer OneDrive" (typo + stale suffix,
+  ChatWorkHorse), "Heartbeat Write OneDrive" (typo, Surface3GC). "Fleet
+  Metrics Server" was consistent across all 5. Fixed by rewriting the script
+  to discover both task names by their action (script path) instead of
+  hardcoding display names — no per-box config needed.
+- **Validated on travelbeast 2026-07-27** on first real run: caught 2 genuine
+  duplicate Heartbeat Writer processes and killed the stale one, confirming
+  the whole mechanism works on the box where the original hang happened, not
+  just remotews.
 
 ## 2. ST tiles dashboard integration
 
