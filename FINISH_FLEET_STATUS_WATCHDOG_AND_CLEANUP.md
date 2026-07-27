@@ -30,7 +30,8 @@ powershell.exe in process filter, duplicate-process pileup, wrong task name
   = IgnoreNew`.
 - Confirm `$staleThresholdMinutes` is at the production value (10) on every
   deployed copy, not the `1` used for remotews testing.
-- ~~Confirm each box's actual task names match~~ **RESOLVED 2026-07-27:**
+- ~~Confirm each box's actual task names match~~ **RESOLVED 2026-07-27** (in
+  two passes — first pass was incomplete, see below):
   confirmed the writer task's display name drifts across the fleet —
   "Heartbeat Writer" (travelbeast, ImageBeast), "HeartbeatWriter" (no space,
   AmsterdamDesktop), "Hearbeat Writer OneDrive" (typo + stale suffix,
@@ -38,6 +39,18 @@ powershell.exe in process filter, duplicate-process pileup, wrong task name
   Metrics Server" was consistent across all 5. Fixed by rewriting the script
   to discover both task names by their action (script path) instead of
   hardcoding display names — no per-box config needed.
+- **Gap found in the first pass:** discovery only checked each task's own
+  `Execute`/`Arguments`. But travelbeast/ImageBeast/ChatWorkHorse/
+  AmsterdamDesktop all launch via a generic `wscript.exe run_hidden*.vbs`
+  wrapper whose action never mentions the real script at all — only the
+  `.vbs` file's *contents* do (`heartbeat_writer` etc. lives inside the VBS,
+  not in the task action). So discovery silently failed on every VBS-wrapped
+  box and fell back to the hardcoded default name — which happened to be
+  *correct* on travelbeast by coincidence (its actual name is literally
+  "Heartbeat Writer"), masking the bug during that test, but would have been
+  *wrong* on ChatWorkHorse/AmsterdamDesktop, the exact boxes the fix was
+  for. Second pass: discovery now also reads the referenced `.vbs` file's
+  contents when a task's action points at one.
 - **Validated on travelbeast 2026-07-27** on first real run: caught 2 genuine
   duplicate Heartbeat Writer processes and killed the stale one, confirming
   the whole mechanism works on the box where the original hang happened, not
