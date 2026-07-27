@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# Fleet-wide git status check: SSHes into every fleet host and reports which
+# repos under its repo root have unpushed commits, unpulled commits, or
+# uncommitted changes. Read-only except for `git fetch` (updates remote-tracking
+# refs only, never touches working trees or pushes).
+#
+# Usage: ./fleet-git-check.sh [--no-fetch] [host ...]
+#   --no-fetch   skip `git fetch`, just report against last-known remote state
+#   host ...     restrict to specific tailscale names (default: whole fleet)
+
+set -uo pipefail
+
+# tailscale_name:os pairs (mac|ubuntu|win). Plain arrays only — macOS ships
+# bash 3.2 with no associative-array support.
+FLEET_HOSTS=(
+  "imagebeast:win"
+  "chatworkhorse:win"
+  "travelbeast:win"
+  "amsterdamdesktop:win"
+  "denniss-macbook-air:mac"
+  "denniss-2nd-macbook-air:mac"
+  "surface3-gc:win"
+  "mathes-mac-mini:mac"
+  "remotews:win"
+  "workbenchunix:ubuntu"
+  "chatworkhorseunix:ubuntu"
+)
+
+# All fleet hosts now have local repo checkouts (as of 2026-07-27); nothing to skip.
+SKIP_HOSTS=()
+
+host_os() {
+  local h="$1" pair name os
+  for pair in "${FLEET_HOSTS[@]}"; do
+    name="${pair%%:*}"
+    os="${pair##*:}"
+    if [ "$name" = "$h" ]; then
+      echo "$os"
+      return 0
+    fi
+  done
+  return 1
+}
+
+FETCH=1
+HOSTS=()
+for arg in "$@"; do
+  case "$arg" in
+    --no-fetch) FETCH=0 ;;
+    *) HOSTS+=("$arg") ;;
+  esac
+done
+
+if [ "${#HOSTS[@]}" -eq 0 ]; then
+  filtered=()
+  for pair in "${FLEET_HOSTS[@]}"; do
+    h="${pair%%:*}"
+    skip=0
+    for s in "${SKIP_HOSTS[@]:-}"; do [ -n "$s" ] && [ "$h" = "$s" ] && skip=1; done
+    [ "$skip" -eq 0 ] && filtered+=("$h")
+  done
+  HOSTS=("${filtered[@]}")
+fi
+
+# Sort hosts for stable output
+IFS=$'\n' HOSTS=($(sort <<<"${HOSTS[*]}")); unset IFS
+
+# Tailscale's own idea of this machine's name (falls back to `hostname` if
+# tailscale isn't on PATH), used to detect "this host is the one we're on"
+# so we run the check locally instead of SSHing to ourselves.
+SELF_NAME=""
+if command -v tailscale >/dev/null 2>&1; then
+  SELF_NAME=$(tailscale status --self --json 2>/dev/null | grep -m1 '"DNSName"' | sed -E 's/.*"DNSName": *"([^."]+).*/\1/')
+fi
+[ -z "$SELF_NAME" ] && SELF_NAME=$(hostname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')
+
+remote_bash_script() {
+  local fetch_flag="$1"
+  cat <<EOF
+for root in "\$HOME/repos" "/c/repos" "/d/repos"; do
+  [ -d "\$root" ] && REPO_ROOT="\$root" && break
+done
+[ -z "\${REPO_ROOT:-}" ] && exit 0
+find "\$REPO_ROOT" -maxdepth 3 -name .git -type d 2>/dev/null | while read -r gitdir; do
+  repo=\$(dirname "\$gitdir")
+  cd "\$repo" || continue
+  [ "$fetch_flag" = "1" ] && git fetch --quiet 2>/dev/null
+  branch=\$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+  dirty=\$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+  upstream=\$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
+  if [ -z "\$upstream" ]; then
+    echo "\$(basename "\$repo")|\$branch|no-upstream|-|\$dirty"
+    continue
+  fi
+  ahead=\$(git rev-list --count @{u}..HEAD 2>/dev/null)
+  behind=\$(git rev-list --count HEAD..@{u} 2>/dev/null)
+  echo "\$(basename "\$repo")|\$branch|\$ahead|\$behind|\$dirty"
+done
+EOF
+}
+
+remote_ps_script() {
+  local fetch_flag="$1"
+  cat <<EOF
+\$ProgressPreference = 'SilentlyContinue'
+\$roots = @("C:\repos","D:\repos")
+\$repoRoot = \$roots | Where-Object { Test-Path \$_ } | Select-Object -First 1
+if (-not \$repoRoot) { exit 0 }
+Get-ChildItem -Path \$repoRoot -Directory -Recurse -Depth 2 -Filter ".git" -Force -ErrorAction SilentlyContinue | ForEach-Object {
+  \$repo = \$_.Parent.FullName
+  Push-Location \$repo
+  if ("$fetch_flag" -eq "1") { git fetch --quiet 2>\$null }
+  \$branch = git rev-parse --abbrev-ref HEAD 2>\$null
+  \$dirty = (git status --porcelain 2>\$null | Measure-Object -Line).Lines
+  \$upstream = git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>\$null
+  \$name = Split-Path \$repo -Leaf
+  if (-not \$upstream) {
+    Write-Output "\$name|\$branch|no-upstream|-|\$dirty"
+  } else {
+    \$ahead = (git rev-list --count '@{u}..HEAD' 2>\$null)
+    \$behind = (git rev-list --count 'HEAD..@{u}' 2>\$null)
+    Write-Output "\$name|\$branch|\$ahead|\$behind|\$dirty"
+  }
+  Pop-Location
+}
+EOF
+}
+
+printf "%-24s %-28s %-10s %6s %6s %6s\n" "HOST" "REPO" "BRANCH" "AHEAD" "BEHIND" "DIRTY"
+printf "%-24s %-28s %-10s %6s %6s %6s\n" "----" "----" "------" "-----" "------" "-----"
+
+any_issue=0
+
+for host in "${HOSTS[@]}"; do
+  if ! os=$(host_os "$host"); then
+    echo "!! unknown host: $host (skipping)" >&2
+    continue
+  fi
+
+  if [ "$host" = "$SELF_NAME" ]; then
+    # This is the machine we're running on — run the check locally, no SSH.
+    script=$(remote_bash_script "$FETCH")
+    output=$(bash -c "$script" 2>/dev/null)
+  elif [ "$os" = "win" ]; then
+    script=$(remote_ps_script "$FETCH")
+    # PowerShell -EncodedCommand wants UTF-16LE base64; avoids quoting/BOM issues over SSH.
+    encoded=$(printf '%s' "$script" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')
+    if ! output=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" "powershell -NoProfile -EncodedCommand $encoded" 2>/dev/null); then
+      printf "%-24s %s\n" "$host" "UNREACHABLE or SSH error"
+      continue
+    fi
+  else
+    script=$(remote_bash_script "$FETCH")
+    if ! output=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" "bash -s" <<< "$script" 2>/dev/null); then
+      printf "%-24s %s\n" "$host" "UNREACHABLE or SSH error"
+      continue
+    fi
+  fi
+
+  if [ -z "$output" ]; then
+    printf "%-24s %s\n" "$host" "(no repos found / repo root missing)"
+    continue
+  fi
+
+  while IFS='|' read -r repo branch ahead behind dirty; do
+    repo="${repo%$'\r'}"; branch="${branch%$'\r'}"; ahead="${ahead%$'\r'}"; behind="${behind%$'\r'}"; dirty="${dirty%$'\r'}"
+    [ -z "$repo" ] && continue
+    flag=""
+    if [ "$ahead" != "0" ] && [ "$ahead" != "-" ]; then flag="$flag PUSH"; fi
+    if [ "$behind" != "0" ] && [ "$behind" != "-" ]; then flag="$flag PULL"; fi
+    if [ "$dirty" != "0" ]; then flag="$flag DIRTY"; fi
+    if [ "$ahead" = "no-upstream" ]; then flag="$flag NO-UPSTREAM"; fi
+    [ -n "$flag" ] && any_issue=1
+    printf "%-24s %-28s %-10s %6s %6s %6s %s\n" "$host" "$repo" "$branch" "$ahead" "$behind" "$dirty" "$flag"
+  done <<< "$output"
+done
+
+echo
+if [ "$any_issue" -eq 1 ]; then
+  echo "Repos flagged above need attention (PUSH/PULL/DIRTY/NO-UPSTREAM)."
+else
+  echo "All checked repos are clean and in sync."
+fi
