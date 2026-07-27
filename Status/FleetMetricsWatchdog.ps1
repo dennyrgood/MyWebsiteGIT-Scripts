@@ -42,6 +42,7 @@ $checkerHost = if ($hostnameMap.ContainsKey($rawHost)) { $hostnameMap[$rawHost] 
 # its _ALLOWED filename pattern, so this log is fetchable over 9100 like the other files.
 $fleetMonitorDir = if ($env:FLEET_METRICS_DIR) { $env:FLEET_METRICS_DIR } else { "C:\fleet_monitor" }
 $logFile = Join-Path $fleetMonitorDir "watchdog_$checkerHost.log"
+$aliveMarkerFile = Join-Path $fleetMonitorDir ".watchdog_$checkerHost.alive"
 
 $checkUrl = "http://127.0.0.1:9100/heartbeat_$checkerHost.txt"
 $timeoutSec = 5
@@ -50,6 +51,18 @@ function Log($msg) {
     $line = "$(Get-Date -Format o) $msg"
     Write-Output $line
     Add-Content -Path $logFile -Value $line
+}
+
+# A healthy run logs nothing (by design - see below), which is indistinguishable
+# from the watchdog not running at all. Ping the log once per calendar day (plus
+# always on the very first run, i.e. no marker file yet - covers "just deployed"
+# and "just rebooted") so "no issues today" is visible without waiting for a
+# failure. Deliberately NOT every run - that'd be a line every 5 min, too noisy.
+$today = (Get-Date).ToString("yyyy-MM-dd")
+$lastAliveDate = if (Test-Path $aliveMarkerFile) { (Get-Content $aliveMarkerFile -Raw -ErrorAction SilentlyContinue).Trim() } else { $null }
+if ($lastAliveDate -ne $today) {
+    Log "watchdog alive, checking..."
+    Set-Content -Path $aliveMarkerFile -Value $today
 }
 
 # Requires the watchdog task itself to "Run with highest privileges" - both
