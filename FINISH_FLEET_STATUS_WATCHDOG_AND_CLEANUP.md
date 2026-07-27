@@ -6,12 +6,23 @@ powershell.exe in process filter, duplicate-process pileup, wrong task name
 "Fleet Metrics Server" with a space). All three former no-repo boxes
 (surface3-gc, remotews, mmm) have since been converted to repo checkouts.
 
-## 1. Watchdog production rollout (remaining boxes)
+## 1. Watchdog production rollout (remaining boxes, AND remotews itself)
 
-- `Status/FleetMetricsWatchdog.ps1` has only been live-tested on remotews.
-  Deploy to travelbeast (the original genuine-hang case — never actually
-  retested with this script), plus chatworkhorse, amsterdamdesktop,
-  imagebeast, surface3-gc.
+- **IMPORTANT (found 2026-07-27):** `FleetMetricsWatchdog.ps1` was only ever
+  run manually on remotews during testing (`.\FleetMetricsWatchdog.ps1`) — it
+  was never actually registered as its own recurring Task Scheduler job
+  there. `schtasks /Query /TN "FleetMetricsWatchdog"` on remotews is expected
+  to come back "cannot find." The 5 days of silence in
+  `watchdog_remotews.log` after 7/22 wasn't proof of stability — it was
+  proof nothing was running it. Also found: the Heartbeat Writer process is
+  running as an orphan, not managed by the actual "Heartbeat Writer" task,
+  consistent with nothing having checked/restarted it since testing ended.
+  **remotews needs the recurring task created just as much as every other
+  box below** — don't treat it as "done."
+- Deploy the script + recurring task to travelbeast (the original genuine-hang
+  case — never actually tested with this script at all, not even manually),
+  plus chatworkhorse, amsterdamdesktop, imagebeast, surface3-gc, and remotews
+  (per above).
 - Per box: Task Scheduler task, recurring trigger every 5 min indefinitely,
   **"Run with highest privileges" checked** (required — CommandLine comes
   back blank for other-session processes otherwise, which caused the
