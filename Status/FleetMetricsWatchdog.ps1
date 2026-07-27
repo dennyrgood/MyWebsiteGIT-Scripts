@@ -15,7 +15,11 @@
 # "Hearbeat" + OneDrive suffix left over from the old transport), "Heartbeat Write
 # OneDrive" (Surface3GC, typo'd "Write" not "Writer"). Task names are discovered
 # by ACTION (the script path each task actually runs), same trick the fleet-configs
-# snapshot scripts use, so display-name drift/typos never matter.
+# snapshot scripts use, so display-name drift/typos never matter. Several boxes
+# (travelbeast, ImageBeast, ChatWorkHorse, AmsterdamDesktop) launch via a generic
+# "wscript.exe run_hidden*.vbs" wrapper whose OWN action never mentions the real
+# script - only the .vbs file's contents do - so discovery reads the .vbs too when
+# an action points at one, not just the task's Execute/Arguments fields.
 #
 # Run on a recurring Task Scheduler trigger (e.g. every 5 min). Safe to run
 # even when everything is healthy - does nothing in that case.
@@ -55,10 +59,24 @@ function Log($msg) {
 # duplicate writer processes pile up undetected).
 function Get-TaskNameByAction($pattern, $fallback) {
     try {
-        $t = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
-            ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match $pattern
-        } | Select-Object -First 1
-        if ($t) { return $t.TaskName }
+        $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue
+        foreach ($t in $tasks) {
+            foreach ($a in $t.Actions) {
+                $haystack = "$($a.Execute) $($a.Arguments)"
+                # Many boxes launch via a generic "wscript.exe run_hidden*.vbs" wrapper -
+                # the task's own action never mentions the real script (heartbeat_writer,
+                # fleet_metrics_server), only the .vbs file's CONTENTS do. Read it too, or
+                # every VBS-wrapped box falls through to the fallback name (silently wrong
+                # on any box whose task isn't literally named that fallback).
+                if ($a.Execute -match "wscript" -and $a.Arguments -match "\.vbs") {
+                    $vbsPath = $a.Arguments -replace '^"|"$', ''
+                    if (Test-Path $vbsPath) {
+                        try { $haystack += " " + (Get-Content $vbsPath -Raw) } catch {}
+                    }
+                }
+                if ($haystack -match $pattern) { return $t.TaskName }
+            }
+        }
     } catch {}
     return $fallback
 }
