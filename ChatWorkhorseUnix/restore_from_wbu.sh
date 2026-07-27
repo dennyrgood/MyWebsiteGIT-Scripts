@@ -37,6 +37,15 @@
 #      a single trap on EXIT, gated by STACK_DOWN. That way *any* failure after the
 #      stack comes down — not just the two steps someone remembered to guard — brings
 #      it back up.
+# 2026-07-28 UTC: Third outage — the wipe-then-restore left Immich showing the
+# first-run "create admin user" screen. The pg_isready readiness check below matched
+# the postgres image's short-lived TEMPORARY init server (Unix socket only) instead of
+# the real one, so the restore got piped into a connection that was killed seconds
+# later when the temp server shut down, leaving Postgres empty. Fixed by forcing
+# pg_isready onto TCP (-h 127.0.0.1), which the temp server never listens on. See the
+# comment at the pg_isready line for the full mechanism. Recovered manually by
+# restoring the still-staged dump into the live container (no wipe needed) after
+# DROP DATABASE immich to undo the schema Immich had auto-migrated onto the empty DB.
 set -e
 WBU_HOST="workbenchunix"   # Tailscale name
 WBU_USER="dhm"
@@ -141,7 +150,17 @@ echo "Wiping CWHU's Postgres data directory..."
 sudo find /mnt/immich-data/immich/postgres/ -mindepth 1 -delete
 echo "Bringing up Postgres only, to restore into it..."
 docker compose up -d database
-until docker exec immich_postgres pg_isready -U postgres; do sleep 2; done
+# -h 127.0.0.1 forces a TCP check, not the default Unix socket. On a wiped/fresh
+# data dir, the postgres image's entrypoint runs initdb, then briefly starts a
+# TEMPORARY server (Unix socket only, for init scripts), then shuts it down and
+# starts the real server (which listens on both). A bare `pg_isready -U postgres`
+# can match that temp server and report ready before the real one exists — the
+# script then pipes the restore into a session that gets killed seconds later
+# ("FATAL: terminating connection due to administrator command") when the temp
+# server shuts down, leaving Postgres empty and Immich looking like a fresh
+# install. The temp server never listens on TCP, so forcing TCP here waits for
+# the real server instead. Root-caused 2026-07-28 after exactly this happened.
+until docker exec immich_postgres pg_isready -h 127.0.0.1 -U postgres; do sleep 2; done
 echo "Restoring dump..."
 RESTORE_LOG="$HOME/.cache/cwhu-warm-sync/restore_log_$(date -u +%Y%m%d_%H%M%S).txt"
 cat "$DUMP_STAGING_FILE" | docker exec -i immich_postgres psql -U postgres > "$RESTORE_LOG" 2>&1 || true
