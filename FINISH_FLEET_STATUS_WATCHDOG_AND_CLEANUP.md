@@ -85,16 +85,19 @@ powershell.exe in process filter, duplicate-process pileup, wrong task name
   box. **Keep it simple: raw log tail, same as transitions** — no special
   formatting for restart vs. duplicate-kill events.
 
-## 3. Snapshot scripts — finish repo-based conversion
+## 3. Snapshot scripts — finish repo-based conversion — ALL DONE 2026-07-28
 
 - ~~Surface3GC~~ **DONE 2026-07-28.**
-- `MathesMacMini/mathes-mac-mini-snapshot-fleet-configs.sh` still needs
-  rewriting to the repo-based pattern (same as `RemoteWS`/`Surface3GC` were
-  converted) — this is the last one.
+- ~~MathesMacMini~~ **DONE 2026-07-28** — `launchctl`/plist-list capture
+  pattern, matching `Denniss2ndMacBookAir`'s snapshot (not the Windows
+  Task Scheduler XML pattern, since mmm is a Mac).
 - ~~Add `watchdog` to the task-discovery regex in all repo-based Windows
   snapshot scripts~~ **DONE 2026-07-27** — travelbeast, ImageBeast,
   ChatWorkHorse, AmsterdamDesktop, Surface3GC all fixed (only RemoteWS had
   it originally).
+- **Every box that needed a repo-based snapshot conversion is now done.**
+  What's left before OneDrive staging can be deleted (see item 4) is purely
+  confirming no box still references it, not more script work.
 
 ## 4. Retire the OneDrive staging mess
 
