@@ -3,6 +3,12 @@ checkers/http_checker.py — Generic HTTP GET checker
 Used for Layer 2 (Tailscale service checks) and Layer 3 (public endpoint checks).
 Any valid HTTP response = passing. Timeout or connection failure = failing.
 Not used directly — called by service-specific checkers and the engine for public checks.
+
+A single failed attempt (timeout, connection error, or 5xx) is retried once before
+being reported as down — on relayed/mobile hosts (e.g. TravelBeast) a single HTTP
+round-trip can occasionally exceed timeout_ms even though the service is healthy,
+and service-specific checkers like comfyui_checker make multiple sequential calls
+per check, compounding that risk.
 """
 
 import urllib.request
@@ -11,22 +17,7 @@ import time
 from datetime import datetime, timezone
 
 
-def get(url: str, timeout_ms: int) -> dict:
-    """
-    Perform an HTTP GET to url.
-    Any HTTP response including 3xx, 4xx = passing (service is alive).
-    Timeout or connection failure = failing.
-
-    Returns:
-        {
-            "status": "up" | "down",
-            "http_code": int | None,
-            "response_time_ms": int,
-            "detail": str | None,
-            "timestamp_utc": str,
-            "raw_body": bytes | None,   # available for callers that need to parse JSON
-        }
-    """
+def _attempt(url: str, timeout_ms: int) -> dict:
     timeout_s = timeout_ms / 1000
     start = time.monotonic()
     status = "down"
@@ -80,3 +71,25 @@ def get(url: str, timeout_ms: int) -> dict:
         "timestamp_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "raw_body": raw_body,
     }
+
+
+def get(url: str, timeout_ms: int) -> dict:
+    """
+    Perform an HTTP GET to url, retrying once before reporting failure.
+    Any HTTP response including 3xx, 4xx = passing (service is alive).
+    Timeout, connection failure, or 5xx = failing on both attempts = failing.
+
+    Returns:
+        {
+            "status": "up" | "down",
+            "http_code": int | None,
+            "response_time_ms": int,   # time of the attempt actually returned
+            "detail": str | None,
+            "timestamp_utc": str,
+            "raw_body": bytes | None,   # available for callers that need to parse JSON
+        }
+    """
+    result = _attempt(url, timeout_ms)
+    if result["status"] == "up":
+        return result
+    return _attempt(url, timeout_ms)

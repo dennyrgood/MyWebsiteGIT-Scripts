@@ -3,13 +3,16 @@
 # ~/Library/LaunchAgents and (re)load it. Safe to re-run after editing a
 # plist — it boots out the old copy first.
 #
-#   ./install.sh              install/reload all agents
-#   ./install.sh --uninstall  stop and remove all agents
+# Host-aware: which agents get installed depends on the Mac's ComputerName
+# (must match its Tailscale name — see launchagents/README.md's Ollama
+# section for why). Unrecognized hosts abort rather than silently
+# installing everything, since the GUI/travel agents are mb (primary)
+# only — mb2 and mmm are fleet-only (heartbeat + metrics server, no
+# Ollama, no search_adv/search_shows/travel/tmdb GUIs).
 #
-# Day-to-day management (no need to re-run this script):
-#   launchctl kickstart -k gui/$UID/com.dennis.search-adv-web   # restart
-#   launchctl bootout gui/$UID/com.dennis.search-adv-web        # stop
-#   tail -f ~/Library/Logs/search_adv_web.log                   # logs
+#   ./install.sh              install/reload this host's agents
+#   ./install.sh --uninstall  stop and remove this host's agents
+#   ./install.sh --all        install/reload every plist regardless of host (rare; debugging)
 
 set -euo pipefail
 
@@ -17,10 +20,40 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 DEST="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u)"
 
+FLEET_ONLY="com.dennis.heartbeat-writer com.dennis.fleet-metrics-server"
+ALL_AGENTS="com.dennis.search-adv-web com.dennis.search-shows-web com.dennis.travel-http com.dennis.tmdb-explorer $FLEET_ONLY"
+
+RAW_HOST="$(scutil --get ComputerName 2>/dev/null || hostname -s)"
+# Normalize: lowercase, spaces -> hyphens. Not every Mac has been renamed to
+# match its Tailscale name exactly (e.g. mmm's ComputerName is "Mathes Mac
+# mini", not "mathes-mac-mini") — match on the normalized form instead of
+# requiring an exact rename everywhere.
+HOST="$(echo "$RAW_HOST" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')"
+case "$HOST" in
+    denniss-macbook-air)
+        LABELS="$ALL_AGENTS" ;;
+    denniss-2nd-macbook-air|mathes-mac-mini)
+        LABELS="$FLEET_ONLY" ;;
+    *)
+        if [[ "${1:-}" == "--all" ]]; then
+            LABELS="$ALL_AGENTS"
+        else
+            echo "error: unrecognized host '$RAW_HOST' (normalized: '$HOST') — add it to the case statement in install.sh" >&2
+            echo "       (or pass --all to force every agent, e.g. for debugging)" >&2
+            exit 1
+        fi
+        ;;
+esac
+
 mkdir -p "$DEST"
 
-for plist in "$HERE"/*.plist; do
-    label="$(basename "$plist" .plist)"
+for label in $LABELS; do
+    plist="$HERE/$label.plist"
+    if [[ ! -f "$plist" ]]; then
+        echo "warning: $label.plist not found in $HERE, skipping" >&2
+        continue
+    fi
+
     # Boot out any loaded copy (ignore "not loaded" failures).
     launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
 

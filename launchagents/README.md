@@ -25,14 +25,24 @@ grant), see `MIGRATION.md`.
 
 ## Install / update / remove
 
+`install.sh` is host-aware — it looks at `scutil --get ComputerName` and
+only installs the agents that machine should run: mb (`denniss-macbook-air`,
+primary) gets all 6; mb2 (`denniss-2nd-macbook-air`) and mmm
+(`mathes-mac-mini`) are fleet-only (`heartbeat-writer` +
+`fleet-metrics-server` — no Ollama, no search_adv/search_shows/travel/tmdb
+GUIs). An unrecognized host aborts with an error rather than silently
+installing everything; add it to the `case` statement in `install.sh` first.
+
 ```bash
 cd ~/repos/scripts/launchagents
-./install.sh              # install or reload all agents (safe to re-run)
-./install.sh --uninstall  # stop and remove all agents
+./install.sh              # install or reload this host's agents (safe to re-run)
+./install.sh --uninstall  # stop and remove this host's agents
+./install.sh --all        # force every agent regardless of host (debugging only)
 ```
 
 Re-run `./install.sh` after editing a plist — it boots out the old copy
-first. Adding a new server = drop another `.plist` in this dir and re-run.
+first. Adding a new server = drop another `.plist` in this dir, add its
+label to the right host's list in `install.sh`, and re-run.
 
 ## Day-to-day
 

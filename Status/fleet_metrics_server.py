@@ -38,7 +38,7 @@ PORT = int(os.environ.get("FLEET_METRICS_PORT", "9100"))
 
 # Only these files are servable, and the name must be a bare filename — the character
 # class excludes "/" and "\", so no path traversal is possible.
-_ALLOWED = re.compile(r"^(heartbeat|machine_info|metrics_history)_[A-Za-z0-9._-]+\.(txt|json)$")
+_ALLOWED = re.compile(r"^(heartbeat|machine_info|metrics_history|watchdog)_[A-Za-z0-9._-]+\.(txt|json|log)$")
 
 
 class Handler(BaseHTTPRequestHandler):

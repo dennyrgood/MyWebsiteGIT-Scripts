@@ -69,8 +69,12 @@ DISK_TRIGGERED=0
 [ -n "$DISK_OVER" ] && DISK_TRIGGERED=1
 
 # --- Check 4: missing mount ---
+# 2026-07-22: backup-c drive unplugged/retired (repeat failures — kernel blk-mq
+# crash + non-converging fsck corruption, second failure incident on this drive).
+# Disabled so this doesn't alert on its own intentional absence. Re-enable
+# (pointed at the new mount) once the UGREEN NAS replacement is in place.
 MOUNT_TRIGGERED=0
-grep -q " $BACKUP_C_MOUNT " /proc/mounts || MOUNT_TRIGGERED=1
+# grep -q " $BACKUP_C_MOUNT " /proc/mounts || MOUNT_TRIGGERED=1
 
 # --- Check 5: docker container health ---
 # For each container: check present, and if present check health status.

@@ -17,11 +17,18 @@
 # no log output explaining why. Now the rsync exit code is captured and logged instead
 # of being allowed to kill the script — verification proceeds regardless, since it is
 # the actual mechanism for determining real scope of any problem.
+#
+# Edited: 2026-07-22 UTC — added ConnectTimeout/ServerAlive to every ssh/rsync call, same
+# fix applied to restore_from_wbu.sh and the Mac Mini backup scripts this week after a
+# ~2hr Immich outage caused by a bare ssh call hanging indefinitely on a transient SSH
+# blip. This script is manual-only (not cron-scheduled), so a hang here just freezes your
+# terminal rather than silently stalling unattended — lower stakes, but same cheap fix.
 
 set -e
 DEST_HOST="dennishmathes@mathes-mac-mini"
 SSH_KEY="/home/dhm/.ssh/id_ed25519_macmini"
-SSH_OPTS="ssh -i $SSH_KEY"
+SSH_TIMEOUT_OPTS="-o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
+SSH_OPTS="ssh -i $SSH_KEY $SSH_TIMEOUT_OPTS"
 SRC="/mnt/immich-data/immich/export_flat/"
 DEST_BASE_PATH="/Volumes/Expansion/Immich/export_flat"
 DEST="$DEST_HOST:$DEST_BASE_PATH/"
@@ -45,7 +52,7 @@ fi
 log "Sync complete. Starting verification (bulk scan + individual recheck of flagged files)..."
 find "$SRC" -type f -printf '%P\n' | sort > "$WORK_DIR/src_relpaths.txt"
 SRC_COUNT=$(wc -l < "$WORK_DIR/src_relpaths.txt")
-ssh -n -i "$SSH_KEY" "$DEST_HOST" "find '$DEST_BASE_PATH' -type f -exec basename {} \;" | sort > "$WORK_DIR/dest_basenames.txt"
+ssh -n -i "$SSH_KEY" $SSH_TIMEOUT_OPTS "$DEST_HOST" "find '$DEST_BASE_PATH' -type f -exec basename {} \;" | sort > "$WORK_DIR/dest_basenames.txt"
 DEST_COUNT=$(wc -l < "$WORK_DIR/dest_basenames.txt")
 FLAGGED_FILE="$WORK_DIR/flagged.txt"
 > "$FLAGGED_FILE"
@@ -67,7 +74,7 @@ while IFS= read -r relpath; do
     dest_path="$DEST_BASE_PATH/$relpath"
     remote_quoted_path=$(printf '%q' "$dest_path")
     set +e
-    ssh -n -i "$SSH_KEY" "$DEST_HOST" "test -e $remote_quoted_path" 2>>"$ERROR_FILE"
+    ssh -n -i "$SSH_KEY" $SSH_TIMEOUT_OPTS "$DEST_HOST" "test -e $remote_quoted_path" 2>>"$ERROR_FILE"
     exit_code=$?
     set -e
     if [ "$exit_code" -eq 0 ]; then
@@ -78,7 +85,7 @@ while IFS= read -r relpath; do
     remote_quoted_dir=$(printf '%q' "$dest_dir")
     remote_quoted_bn=$(printf '%q' "$bn")
     set +e
-    found=$(ssh -n -i "$SSH_KEY" "$DEST_HOST" "find $remote_quoted_dir -maxdepth 1 -iname $remote_quoted_bn" 2>>"$ERROR_FILE")
+    found=$(ssh -n -i "$SSH_KEY" $SSH_TIMEOUT_OPTS "$DEST_HOST" "find $remote_quoted_dir -maxdepth 1 -iname $remote_quoted_bn" 2>>"$ERROR_FILE")
     set -e
     if [ -z "$found" ]; then
         echo "$relpath" >> "$REAL_MISSING_FILE"

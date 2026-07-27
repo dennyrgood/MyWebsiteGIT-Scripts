@@ -1,0 +1,8 @@
+# /etc/aliases — routes local system-mail to a real address.
+# Consumed by msmtp via the `aliases` directive in /etc/msmtprc. Without this,
+# mail addressed to bare "root" (sudo auth alerts, cron job errors, smartd/mdadm
+# events, etc.) bounces at iCloud with 504 "Recipient address rejected: need
+# fully-qualified address". Staged in the scripts repo; installed to /etc/aliases
+# by install.msmtp.aliases.sh. 2026-07-23.
+root: dennyrgood@yahoo.com
+default: dennyrgood@yahoo.com

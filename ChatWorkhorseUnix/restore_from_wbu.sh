@@ -18,40 +18,111 @@
 # local Postgres wipe path below updated to match. Both machines now use immich-data
 # consistently; no win-d mounts remain on either host.
 # 2026-07-14 15:30 UTC: Save psql restore log to ~/.cache/cwhu-warm-sync/ with datestamp (alongside sync_log/sync_errors), replacing ephemeral /tmp path.
+# 2026-07-22 UTC: Root-caused a ~2hr Immich outage — WBU had a transient SSH hang, and
+# the bare `ssh` call below (no ConnectTimeout/keepalive) sat there indefinitely, never
+# reaching the "no dump found" guard, so the stack stayed torn down with no recovery and
+# no error surfaced. Added SSH_OPTS (applied to the ssh call and every rsync's transport,
+# since rsync can hang mid-transfer the same way) so any future connectivity blip to WBU
+# fails within ~25s instead of hanging forever, and switched the LATEST_DUMP assignment to
+# explicit error-checking so set -e can't skip past the recovery block on failure.
+# 2026-07-23 UTC: Second outage, different step — WBU was itself in I/O distress (RCU
+# stalls), which corrupted the SSH transport mid-image-rsync ("message authentication
+# code incorrect"). That step had no recovery block (only the dump-list/verify steps
+# did), so the stack stayed down with nothing to bring it back up. Fixed two ways:
+#   1. Added a preflight WBU health check (iowait + D-state, same signal/thresholds
+#      wbu-health-monitor.sh alerts on) before anything destructive happens. If WBU is
+#      unreachable or already struggling, skip the run entirely and never touch CWHU's
+#      running stack.
+#   2. Replaced the per-step manual "docker compose up -d; exit 1" recovery blocks with
+#      a single trap on EXIT, gated by STACK_DOWN. That way *any* failure after the
+#      stack comes down — not just the two steps someone remembered to guard — brings
+#      it back up.
 set -e
 WBU_HOST="workbenchunix"   # Tailscale name
 WBU_USER="dhm"
 LIVE_IMAGES="/mnt/immich-data/immich/images"
 DUMP_STAGING="/mnt/immich-data/immich/restore-dump"
 DUMP_STAGING_FILE="$DUMP_STAGING/latest-sync-dump.sql"
+# Fail fast rather than hang forever on a wedged/unreachable WBU connection —
+# ConnectTimeout bounds the initial connect, ServerAlive* detects a session that
+# connected but then went silent (the failure mode that caused the 2026-07-22 outage).
+SSH_OPTS="-o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
+# Same thresholds wbu-health-monitor.sh alerts on for itself (iowait > 20%, gated on
+# D-state also present — a healthy nightly backup can sit in D-state without high
+# iowait, so require both, matching that monitor's 2026-07-21 anti-false-positive fix).
+IOWAIT_THRESHOLD=20
 cd /home/dhm/immich-app
+
+# STACK_DOWN tracks whether CWHU's stack is currently torn down. Whatever kills the
+# script from here on (this step or any later one), the trap brings it back up —
+# no per-step recovery block to forget.
+STACK_DOWN=0
+recover_stack() {
+    if [ "$STACK_DOWN" = "1" ]; then
+        echo "Recovering: bringing CWHU's stack back up after failure..."
+        docker compose up -d
+        STACK_DOWN=0
+    fi
+}
+trap recover_stack EXIT
+
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting warm-sync from WBU's immich-data."
+
+# 0. Preflight: is WBU even up, and not itself mid-meltdown? Checked *before*
+#    touching CWHU's live stack, so a bad night on WBU costs nothing here beyond
+#    skipping tonight's sync — same data, same running stack, try again tomorrow.
+echo "Checking WBU is reachable and not under I/O distress..."
+if ! WBU_CHECK=$(ssh $SSH_OPTS "$WBU_USER@$WBU_HOST" '
+    read -r _ a1 b1 c1 i1 w1 _ < /proc/stat
+    sleep 1
+    read -r _ a2 b2 c2 i2 w2 _ < /proc/stat
+    dt=$(( (a2+b2+c2+i2+w2) - (a1+b1+c1+i1+w1) ))
+    diowait=$((w2 - w1))
+    iowait_pct=$(( dt > 0 ? diowait * 100 / dt : 0 ))
+    dstate=$(ps -eo stat= | grep -c "^D")
+    echo "$iowait_pct $dstate"
+'); then
+    echo "WBU unreachable or unresponsive — skipping tonight's sync. CWHU's stack is untouched."
+    exit 0
+fi
+read -r WBU_IOWAIT WBU_DSTATE <<< "$WBU_CHECK"
+echo "WBU: iowait=${WBU_IOWAIT}% D-state-procs=${WBU_DSTATE}"
+if [ "$WBU_IOWAIT" -gt "$IOWAIT_THRESHOLD" ] && [ "$WBU_DSTATE" -gt 0 ]; then
+    echo "WBU looks like it's in I/O distress — skipping tonight's sync. CWHU's stack is untouched."
+    exit 0
+fi
+
 # 1. Stop CWHU's Immich stack first — avoids any race between the live
 #    container and the incremental image rsync that's about to run.
 echo "Stopping CWHU's Immich stack..."
 docker compose down
+STACK_DOWN=1
 # 2. Pull the latest Postgres dump from WBU's immich-data into local staging.
 #    Cheap and small enough to stage separately before touching anything live.
 mkdir -p "$DUMP_STAGING"
-LATEST_DUMP=$(ssh "$WBU_USER@$WBU_HOST" "ls -1t /mnt/immich-data/immich/postgres-dumps-latest/immich-dump_*.sql | head -1")
+# Explicit if-check, not `LATEST_DUMP=$(...)` on its own — under `set -e`, a failed
+# assignment like that exits the script immediately, before this recovery block ever
+# runs. That's what actually happened on 2026-07-22: the ssh call failed(/hung), the
+# script died silently, and the intended "bring the stack back up" never fired.
+if ! LATEST_DUMP=$(ssh $SSH_OPTS "$WBU_USER@$WBU_HOST" "ls -1t /mnt/immich-data/immich/postgres-dumps-latest/immich-dump_*.sql | head -1"); then
+    echo "ERROR: could not reach WBU or list dump files. Aborting before touching anything live."
+    exit 1
+fi
 if [ -z "$LATEST_DUMP" ]; then
     echo "ERROR: could not find a dump file on WBU's immich-data. Aborting before touching anything live."
-    docker compose up -d
     exit 1
 fi
 echo "Pulling dump: $LATEST_DUMP"
-rsync -avh --checksum "$WBU_USER@$WBU_HOST:$LATEST_DUMP" "$DUMP_STAGING_FILE"
+rsync -avh --checksum -e "ssh $SSH_OPTS" "$WBU_USER@$WBU_HOST:$LATEST_DUMP" "$DUMP_STAGING_FILE"
 # 3. Verify the staged dump looks complete before doing anything destructive with it.
 #    Minimum bar: file exists, non-empty, and ends with the expected pg_dumpall
 #    closing marker rather than being truncated mid-transfer.
 if [ ! -s "$DUMP_STAGING_FILE" ]; then
     echo "ERROR: staged dump is missing or empty. Aborting before touching anything live."
-    docker compose up -d
     exit 1
 fi
 if ! tail -5 "$DUMP_STAGING_FILE" | grep -q "PostgreSQL database cluster dump complete"; then
     echo "ERROR: staged dump does not end with the expected pg_dumpall completion marker — possible truncation. Aborting before touching anything live."
-    docker compose up -d
     exit 1
 fi
 echo "Staged dump verified complete."
@@ -62,7 +133,7 @@ echo "Staged dump verified complete."
 echo "Re-checking UPLOAD_LOCATION ownership before rsync..."
 sudo chown -R 1000:1000 "$LIVE_IMAGES"
 echo "Syncing images from WBU's immich-data (live)..."
-rsync -avh --delete "$WBU_USER@$WBU_HOST:/mnt/immich-data/immich/images/" "$LIVE_IMAGES/"
+rsync -avh --delete -e "ssh $SSH_OPTS" "$WBU_USER@$WBU_HOST:/mnt/immich-data/immich/images/" "$LIVE_IMAGES/"
 # 5. Wipe and restore Postgres from the staged, verified dump.
 #    find -mindepth 1 -delete, not rm -rf */ — see runbook v5/v6 for why the
 #    glob version silently no-ops under sudo.
@@ -81,5 +152,6 @@ fi
 # 6. Bring the full stack back up.
 echo "Bringing up full stack..."
 docker compose up -d
+STACK_DOWN=0
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Warm-sync complete."
-rsync -aq --delete /home/dhm/.cache/cwhu-warm-sync/ "$WBU_USER@$WBU_HOST:/home/dhm/.cache/cwhu-warm-sync/"
+rsync -aq --delete -e "ssh $SSH_OPTS" /home/dhm/.cache/cwhu-warm-sync/ "$WBU_USER@$WBU_HOST:/home/dhm/.cache/cwhu-warm-sync/"
