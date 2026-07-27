@@ -43,6 +43,12 @@ Top-level scripts that commit + `pull --rebase` + push, in two parallel sets:
 
 Behavior shared by all four: they act on the **current branch** (not a hardcoded `main`), take the commit message as the first positional arg and prompt only if it's omitted, push with `-u` so new branches work, and abort the transaction rather than pushing if the commit or pull fails. `sync-all`/`sync-all.ps1` also skip repos that are clean *and* up-to-date unless passed `--all`/`-All`, and support `--dry-run`/`-DryRun`.
 
+Bash-pair mechanics (confirmed by reading `sync-this` 2026-07-23), useful when scripting a commit through it:
+- It stages with **`git add -A`**, so *everything* untracked/modified/deleted in the repo is swept into the commit — a stray `.bak`, scratch, or editor temp file gets committed unless it's `.gitignore`d. Check `git status` first if you're not sure what's dirty. (This is why the `WorkBenchUnix/*.bak.YYYY-MM-DD` backups end up tracked.)
+- The message arg goes straight to **`git commit -m "$1"`**, so it may be **multi-line**: a subject line, a blank line, then a body and trailers (e.g. `Co-Authored-By:`) all fit inside the single quoted argument.
+- After committing it runs **`git pull --rebase`** (not merge) before pushing, then reprints status + the last 5 commits so you can confirm the new commit landed. The pre-sync banner shows ahead/behind counts.
+- Commits from `WorkBenchUnix` use git's **auto-detected identity** (`Dennis <dhm@workbenchunix.tailb73767.ts.net>`) unless `user.name`/`user.email` are set globally on that box — harmless, but it's why author identity varies across the fleet.
+
 `sync-this`/`sync-this.ps1` resolve the repo from the **current working directory** — the script itself can live anywhere on PATH; you just have to be `cd`'d inside the target repo. `sync-all*` never uses cwd.
 
 Repo roots differ per platform, which is why `sync-all.ps1` doesn't just reuse `$HOME/repos`: on the Windows fleet repos live at `C:\repos` on every machine **except amsterdamdesktop, which uses `D:\repos`**. Rather than branching on hostname, `sync-all.ps1` probes `C:\repos` → `D:\repos` → `$HOME\repos` and takes the first that exists (override with `-RepoRoot`). If a box ever has both `C:\repos` and `D:\repos`, `C:` wins — revisit if that becomes true on amsdt.

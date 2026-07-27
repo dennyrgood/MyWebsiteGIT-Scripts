@@ -1,0 +1,23 @@
+dennishmathes@Mathes-Mac-mini launchagents % launchctl list | grep com.dennis
+
+62722	0	com.dennis.heartbeat-writer
+62726	0	com.dennis.fleet-metrics-server
+dennishmathes@Mathes-Mac-mini launchagents % tail ~/Library/Logs/heartbeat_writer.log ~/Library/Logs/fleet_metrics_server.log 
+==> /Users/dennishmathes/Library/Logs/heartbeat_writer.log <==
+[2026-07-22T23:37:21.037624+00:00] history written (tick 27)
+[2026-07-22T23:37:52.345095+00:00] history written (tick 28)
+[2026-07-22T23:38:23.802484+00:00] history written (tick 29)
+[2026-07-22T23:39:06.211211+00:00] machine_info + heartbeat written (tick 30)
+[2026-07-22T23:39:37.671231+00:00] history written (tick 31)
+[2026-07-22T23:40:09.068731+00:00] history written (tick 32)
+[2026-07-22T23:40:40.377924+00:00] history written (tick 33)
+[2026-07-22T23:41:11.694251+00:00] history written (tick 34)
+[2026-07-22T23:41:54.389123+00:00] machine_info + heartbeat written (tick 35)
+[2026-07-22T23:42:25.786222+00:00] history written (tick 36)
+
+==> /Users/dennishmathes/Library/Logs/fleet_metrics_server.log <==
+fleet_metrics_server serving /Users/dennishmathes/fleet_monitor on 0.0.0.0:9100
+fleet_metrics_server serving /Users/dennishmathes/fleet_monitor on 0.0.0.0:9100
+fleet_metrics_server serving /Users/dennishmathes/fleet_monitor on 0.0.0.0:9100
+dennishmathes@Mathes-Mac-mini launchagents % 
+
