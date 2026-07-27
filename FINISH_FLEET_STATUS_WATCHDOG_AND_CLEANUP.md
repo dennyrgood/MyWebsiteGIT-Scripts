@@ -55,6 +55,18 @@ powershell.exe in process filter, duplicate-process pileup, wrong task name
   duplicate Heartbeat Writer processes and killed the stale one, confirming
   the whole mechanism works on the box where the original hang happened, not
   just remotews.
+- **DONE: travelbeast, remotews** (both fully deployed 2026-07-27 — script,
+  scheduled task, XML captured into fleet-configs).
+- **Remaining Windows (4):** chatworkhorse, amsterdamdesktop, imagebeast,
+  surface3-gc — straight repeat of the tb/rws deployment steps above.
+- **Not Windows / not directly applicable (5):** mb, mb2, mmm (launchd,
+  `KeepAlive` already restarts a crashed process, but wouldn't catch a
+  hung-but-alive process or a stale heartbeat) and workbenchunix/
+  chatworkhorseunix (systemd/cron). These would need an equivalent but
+  separately-built check (shell + cron/systemd timer), not a port of the
+  `.ps1`. Open decision: is launchd's/systemd's native restart-on-crash good
+  enough there, or do these 5 want the same duplicate/stale-heartbeat
+  protection too?
 
 ## 2. ST tiles dashboard integration
 
