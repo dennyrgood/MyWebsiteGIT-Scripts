@@ -107,6 +107,32 @@ def get_history(host):
     return response
 
 
+@app.route('/api/watchdog/<host>', methods=['GET'])
+def get_watchdog_log(host):
+    """
+    Returns FleetMetricsWatchdog.ps1's raw log for a host as plain text (last ~50 lines).
+    Pulls watchdog_{host}.log from that host's fleet_metrics_server over Tailscale, same
+    live-fetch pattern as /api/history/<host>. A healthy watchdog logs almost nothing (only
+    a daily "alive" ping plus any actual restart/duplicate-kill events), so this is cheap to
+    fetch on demand rather than caching. Unreachable target / no watchdog deployed there yet
+    -> empty text, dashboard degrades gracefully (badge just stays hidden).
+    """
+    fetch_host = "127.0.0.1" if host == getattr(config, "CHECKER_HOST", "") else host
+    url = f"http://{fetch_host}:{config.METRICS_PORT}/watchdog_{host}.log"
+
+    try:
+        with urllib.request.urlopen(url, timeout=3) as r:
+            text = r.read().decode("utf-8-sig")
+    except Exception:
+        text = ""
+
+    lines = [l for l in text.splitlines() if l.strip()][-50:]
+
+    response = make_response(jsonify({"text": "\n".join(lines)}), 200)
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
+
 @app.route('/api/transitions', methods=['GET'])
 def get_transitions():
     """

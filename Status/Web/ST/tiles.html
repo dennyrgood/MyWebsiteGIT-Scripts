@@ -326,6 +326,8 @@
     .tile-ping { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
     .tile-flap { font-size: 10px; color: var(--warn); flex-shrink: 0; margin-right: 4px; display: none; }
     .tile-flap.visible { display: inline; }
+    .tile-watchdog { font-size: 10px; color: var(--warn); flex-shrink: 0; margin-right: 4px; display: none; }
+    .tile-watchdog.visible { display: inline; }
     .tile-dot {
       width: 8px; height: 8px;
       border-radius: 50%; flex-shrink: 0;
@@ -1134,6 +1136,67 @@
       badge.classList.add('visible');
     }
 
+    // ── FETCH WATCHDOG LOG FOR ALL MACHINES ──────────
+    // FleetMetricsWatchdog.ps1 logs almost nothing when healthy (just a daily
+    // "alive" ping, plus any actual restart/duplicate-kill events) — so a
+    // recent non-"alive" line means it actually had to fix something.
+    const watchdogCache = {};
+
+    function fetchAllWatchdog(machines) {
+      for (const machine of machines) {
+        const host = machine.machine?.tailscale_name;
+        if (!host) continue;
+        fetchWatchdog(host);
+      }
+    }
+
+    async function fetchWatchdog(host) {
+      const API_BASE = isBkp
+        ? 'https://fleet-bkp.ldmathes.cc'
+        : 'https://fleet.ldmathes.cc';
+      try {
+        const res = await fetch(`${API_BASE}/api/watchdog/${host}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const text = data.text || '';
+        watchdogCache[host] = text;
+        applyWatchdogBadge(host, text);
+      } catch (e) {
+        // Watchdog log unavailable — badge just stays hidden, no crash
+      }
+    }
+
+    // Shows a small "🛠" badge in the tile head when the watchdog log has a
+    // line in the last 24h that isn't just the routine daily alive-ping —
+    // i.e. it actually restarted something or killed a duplicate process.
+    function applyWatchdogBadge(host, text) {
+      const tile = document.querySelector(`.tile[data-host="${host}"]`);
+      if (!tile) return;
+      const badge = tile.querySelector('.tile-watchdog');
+      if (!badge) return;
+
+      const lines = text.split('\n').filter(l => l.trim());
+      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      const issues = lines.filter(l => {
+        const m = l.match(/^(\S+)\s/);
+        if (!m) return false;
+        const ts = new Date(m[1]).getTime();
+        if (isNaN(ts) || ts < oneDayAgo) return false;
+        return !l.includes('watchdog alive, checking');
+      });
+
+      if (!issues.length) {
+        badge.classList.remove('visible');
+        badge.textContent = '';
+        badge.title = '';
+        return;
+      }
+
+      badge.textContent = `🛠${issues.length}`;
+      badge.title = `${issues.length} watchdog event(s) in last 24h — most recent: ${issues[issues.length - 1]}`;
+      badge.classList.add('visible');
+    }
+
     // ── RENDER SYSINFO STRIP ─────────────────────────
     function renderSysInfo(machine) {
       try {
@@ -1286,6 +1349,7 @@
             ${machine.machine.primary_role ? `<span class="tile-role">${machine.machine.primary_role}</span>` : ''}
           </span>
           <span class="tile-flap" data-metric="flap" title=""></span>
+          <span class="tile-watchdog" data-metric="watchdog" title=""></span>
           <span class="tile-ping">${ping != null ? ping+'ms' : '–'}</span>
           <span class="tile-dot"></span>
         </div>
@@ -1324,6 +1388,12 @@
       } else {
         content.classList.remove('visible');
       }
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
     }
 
     // ── MODAL ────────────────────────────────────────
@@ -1395,6 +1465,12 @@
       html += `<div><div class="m-section-title">RECENT TRANSITIONS</div>
         ${transitions.length ? `<div class="m-svc-grid">${transitions.slice().reverse().map(renderModalTransition).join('')}</div>`
                               : `<div class="m-info-val" style="color:var(--text-dim)">No transitions recorded yet</div>`}
+      </div>`;
+
+      const watchdogText = watchdogCache[host] || '';
+      html += `<div><div class="m-section-title">WATCHDOG LOG</div>
+        ${watchdogText ? `<pre class="m-raw-pre">${escapeHtml(watchdogText)}</pre>`
+                        : `<div class="m-info-val" style="color:var(--text-dim)">No watchdog events recorded</div>`}
       </div>`;
 
       html += `<div><div class="m-section-title">RAW DATA</div>
@@ -1604,6 +1680,7 @@
         render(data);
         fetchAllHistory(data.machines || []);
         fetchAllTransitions(data.machines || []);
+        fetchAllWatchdog(data.machines || []);
       } catch (err) {
         const loading = document.getElementById('loading');
         if (loading) loading.style.display = 'none';
