@@ -101,6 +101,33 @@ Ended up as two pieces, not one — design evolved during the session:
   every box's `Fleet Metrics Server` task needed an explicit bounce too.
 - **TODO when more boxes get the watchdog:** update the hardcoded
   `WATCHDOG_HOSTS` array in `tiles.html` to include them.
+- **Same hot-reload gotcha bit the `/api/watchdog` deploy too:** restarting
+  the wrong/no task after `git pull` on amsterdamdesktop left `fleet_api.py`
+  serving a literal 404 for the new route for a while — confirmed via
+  `Get-EventLog`-style direct testing (`https://fleet.ldmathes.cc/api/watchdog/<host>`
+  in a browser) rather than trusting that a `git pull` + "I restarted it"
+  meant the right process actually reloaded. Once the correct task was
+  bounced, it worked immediately on both the primary and backup
+  (`fleet-bkp.ldmathes.cc`) feeds.
+- **Live-validated 2026-07-28/29:** the fleet-wide indicator correctly
+  surfaced a real, previously-invisible event — imagebeast's Fleet Metrics
+  Server went down for ~15 minutes (21:57-22:12) during a Windows Update
+  install (confirmed via `Get-EventLog`: WU install completed 22:04, with a
+  burst of service-restart/DCOM/config-change events either side), needed 3
+  failed watchdog cycles before recovering on the 4th. This would have
+  silently taken imagebeast off the dashboard's data feed with nothing
+  catching it before this indicator existed - good real-world proof the
+  whole project (watchdog + dashboard surfacing) works end to end, not a
+  code problem to fix.
+- **Known cosmetic quirk, not fixed:** the issue **count** in both the badge
+  and the modal is a count of matching *log lines*, not *incidents* - a
+  single duplicate-kill event produces 2 lines ("found duplicate" + "killing
+  duplicate"), and a single flaky-restart outage can produce 20+ lines (one
+  "not responding" + 2 lines per failed attempt x 3 attempts x however many
+  5-min cycles it took, e.g. imagebeast's one 15-min WU-outage showed as "27
+  issues"). Correct at reflecting "something happened," misleading at
+  suggesting *how many* somethings. Low priority - grouping consecutive
+  lines into incidents would fix it if it's ever confusing in practice.
 
 ## 3. Snapshot scripts — finish repo-based conversion — ALL DONE 2026-07-28
 
