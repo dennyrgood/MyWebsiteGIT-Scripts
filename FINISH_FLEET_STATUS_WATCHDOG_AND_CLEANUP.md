@@ -143,22 +143,33 @@ Ended up as two pieces, not one — design evolved during the session:
   What's left before OneDrive staging can be deleted (see item 4) is purely
   confirming no box still references it, not more script work.
 
-## 4. Retire the OneDrive staging mess
+## 4. Retire the OneDrive staging mess — DONE 2026-07-29
 
-(After the overnight/reboot soak test confirms nothing regressed.)
+- ~~Delete `push-snapshots-to-onedrive.sh`, `collect-fleet-configs-from-onedrive.sh`~~
+  **DONE** — user deleted both directly.
+- ~~Clean up references in `HOWTO_TWEAK_FLEET_TASKS.md`, `CLAUDE.md`,
+  `Status/README_MOVE_AWAY_ONEDRIVE.md`~~ **DONE** — removed the "no-repo box"
+  branches from `HOWTO_TWEAK_FLEET_TASKS.md`'s short-version steps and
+  "things that bite you" list, and replaced `README_MOVE_AWAY_ONEDRIVE.md`'s
+  OneDrive-staging section with a one-liner noting all boxes are repo boxes
+  now. `CLAUDE.md` needed no edit — it already said the workaround "is
+  retired." Left the mentions in this file (changelog) and the two
+  ex-no-repo boxes' snapshot script header comments alone — those are
+  accurate past-tense history, not instructions to do anything wrong.
+- ~~Delete leftover `C:\Misc\Bekah_*`/`GC_*` files on remotews/surface3-gc~~
+  **DONE 2026-07-29** — confirmed via Task Scheduler that all 6 Windows
+  boxes' tasks point at repo paths (not `C:\Misc`), then deleted the dead
+  `fleet_metrics_server.py`, `Bekah_*`/`GC_*` writer scripts, and stray
+  leftover files on both boxes. `Python313\` kept on both (still the
+  interpreter in use).
 
-- Delete `push-snapshots-to-onedrive.sh`, `collect-fleet-configs-from-onedrive.sh`.
-- Clean up references in `HOWTO_TWEAK_FLEET_TASKS.md`, `CLAUDE.md`,
-  `Status/README_MOVE_AWAY_ONEDRIVE.md` (host table's "no repo" rows for
-  surface3-gc/remotews/mathes-mac-mini are now stale).
-- Delete leftover `C:\Misc\Bekah_*` files on remotews (superseded by repo
-  copies) and equivalent leftovers on surface3-gc.
+## 5. Loose ends found during this work — DONE 2026-07-29
 
-## 5. Loose ends found during this work
-
-- `launchagents/MMM-PROMPT.md` is now obsolete (describes the old
-  OneDrive-era, no-repo, heartbeat-only setup) — retire or rewrite now that
-  mmm is fully repo-based with host-aware `install.sh`.
-- Confirm the metrics server actually running on remotews is the repo copy,
-  not a stale leftover at the old `c:\misc\python313\fleet_metrics_server.py`
-  path.
+- ~~Confirm the metrics server actually running on remotews is the repo
+  copy~~ **DONE** — verified via Task Scheduler screenshot, task points at
+  the repo path.
+- `launchagents/MMM-PROMPT.md` is still sitting there, technically obsolete
+  (describes the old OneDrive-era, no-repo, heartbeat-only setup) but
+  harmless — nothing reads or runs it anymore now that mmm is fully
+  repo-based with host-aware `install.sh`. Not retired/rewritten, just
+  no longer accurate; low priority to actually clean up.

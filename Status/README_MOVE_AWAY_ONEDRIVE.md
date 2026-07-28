@@ -192,13 +192,9 @@ original cwhu/wbu pattern). Run manually, review `git diff`, commit.
   - Ubuntu (cwhu/wbu) — the existing files + the `fleet_metrics_server` systemd enabled-state
     (writer/server/unit are already repo-tracked, cron already captured).
 
-- **No-repo boxes** (`surface3-gc`, `remotews`, `mathes-mac-mini`) can't commit to git, so
-  their snapshot scripts **stage** files into `OneDrive/ForFleetConfigs/<box>/`. The scripts
-  are delivered to those boxes through that same OneDrive folder. Then, on the MacBook Air:
-  ```bash
-  scripts/collect-fleet-configs-from-onedrive.sh   # OneDrive/ForFleetConfigs/* -> fleet-configs/
-  cd ~/repos/fleet-configs && git status           # review + commit
-  ```
+- **All boxes are now repo boxes** (surface3-gc, remotews, and mathes-mac-mini were
+  converted 2026-07-27/28) — the old OneDrive-staging workaround is retired. There is
+  no such thing as a no-repo box in the fleet anymore.
 
 fleet-configs folders: `AmsterdamDesktop ChatWorkHorse ImageBeast TravelBeast Surface3GC
 RemoteWS MathesMacMini DennissMacBookAir Denniss2ndMacBookAir ChatWorkhorseUnix WorkBenchUnix`.

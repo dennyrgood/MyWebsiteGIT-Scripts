@@ -9,9 +9,6 @@ fleet-status (writer, metrics server, checker, API) on any machine.
 2. Re-run that box's snapshot script to capture the new state:
    - Repo box (Win): `<drive>:\repos\scripts\<Machine>\<machine>-snapshot-fleet-configs.ps1`
    - Repo box (Mac/Ubuntu): `scripts/<Machine>/<machine>-snapshot-fleet-configs.sh`
-   - No-repo box (surface3-gc/remotews/mathes-mac-mini): run its script from
-     `OneDrive\ForFleetConfigs\<box>\`, then on the MacBook Air run
-     `scripts/collect-fleet-configs-from-onedrive.sh`
 3. `cd fleet-configs && git status` — review, delete any now-stale XML (e.g. a task
    you renamed leaves its old name's `.xml` behind — the snapshot won't remove it
    automatically), then commit + push.
@@ -44,11 +41,6 @@ Full background: `Status/README_MOVE_AWAY_ONEDRIVE.md` (architecture) and
 - **`Join-Path "D:\repos" ...` throws `DriveNotFoundException`** on any box with no
   `D:` drive at all (not just a missing folder) — non-terminating here, but noisy.
   The repo-root probe uses plain string concatenation (`"$_\fleet-configs"`) instead.
-- **No-repo boxes** (surface3-gc, remotews, mathes-mac-mini) can't commit — their
-  snapshot stages to `OneDrive\ForFleetConfigs\<box>\`, and you collect from the
-  MacBook Air. If you edit one of *their* snapshot scripts in the repo, run
-  `scripts/push-snapshots-to-onedrive.sh` to deliver the update before it'll take
-  effect on that box.
 - **Root crontab (cwhu/wbu) needs local sudo** — can't be refreshed by running the
   snapshot over a non-interactive SSH session (no password prompt reaches you). Run
   it locally on the box if you need a fresh `crontab-l-root.txt`.
