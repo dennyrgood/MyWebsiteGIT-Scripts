@@ -126,6 +126,29 @@ Get-ChildItem -Path \$repoRoot -Directory -Recurse -Depth 2 -Filter ".git" -Forc
 EOF
 }
 
+# Portable per-call deadline: ConnectTimeout only bounds the TCP handshake, so
+# a host that accepts the connection but then hangs (auth stall, stuck login
+# script, half-dead network) can block forever with no other guard. Neither
+# `timeout` nor `gtimeout` is installed here (no coreutils), so enforce the
+# wall-clock cap ourselves: run the command in the background, poll for exit,
+# and kill it if it outlives $1 seconds.
+run_with_timeout() {
+  local secs="$1"; shift
+  "$@" &
+  local pid=$!
+  local waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+    if [ "$waited" -ge "$secs" ]; then
+      kill -9 "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      return 124
+    fi
+  done
+  wait "$pid"
+}
+
 printf "%-24s %-28s %-10s %6s %6s %6s\n" "HOST" "REPO" "BRANCH" "AHEAD" "BEHIND" "DIRTY"
 printf "%-24s %-28s %-10s %6s %6s %6s\n" "----" "----" "------" "-----" "------" "-----"
 
@@ -145,13 +168,13 @@ for host in "${HOSTS[@]}"; do
     script=$(remote_ps_script "$FETCH")
     # PowerShell -EncodedCommand wants UTF-16LE base64; avoids quoting/BOM issues over SSH.
     encoded=$(printf '%s' "$script" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')
-    if ! output=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" "powershell -NoProfile -EncodedCommand $encoded" 2>/dev/null); then
+    if ! output=$(run_with_timeout 20 ssh -o ConnectTimeout=5 -o BatchMode=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$host" "powershell -NoProfile -EncodedCommand $encoded" 2>/dev/null); then
       printf "%-24s %s\n" "$host" "UNREACHABLE or SSH error"
       continue
     fi
   else
     script=$(remote_bash_script "$FETCH")
-    if ! output=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" "bash -s" <<< "$script" 2>/dev/null); then
+    if ! output=$(run_with_timeout 20 ssh -o ConnectTimeout=5 -o BatchMode=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$host" "bash -s" <<< "$script" 2>/dev/null); then
       printf "%-24s %s\n" "$host" "UNREACHABLE or SSH error"
       continue
     fi
