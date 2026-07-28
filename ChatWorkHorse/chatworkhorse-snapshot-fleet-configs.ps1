@@ -45,4 +45,23 @@ foreach ($t in $wanted) {
     }
 }
 
+# Some boxes have multiple local accounts, and the
+# real PSProfile content can live under an account other than the one running this
+# script -- so search all user profiles on the box before falling back to $PROFILE
+# (which covers boxes like ImageBeast that never adopted the PSProfile indirection).
+$psProfileCandidates = @("$env:USERPROFILE\PSProfile\Microsoft.PowerShell_profile.ps1")
+$psProfileCandidates += Get-ChildItem C:\Users -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne "Public" } |
+    ForEach-Object { Join-Path $_.FullName "PSProfile\Microsoft.PowerShell_profile.ps1" }
+$psProfileCandidates += $PROFILE
+$psProfileSrc = $psProfileCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($psProfileSrc) {
+    $psProfileDest = Join-Path $repoRoot "fleet-configs\$Machine\PSProfile"
+    New-Item -ItemType Directory -Force -Path $psProfileDest | Out-Null
+    Copy-Item $psProfileSrc (Join-Path $psProfileDest "Microsoft.PowerShell_profile.ps1") -Force
+    Write-Host "exported: PSProfile\Microsoft.PowerShell_profile.ps1"
+} else {
+    Write-Warning "skipped PSProfile (no Microsoft.PowerShell_profile.ps1 found under any C:\Users\* account or at $PROFILE)"
+}
+
 Write-Host "`nSnapshot complete. Review: cd $repoRoot\fleet-configs ; git status"
