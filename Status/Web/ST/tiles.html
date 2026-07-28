@@ -1166,7 +1166,7 @@
       }
     }
 
-    // Shows a small "🛠" badge in the tile head when the watchdog log has a
+    // Shows a small "⚠" badge in the tile head when the watchdog log has a
     // line in the last 24h that isn't just the routine daily alive-ping —
     // i.e. it actually restarted something or killed a duplicate process.
     function applyWatchdogBadge(host, text) {
@@ -1192,7 +1192,7 @@
         return;
       }
 
-      badge.textContent = `🛠${issues.length}`;
+      badge.textContent = `⚠${issues.length}`;
       badge.title = `${issues.length} watchdog event(s) in last 24h — most recent: ${issues[issues.length - 1]}`;
       badge.classList.add('visible');
     }
