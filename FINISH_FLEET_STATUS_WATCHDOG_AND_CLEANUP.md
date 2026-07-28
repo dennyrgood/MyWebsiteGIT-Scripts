@@ -78,12 +78,29 @@ powershell.exe in process filter, duplicate-process pileup, wrong task name
   enough there, or do these 5 want the same duplicate/stale-heartbeat
   protection too?
 
-## 2. ST tiles dashboard integration
+## 2. ST tiles dashboard integration — DONE 2026-07-28
 
-- Add a button/link (matching the existing "FLEET TRANSITIONS" pattern) that
-  opens a modal/window pulling `http://<host>:9100/watchdog_<host>.log` per
-  box. **Keep it simple: raw log tail, same as transitions** — no special
-  formatting for restart vs. duplicate-kill events.
+Ended up as two pieces, not one — design evolved during the session:
+
+- **Per-tile badge** (`⚠N`, hidden unless there's an issue in the last 24h) —
+  matches the existing transitions-badge pattern, avoids per-tile clutter.
+  Click the tile → modal has a new WATCHDOG LOG section (raw tail).
+- **Fleet-wide indicator** (`🛡 WATCHDOG OK` / `⚠ WATCHDOG: N issues, M
+  stale`) next to the FLEET TRANSITIONS button — added because per-tile-only
+  badges are ambiguous: no badge could mean "healthy" OR "watchdog died and
+  stopped reporting silently." This single persistent button distinguishes
+  the two explicitly and is always visible without per-tile clutter. Click
+  opens a modal listing all `WATCHDOG_HOSTS` individually.
+- Backend: new `/api/watchdog/<host>` endpoint in `fleet_api.py`, mirroring
+  the existing `/api/history/<host>` live-fetch-over-9100 pattern exactly —
+  no new service, deploys only to the 2 boxes already running `fleet_api.py`.
+- **Prerequisite discovered along the way:** the `_ALLOWED` regex fix in
+  `fleet_metrics_server.py` (needed to serve `watchdog_*.log` at all) had
+  been in the repo since 7/22, but most boxes' *running* server process
+  predated it (Python doesn't hot-reload) — `git pull` alone wasn't enough,
+  every box's `Fleet Metrics Server` task needed an explicit bounce too.
+- **TODO when more boxes get the watchdog:** update the hardcoded
+  `WATCHDOG_HOSTS` array in `tiles.html` to include them.
 
 ## 3. Snapshot scripts — finish repo-based conversion — ALL DONE 2026-07-28
 
