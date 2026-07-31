@@ -39,16 +39,26 @@ Work through the sections in order. Sections 1 and 2 must happen before 3.
 
 ## 1. Network settings — do this first
 
-WBU is currently pinned to 100 Mbit by a **non-persistent** `ethtool` override that
-advertises 100baseT only. **1000baseT is off the table until you revert it.** If you
-skip this step, the new switch will look like it changed nothing.
+The goal before measuring anything is: **WBU advertises all modes (10/100/1000).** Run
+this regardless of what state you think the machine is in:
 
 ```bash
 sudo ethtool -s enp9s0 advertise 0x02f
 ```
 
+There are two possible starting states, and this command is correct for both:
+
+- **WBU has been rebooted since 2026-07-31.** The override is gone — it lives only in
+  driver runtime state, and nothing persists it. The card is already back to advertising
+  everything, and against the old hub it will read **10 Mb/s**. That is the expected
+  baseline after a reboot, *not* a fault to chase. The command above is a harmless no-op.
+- **WBU has not been rebooted.** The override is still active: pinned to 100 Mbit with
+  **1000baseT removed from the advertisement**. The new switch cannot negotiate gigabit
+  until you revert it, and skipping this step makes the new switch look like it changed
+  nothing.
+
 `0x02f` = 10baseT/Half + 10baseT/Full + 100baseT/Half + 100baseT/Full + 1000baseT/Full,
-i.e. the card's normal default. Then wait ~10 seconds and check:
+i.e. the card's factory default. Then wait ~10 seconds and check:
 
 ```bash
 cat /sys/class/net/enp9s0/speed
