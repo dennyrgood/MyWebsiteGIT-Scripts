@@ -167,6 +167,19 @@ def season():
     return jsonify(tmdb_get(f"/tv/{tmdb_id}/season/{number}"))
 
 
+@app.get("/api/episode")
+def episode():
+    tmdb_id = request.args.get("id", "")
+    season_num = request.args.get("season", "")
+    episode_num = request.args.get("episode", "")
+    if not (tmdb_id.isdigit() and re.fullmatch(r"\d+", season_num) and re.fullmatch(r"\d+", episode_num)):
+        raise TmdbError(400, "id, season, and episode must be numeric")
+    return jsonify(tmdb_get(
+        f"/tv/{tmdb_id}/season/{season_num}/episode/{episode_num}",
+        append_to_response="credits",
+    ))
+
+
 if __name__ == "__main__":
     if not KEYS_FILE.exists():
         sys.exit(f"keys file not found: {KEYS_FILE}")

@@ -863,6 +863,7 @@ function personExtLinks(d) {
   const links = [`<a href="https://www.themoviedb.org/person/${d.id}" target="_blank">TMDB page</a>`];
   const imdb = d.imdb_id || d.external_ids?.imdb_id;
   if (imdb) links.push(`<a href="https://www.imdb.com/name/${esc(imdb)}/" target="_blank">IMDB</a>`);
+  links.push(`<a href="https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(d.name)}&go=Go" target="_blank">Wikipedia</a>`);
   if (d.homepage) links.push(`<a href="${esc(d.homepage)}" target="_blank">homepage</a>`);
   return links.join(" · ");
 }
@@ -933,13 +934,35 @@ async function toggleSeason(el) {
       const title = `<b>${e.episode_number}.</b> ${esc(e.name)}` +
         (e.air_date ? ` <span class="muted">(${e.air_date})</span>` : "");
       const overview = e.overview ? `<div class="muted">${esc(e.overview)}</div>` : "";
-      if (!guests.length) return `<div class="ep">${title}${overview}</div>`;
-      return `<div class="ep"><details><summary>${title}
-        <span class="muted">· ${guests.length} guest star${guests.length > 1 ? "s" : ""}</span></summary>
-        ${overview}<div class="guests">Guest stars: ${guests.join("; ")}</div></details></div>`;
+      const guestLine = guests.length
+        ? `<div class="guests">Guest stars: ${guests.join("; ")}</div>` : "";
+      return `<div class="ep"><details ontoggle="loadEpisodeCast(this)"
+          data-show="${el.dataset.show}" data-season="${el.dataset.season}" data-episode="${e.episode_number}">
+        <summary>${title}</summary>
+        ${overview}${guestLine}<div class="epcast"></div>
+      </details></div>`;
     }).join("") || `<span class="muted">no episodes listed</span>`;
   } catch (err) {
     eps.innerHTML = `<span class="error">${esc(err.message)}</span>`;
+  }
+}
+
+async function loadEpisodeCast(el) {
+  if (!el.open) return;
+  const box = el.querySelector(".epcast");
+  if (!box || box.dataset.loaded) return;
+  box.dataset.loaded = "1";
+  box.innerHTML = `<span class="muted">loading cast…</span>`;
+  try {
+    const data = await api("/api/episode",
+      { id: el.dataset.show, season: el.dataset.season, episode: el.dataset.episode });
+    const cast = data.credits?.cast || [];
+    box.innerHTML = cast.length
+      ? `<div class="muted" style="margin-top:.3rem">Cast:</div>` +
+        cast.map(c => `${personLink(c.id, c.name)}${c.character ? ` <span class="muted">as ${esc(c.character)}</span>` : ""}`).join("; ")
+      : `<span class="muted">no cast listed</span>`;
+  } catch (err) {
+    box.innerHTML = `<span class="error">${esc(err.message)}</span>`;
   }
 }
 </script>
