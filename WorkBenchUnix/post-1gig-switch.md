@@ -16,6 +16,8 @@ Work through the sections in order. Sections 1 and 2 must happen before 3.
 | `backup_immich_db_to_fleetnas.sh` | Written, **validated twice** end-to-end |
 | `backup_immich_images_to_fleetnas.sh` | Written, syntax-checked, **never run** |
 | SSH key `~/.ssh/id_ed25519_fleetnas` | Installed on NAS, working, no password anywhere |
+| WBU `~/.ssh/config` | Created; `ssh fleetnas` / `ssh 192.168.178.123` work keyless |
+| WBU link speed | **Pinned to 100 by a non-persistent `ethtool` override — reverts to 10 on reboot** |
 | NAS `/volume1/immich/postgres-dumps/` | Holds `immich-dump_2026-07-31_0330.sql` |
 | NAS `/volume1/immich/images/` | **Empty — the 111GB has not been pushed** |
 | Crontab entries | **Not added** |
@@ -57,15 +59,35 @@ before concluding anything.
 
 ### Expected: `1000`
 
-Then confirm the other two ends, since the hub was capping them as well:
+Then confirm the rest of the fleet, since the hub was capping **every** machine on the
+LAN, not just WBU:
 
 ```bash
-ssh -i ~/.ssh/id_ed25519_fleetnas dhm@192.168.178.123 'cat /sys/class/net/eth0/speed'
+ssh fleetnas 'cat /sys/class/net/eth0/speed'
 ssh -i ~/.ssh/id_ed25519_macmini dennishmathes@mathes-mac-mini 'networksetup -getmedia Ethernet | grep -i active'
+ssh amsterdamdesktop 'powershell -NoProfile -Command "Get-NetAdapter | Where-Object {$_.Status -eq \"Up\"} | Select-Object Name,LinkSpeed"'
 ```
 
 FleetNAS has **dual 10GbE**, so on a 1GbE switch it will report `1000` — that's the
-switch's ceiling, not a fault.
+switch's ceiling, not a fault. Mac Mini was measured at `100baseTX` on 2026-07-31, so it
+should change. AmsterdamDesktop was never measured (SSH key auth from WBU was refused)
+— check it, since it owns the largest pending transfer of all.
+
+### What else gets faster — worth verifying, not just assuming
+
+The Immich→NAS backup is not the main beneficiary. Everything below shares the same wire:
+
+- **CWHU's nightly warm-sync.** `restore_from_wbu.sh` rsyncs the latest dump, and since
+  the dump gets a fresh datestamped filename daily, that is a **full 2.25GB transfer
+  every night**, not an incremental one. Measured at 10 Mbit that step alone is ~32
+  minutes; at gigabit it's under a minute. Worth confirming CWHU's job actually got
+  shorter — its ceiling is chatworkhorse's physical NIC, since CWHU is a VM.
+- **Mac Mini Friday pushes** (`backup_immich_db_to_macmini.sh` 05:00,
+  `backup_immich_images_to_macmini.sh` 05:05) — capped at 100 today.
+- **AmsterdamDesktop → NAS `photo_legacy`, ~975GB one-time.** Roughly 22 hours at 100
+  Mbit versus ~2.5 at gigabit. This is the single biggest win, and a good reason to have
+  the switch in before starting it.
+- **Mac Mini → NAS Plex library** — same story, also still pending.
 
 ### If WBU comes back at 100, not 1000
 
@@ -307,14 +329,34 @@ Schedule UGOS snapshots on `/volume1/immich` and deletions become recoverable fr
 something the WBU key cannot reach. This matters more here than for any previous target:
 with backup-a/b/c all retired, FleetNAS is becoming the backup of record.
 
-### Tailscale on the NAS
+### Tailscale on the NAS — three places to change, not one
 
-Both scripts hardcode `DEST_HOST="dhm@192.168.178.123"`. Once Tailscale is installed
-(see the FleetNAS State of the Union — use `--accept-dns=false`), switch both to the
-Tailscale name so the push survives a network change. One line in each file.
+Once Tailscale is installed (see the FleetNAS State of the Union — use
+`--accept-dns=false`), the NAS address has to be updated in **three** places:
 
-Note Tailscale rides `enp9s0` too, so it never bypasses a link problem — it wouldn't
-have helped with any of the speed issues above.
+1. `backup_immich_db_to_fleetnas.sh` — `DEST_HOST`
+2. `backup_immich_images_to_fleetnas.sh` — `DEST_HOST`
+3. `/home/dhm/.ssh/config` on WBU — the `Host` alias line and `HostName`
+
+The scripts pass `-i` explicitly and deliberately do **not** read `~/.ssh/config`, so
+fixing the config alone will not change what the backups do. Add the Tailscale name to
+the `Host fleetnas FleetNAS 192.168.178.123` alias list rather than replacing the IP, so
+both keep working during the transition.
+
+Note `~/.ssh/config` is on WBU only and is not in git — it is not part of the scripts
+repo, and I have not checked whether `wbu-snapshot-fleet-configs.sh` captures it.
+
+Also note Tailscale rides `enp9s0` too, so it never bypasses a link problem — it would
+not have helped with any of the speed issues above.
+
+### Mac Mini Friday cron spacing
+
+`backup_immich_db_to_macmini.sh` (05:00) and `backup_immich_images_to_macmini.sh` (05:05)
+are five minutes apart — the same too-tight spacing that made me widen the FleetNAS jobs
+to twenty. The DB push measured 5m35s at 100 Mbit, so on a slow week the image job may
+already be starting before the DB job finishes. Gigabit likely hides this rather than
+fixing it. Worth widening to 05:00 / 05:20 for consistency while you are editing the
+crontab anyway.
 
 ---
 
