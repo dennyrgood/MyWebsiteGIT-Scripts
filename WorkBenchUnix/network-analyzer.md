@@ -71,17 +71,26 @@ Ziggo router
 Every packet between the LAN and the internet has to traverse the small switch, so one
 mirrored port still sees every device — wired and wireless.
 
-### Why this is arguably better than having bought the `DE`
+### Trade-off versus having bought the `DE`
+
+*(Noted 2026-08-01: an earlier draft called this design "arguably better" than a managed
+24-port. That overstated it. The `DE` is genuinely the better build — it can mirror any
+port to any port, so intra-LAN traffic anywhere on the switch is capturable, which the
+upstream tap cannot do. The tap is the pragmatic choice given the unmanaged unit was
+already ordered, not the superior architecture.)*
+
+What the tap does have going for it:
 
 - **Dedicated mirroring fabric.** The mirror doesn't consume a port or contend on the
   24-port switch's backplane.
 - **All 24 ports stay usable** for actual devices.
 - **Portable.** If the topology changes, the tap moves with it.
-- **Cheaper than you'd think.** ~€30 versus the ~€25 the `DE` upgrade would have cost —
-  effectively a wash, with no return shipping and no waiting.
+- **Cost is a wash.** ~€30 versus the ~€25 the `DE` upgrade would have cost — with no
+  return shipping and no waiting.
 
-The one genuine cost is a extra hop and an extra PSU, plus the intra-LAN blind spot
-covered in §5 and §9.
+Against it: an extra hop, an extra PSU, and the intra-LAN blind spot covered in §5 and §9.
+The size of that blind spot is **unknown** — it depends on traffic patterns that have
+never been measured here.
 
 **Get the 8-port `TL-SG108E`, not the 5-port `TL-SG105E`.** The 5-port fills up
 immediately (Ziggo, big switch, `cap0`, FleetNAS = 4 of 5) and leaves nothing for adding
@@ -280,12 +289,17 @@ TL-SG108E, so the mirror won't see it. Concretely: a Mac Mini → FleetNAS trans
 be invisible if both sit on the big switch.
 
 Fix: **move FleetNAS onto the TL-SG108E** (port 4) and add that port as a second mirror
-source. Now anything talking to the NAS crosses the tap. Since the NAS is the endpoint
-for nearly all your heavy intra-LAN traffic — the 975 GB AmsterdamDesktop load, the
-nightly CWHU sync, the Immich pushes, the Plex library — that one move recovers most of
-what matters.
+source. A flow is visible if *either* end sits on the tap, not both — so putting the NAS
+there captures every NAS transfer regardless of which machine is on the other end.
 
-Anything you want fully visible goes on the TL-SG108E. You have 4 spare ports for that.
+How much that recovers is **unmeasured**. The NAS is the endpoint for the known heavy
+jobs (the 975 GB AmsterdamDesktop load, the nightly CWHU sync, the Immich pushes, the
+Plex library), but the fleet also has non-NAS machine-to-machine paths — e.g. the 932 GB
+`//100.125.37.114/Comfyui` mount and ComfyUI model sharing across IMAGEBEAST /
+CHATWORKHORSE / TRAVELBEAST. Don't assume NAS-centricity without measuring it.
+
+Anything you want fully visible goes on the TL-SG108E. You have 4 spare ports for that,
+and relocating a device later costs a patch cable, not a re-purchase.
 
 ⚠️ **Oversubscription is real.** Mirroring multiple gigabit sources into one gigabit
 destination drops frames whenever aggregate traffic exceeds 1 Gb/s — which your NAS syncs
@@ -469,8 +483,8 @@ Real limits of this design. None are fixable by spending more on the switch.
   timing, and who-talked-to-whom — not content. This is genuinely enough for nearly every
   question worth asking.
 - **Device ↔ device where both sit on the TL-SG1024.** Never reaches the tap. This is the
-  cost of the upstream-mirror design. Mitigate by moving anything you care about onto the
-  TL-SG108E — FleetNAS first (§5).
+  cost of the upstream-mirror design, and its size is unmeasured. Mitigate by moving
+  anything you care about onto the TL-SG108E — FleetNAS first (§5).
 - **Wi-Fi client ↔ Wi-Fi client on the same AP.** Bridged inside the AP; never reaches
   any switch. Often blocked by client isolation anyway.
 - **The 3 GL.iNet devices** (`.36`, `.60`, `.75`). If any is routing rather than
@@ -479,7 +493,8 @@ Real limits of this design. None are fixable by spending more on the switch.
 - **The 2 devolo powerline adapters** (`.179`, `.235`). Traffic between two devices on
   the powerline segment can bridge across it without crossing the main switch.
 - **Tailscale.** WireGuard-encrypted on the wire. Capture `-i tailscale0` on WBU to see
-  the decrypted side, but only for WBU's own sessions.
+  the decrypted side, but only for WBU's own sessions. A meaningful share of intra-fleet
+  traffic runs this way and is opaque regardless of hardware.
 - **Randomised MACs.** The 5 Wi-Fi privacy clients change MAC periodically, so
   device identity over time needs DHCP-hostname or IP correlation, not MAC.
 - **Mirror oversubscription** during large NAS transfers — see §5.
@@ -545,6 +560,9 @@ them.
 Modern OSes **prefer IPv6 when available**, so a large share of internet traffic is
 likely v6, not v4. Filters and dashboards written only around `192.168.178.0/24` will
 silently miss it. Zeek and ntopng handle v6 fine — it's the *queries* that need care.
+
+Verified healthy 2026-08-01: `ping6` to `2606:4700:4700::1111` and `ipv6.google.com` both
+0% loss at ~12 ms, and `curl -6` connects marginally faster than `curl -4`.
 
 ### Free today, no hardware required
 
