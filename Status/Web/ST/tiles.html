@@ -1311,7 +1311,7 @@
         const mi = machine.machine_info;
         if (!mi) {
           if (machine.machine?.tailscale_name?.includes('-mac')) {
-            return '<div class="tile-sysinfo"><div class="si-no-stats">⚠ OPEN A TERMINAL TO ACTIVATE STATS</div></div>';
+            return '<div class="tile-sysinfo"><div class="si-no-stats">⚠ METRICS SERVICE NOT REPORTING — CHECK LAUNCHD</div></div>';
           }
           return '';
         }
