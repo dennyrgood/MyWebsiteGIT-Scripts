@@ -31,9 +31,9 @@ MASTER_STATUS_FILE = STATUS_DIR / "server_status_all.json"
 # ---------------------------------------------------------------------------
 
 POLL_INTERVAL_SECONDS = 30
-TIMEOUT_TCP_MS = 3000         # Layer 1 host reachability
-TIMEOUT_HTTP_MS = 3500        # Layer 2 Tailscale service checks
-TIMEOUT_PUBLIC_MS = 3000      # Layer 3 public endpoint checks
+TIMEOUT_TCP_MS = 5000         # Layer 1 host reachability
+TIMEOUT_HTTP_MS = 7000        # Layer 2 Tailscale service checks
+TIMEOUT_PUBLIC_MS = 5000      # Layer 3 public endpoint checks
 
 # ------ Plex Configuration ------
 PLEX_CONFIG = {
