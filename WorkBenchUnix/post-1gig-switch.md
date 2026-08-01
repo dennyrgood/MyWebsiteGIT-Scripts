@@ -17,7 +17,7 @@ Work through the sections in order. Sections 1 and 2 must happen before 3.
 | `backup_immich_images_to_fleetnas.sh` | Written, syntax-checked, **never run** |
 | SSH key `~/.ssh/id_ed25519_fleetnas` | Installed on NAS, working, no password anywhere |
 | WBU `~/.ssh/config` | Created; `ssh fleetnas` / `ssh 192.168.178.123` work keyless |
-| WBU link speed | **Pinned to 100 by a non-persistent `ethtool` override — reverts to 10 on reboot** |
+| WBU link speed | Autonegotiates **100 Mb/s** correctly — no `ethtool` override active, nothing to undo |
 | NAS `/volume1/immich/postgres-dumps/` | Holds `immich-dump_2026-07-31_0330.sql` |
 | NAS `/volume1/immich/images/` | **Empty — the 111GB has not been pushed** |
 | Crontab entries | **Not added** |
@@ -29,36 +29,27 @@ Work through the sections in order. Sections 1 and 2 must happen before 3.
 
 - The LAN was capped at 100 Mbit by a **10/100 hub** — WBU, Mac Mini and FleetNAS all
   negotiated below their hardware. That's the hub being replaced.
-- Separately, **WBU alone negotiated 10 Mb/s** where the others got 100. Forcing
-  100-only proved the cable run is fine, so it's an autonegotiation quirk in the
-  Realtek `r8169`, not a damaged cable.
-- Measured throughput: **1.17 MB/s at 10 Mbit**, **6.77 MB/s at 100 Mbit** (contended
-  with SMB pushes; a quiet 100 Mbit link should reach ~12 MB/s).
+- Separately, **WBU alone negotiated 10 Mb/s** where the others got 100. **Resolved
+  2026-08-01** by moving WBU to a different switch port with a different cable — with
+  the full 10/100/1000 advertisement restored it then negotiated 100 Mb/s immediately.
+  So it was the cable or the port, *not* the NIC, the `r8169` driver, EEE, or hub
+  interop. Error counters after the swap: `tx_errors: 3`, `rx_errors: 1`,
+  `align_errors: 1`, all static — a clean link.
+- Measured throughput: **1.17 MB/s at 10 Mbit**, **6.77 MB/s at 100 Mbit**. The latter
+  is ~54 Mbit against a 100 Mbit link — that was contention from concurrent SMB pushes,
+  not retransmits, as the flat error counters confirm.
 
 ---
 
 ## 1. Network settings — do this first
 
-The goal before measuring anything is: **WBU advertises all modes (10/100/1000).** Run
-this regardless of what state you think the machine is in:
+**Nothing to undo — this section is now just verification.** As of 2026-08-01 WBU is
+advertising all modes (10/100/1000) and autonegotiating 100 Mb/s correctly against the
+old hub. There is no `ethtool` override in place, and none is needed. *(Earlier drafts
+of this runbook told you to revert one. That override is gone; ignore any such
+instruction.)*
 
-```bash
-sudo ethtool -s enp9s0 advertise 0x02f
-```
-
-There are two possible starting states, and this command is correct for both:
-
-- **WBU has been rebooted since 2026-07-31.** The override is gone — it lives only in
-  driver runtime state, and nothing persists it. The card is already back to advertising
-  everything, and against the old hub it will read **10 Mb/s**. That is the expected
-  baseline after a reboot, *not* a fault to chase. The command above is a harmless no-op.
-- **WBU has not been rebooted.** The override is still active: pinned to 100 Mbit with
-  **1000baseT removed from the advertisement**. The new switch cannot negotiate gigabit
-  until you revert it, and skipping this step makes the new switch look like it changed
-  nothing.
-
-`0x02f` = 10baseT/Half + 10baseT/Full + 100baseT/Half + 100baseT/Full + 1000baseT/Full,
-i.e. the card's factory default. Then wait ~10 seconds and check:
+After swapping in the new switch, just check:
 
 ```bash
 cat /sys/class/net/enp9s0/speed
@@ -66,6 +57,13 @@ cat /sys/class/net/enp9s0/speed
 
 `/sys/.../speed` reads `-1` for a few seconds mid-renegotiation — that is normal, re-read
 before concluding anything.
+
+If it doesn't come up on its own, force a clean renegotiation rather than reaching for
+an override:
+
+```bash
+sudo ethtool -r enp9s0
+```
 
 ### Expected: `1000`
 
@@ -118,22 +116,26 @@ ethtool enp9s0 | grep -A4 "Link partner advertised link modes"
 
 ### If WBU comes back at 10 again
 
-The autoneg quirk has returned. Re-apply the 100 override and treat 100 Mbit as the
-working speed for now (the initial sync becomes ~2.5h instead of ~20min):
+That's the old fault returning, and 2026-08-01 established what causes it: **the cable
+or the port**, not the NIC. Swap both again before touching `ethtool` — that is what
+fixed it last time, and forcing the speed only masks it.
+
+Only if a swap genuinely isn't possible, pin it to 100 as a stopgap and accept ~2.5h for
+the initial sync instead of ~20min:
 
 ```bash
-sudo ethtool -s enp9s0 advertise 0x00c    # 100baseT Half+Full only
+sudo ethtool -s enp9s0 advertise 0x00c    # 100baseT Half+Full only — MASKS the fault
+sudo ethtool -s enp9s0 advertise 0x02f    # undo: back to 10/100/1000
 ```
 
-Worth trying before settling for it: a different switch port, and a different cable.
+Remember `0x00c` removes 1000baseT from the advertisement, so leaving it in place caps
+you at 100 even on a gigabit switch.
 
 ### Persistence
 
-None of these `ethtool` settings survive a reboot — a restart returns the card to
-autoneg-everything. If gigabit negotiates properly you want that default, so leave it
-alone. Only if you end up **stuck on the `0x00c` workaround** is persistence worth
-adding (a `@reboot` root cron entry or a systemd-networkd `ethtool` link setting), and
-note that it would then need removing again the day the underlying fault is fixed.
+No `ethtool` setting here survives a reboot — a restart returns the card to
+autoneg-everything, which is exactly what you want now that the cable fault is fixed. So
+there is nothing to persist and nothing to re-apply after a reboot.
 
 ---
 
