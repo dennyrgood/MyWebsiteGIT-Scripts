@@ -46,6 +46,76 @@ Work through the sections in order. Sections 1 and 2 must happen before 3.
   is ~54 Mbit against a 100 Mbit link — that was contention from concurrent SMB pushes,
   not retransmits, as the flat error counters confirm.
 
+### Measured 2026-08-01: this switch is throttling the whole house, not just backups
+
+This runbook was scoped around the Immich backups, but the 100 Mb ceiling is capping
+**internet access for every device in the house.** Measured from WBU:
+
+| Measurement | Result | Verdict |
+|---|---|---|
+| Latency to gateway `192.168.178.1` | 0.44 ms | Healthy |
+| Latency to `1.1.1.1` | 11.4 ms, 0% loss | Healthy |
+| IPv6 (`ping6`, `curl -6`) | Working, on par with v4 | Healthy |
+| **Download throughput** | **83 Mbit/s** | ⛔ **Pinned at the 100BASE-TX ceiling** |
+
+100BASE-TX tops out near 94 Mbit real-world; 83 measured. **The internet connection is
+capped by the switch, not by Ziggo.**
+
+It's worse than a per-machine cap because of the topology: the **Ziggo router uplinks to
+the DES-1024D at 100 Mb, and all 43 LAN devices — every wired box plus everything behind
+the Wi-Fi controller — share that single link.** Any one heavy user (a Windows Update, a
+4K stream, an Immich backup, the five Wyze cameras uploading) takes a large bite out of
+100 Mb shared, and everything else degrades at the same moment. That is the "internet
+randomly goes to hell" symptom, and it has a single cause.
+
+**If the Ziggo plan is above 100 Mbit, none of it has ever been delivered.** Worth
+checking the plan speed — the switch swap may be a much larger upgrade than the backup
+project it was scoped for.
+
+### Ruled out: cron overlap
+
+Checked the fleet schedule, since overlapping jobs were a plausible alternative cause:
+
+```
+01:00  WBU   backup_immich.sh → /mnt/backup-c   (local disk, no network)
+03:30  WBU   dump_immich_db_for_cwhu.sh         (local dump)
+04:00  CWHU  restore_from_wbu.sh                (~2.25 GB pull — the only big one)
+05:00  WBU   → Mac Mini db      (Fridays)
+05:05  WBU   → Mac Mini images  (Fridays)
+06:30  WBU   nightly summary
+07:00  CWHU  nightly summary
+```
+
+Well spaced, no overlaps, and the single heavy job is ~3 minutes even at 100 Mb. WBU's
+own volume is modest too: 27 GB across 3¾ days on `enp9s0`, ~7 GB/day. **Not the cause.**
+
+### After the swap — verify, then chase what's left
+
+Re-run the same throughput test once the gigabit switch is in:
+
+```bash
+S=$(curl -o /dev/null --max-time 12 -s -w '%{speed_download}' \
+      https://ash-speed.hetzner.com/100MB.bin)
+echo "$S" | awk '{printf "%.1f MB/s = %.0f Mbit/s\n", $1/1000000, ($1*8)/1000000}'
+```
+
+Expect it to jump to whatever the Ziggo plan actually provides. If it does, the
+investigation is over.
+
+If it still feels bad at gigabit, the next two suspects in order — neither fixed by a
+switch:
+
+1. **Bufferbloat.** Test at `waveform.com/tools/bufferbloat`, 30 seconds, free. Cable
+   modems buffer upstream aggressively; a saturated upload collapses downloads too
+   because ACKs get delayed. Classic "fast on paper, awful in practice". Needs SQM/QoS,
+   not hardware.
+2. **Upstream saturation from the 5 Wyze cameras.** Cable upstream is a fraction of
+   downstream, and five cameras uploading continuously is a real candidate for eating it.
+
+Only if both come up clean does per-device traffic monitoring earn its keep — and the
+Ziggo router's own per-device stats page is the cheap first stop, not a mirrored switch.
+See `network-analyzer.md` (archived) for why the full-capture route wasn't worth it.
+
 ---
 
 ## 1. Network settings — do this first
