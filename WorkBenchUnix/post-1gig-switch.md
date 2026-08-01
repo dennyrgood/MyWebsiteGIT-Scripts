@@ -27,12 +27,19 @@ Work through the sections in order. Sections 1 and 2 must happen before 3.
 
 ### Why the network was the blocker
 
-- The LAN was capped at 100 Mbit by a **10/100 hub** — WBU, Mac Mini and FleetNAS all
-  negotiated below their hardware. That's the hub being replaced.
+- The LAN was capped at 100 Mbit by a **D-Link DES-1024D, a 24-port 10/100 unmanaged
+  switch** — WBU, Mac Mini and FleetNAS all negotiated below their hardware. That's the
+  device being replaced.
+
+  > **Terminology fix (2026-08-01):** earlier drafts of this runbook called it a *hub*.
+  > It is a **switch**, and the difference matters beyond pedantry — a hub floods every
+  > frame to every port, a switch does not. See `network-analyzer.md`, where that
+  > distinction decides whether LAN-wide traffic capture is possible at all.
+
 - Separately, **WBU alone negotiated 10 Mb/s** where the others got 100. **Resolved
   2026-08-01** by moving WBU to a different switch port with a different cable — with
   the full 10/100/1000 advertisement restored it then negotiated 100 Mb/s immediately.
-  So it was the cable or the port, *not* the NIC, the `r8169` driver, EEE, or hub
+  So it was the cable or the port, *not* the NIC, the `r8169` driver, EEE, or switch
   interop. Error counters after the swap: `tx_errors: 3`, `rx_errors: 1`,
   `align_errors: 1`, all static — a clean link.
 - Measured throughput: **1.17 MB/s at 10 Mbit**, **6.77 MB/s at 100 Mbit**. The latter
@@ -45,9 +52,15 @@ Work through the sections in order. Sections 1 and 2 must happen before 3.
 
 **Nothing to undo — this section is now just verification.** As of 2026-08-01 WBU is
 advertising all modes (10/100/1000) and autonegotiating 100 Mb/s correctly against the
-old hub. There is no `ethtool` override in place, and none is needed. *(Earlier drafts
+old DES-1024D. There is no `ethtool` override in place, and none is needed. *(Earlier drafts
 of this runbook told you to revert one. That override is gone; ignore any such
 instruction.)*
+
+> **Replacement ordered 2026-08-01: TP-Link `TL-SG1024`** (24-port gigabit, unmanaged) —
+> the correct part, nothing to reconsider. A separate LAN traffic-capture project briefly
+> raised whether a smart-managed `TL-SG1024DE` was needed instead (for port mirroring);
+> **that project was archived the same day**, so plain unmanaged is right. Don't return or
+> exchange it. See `network-analyzer.md` for why the capture idea was dropped.
 
 After swapping in the new switch, just check:
 
@@ -67,8 +80,8 @@ sudo ethtool -r enp9s0
 
 ### Expected: `1000`
 
-Then confirm the rest of the fleet, since the hub was capping **every** machine on the
-LAN, not just WBU:
+Then confirm the rest of the fleet, since the old switch was capping **every** machine on
+the LAN, not just WBU:
 
 ```bash
 ssh fleetnas 'cat /sys/class/net/eth0/speed'
