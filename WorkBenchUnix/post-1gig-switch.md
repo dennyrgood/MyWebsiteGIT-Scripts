@@ -1,6 +1,9 @@
 # Post-1GbE-Switch: Finishing the WBU → FleetNAS Immich Backup
 
-**Written 2026-07-31.** Everything here was blocked on the network, not on the scripts.
+**Written 2026-07-31. Updated 2026-08-02** with the Ziggo provisioning numbers, the 1.2 TB
+SMB corroboration, and the Wi-Fi chain (AP + client cards) characterization.
+
+Everything here was blocked on the network, not on the scripts.
 The two backup scripts are written, tested against the real NAS, and working — the DB
 half ran clean end-to-end twice. What remains is: get the link to gigabit, run the
 one-time 111GB image load, put it on cron, and teach the nightly checker to watch it.
@@ -70,7 +73,113 @@ randomly goes to hell" symptom, and it has a single cause.
 
 **If the Ziggo plan is above 100 Mbit, none of it has ever been delivered.** Worth
 checking the plan speed — the switch swap may be a much larger upgrade than the backup
-project it was scoped for.
+project it was scoped for. *(Checked 2026-08-02 — it is. See immediately below.)*
+
+### Answered 2026-08-02: the plan is 829 Mbit. We are receiving 83.
+
+Read straight off the Ziggo DOCSIS 3.1 modem's status page — these are the provisioned
+service-flow rates from the config file (`bac10200010664fa2b24bdac`), not an advertised
+marketing number:
+
+| Service flow | Max traffic rate | |
+|---|---|---|
+| Primary downstream `163471386` | **829,250,000 bps** | **829 Mbit/s** |
+| Secondary downstream `163471387` | 64,000,000 bps | 64 Mbit/s |
+| Primary upstream `163463193` / `163463196` | 64,200,000 bps | **64.2 Mbit/s** |
+
+After DOCSIS overhead a real speed test should land near **780–800 Mbit down**. Measured
+today: **83**. So the house has been getting roughly **10% of the provisioned rate**, and
+the DES-1024D accounts for all of it.
+
+This resolves the open question above: the switch swap is not a backup-project nicety,
+it is a ~10x internet upgrade that happens to also unblock the backups.
+
+**It also weakens suspect #2 below.** Upstream is provisioned at 64 Mbit, not the ~5–10
+Mbit a legacy cable plan would give. Five Wyze cameras do not saturate 64 Mbit. Bufferbloat
+stays on the list; camera upstream saturation drops well down it.
+
+### Corroborating measurement: the 1.2 TB SMB transfer
+
+A ~1.2 TB SMB copy, **Wi-Fi PC → FleetNAS (wired)**, took a bit over a day. That works out
+to roughly **11–13 MB/s, i.e. ~90–100 Mbit/s** sustained:
+
+| Elapsed | Throughput |
+|---|---|
+| 24 h | 13.9 MB/s = 111 Mbit |
+| 28 h | 11.9 MB/s = 95 Mbit |
+| 30 h | 11.1 MB/s = 89 Mbit |
+| 36 h | 9.3 MB/s = 74 Mbit |
+
+The elapsed time was not timed precisely, so treat this as a band rather than a point
+measurement. But unless it ran well past 30 hours, that transfer was at **line rate for a
+100 Mb link** — which tells us three things:
+
+- **Wi-Fi was not the bottleneck.** It sustained ≥90 Mbit for a day. The wired 100 Mb leg
+  was the cap.
+- **SMB per-file overhead was not a factor** at that size — these were large files.
+- **The switch is not degraded, it is simply 100 Mb.** This is the cleanest throughput
+  number on the LAN, better than the 83 Mbit internet test and the 6.77 MB/s contended
+  figure above. Nothing is faulty; the ceiling is exactly where the spec puts it.
+
+### The Wi-Fi path, characterized 2026-08-02 — the AP is fine, the client cards are not
+
+Since the biggest remaining transfers may run over Wi-Fi, the whole chain was checked.
+**The access point is not a bottleneck and does not need replacing.**
+
+| Link in the chain | What it is | Verdict |
+|---|---|---|
+| Ziggo modem → switch | DOCSIS 3.1, provisioned 829/64 | ⚠️ modem's LAN port speed **not yet verified** |
+| Switch | TL-SG1024 (on order) | Gigabit once installed |
+| Switch → AP | TP-Link **Archer AX50** | ✅ 1× GbE WAN + 4× GbE LAN |
+| AP radio | AX3000 Wi-Fi 6, 2x2, 160 MHz capable | ✅ not the limit |
+| AP → clients | 802.11**ac** clients on channel 48 | ⛔ **this is now the bottleneck** |
+
+The AX50 was the main worry — plenty of TP-Link models pair AC Wi-Fi with 100 Mb ports
+(Archer C20/C50/C60 all do), which would have left every wireless device capped at ~94
+Mbit after the switch swap. The AX50 is not one of them. **Do not buy a new router.**
+
+Channel 48 sits in the non-DFS 36–48 block, so the AP is running **80 MHz, not 160** — in
+the EU a 160 MHz channel needs DFS. Assume 80 MHz for all planning below.
+
+#### The two Wi-Fi clients
+
+Read via `netsh wlan show interfaces`. Both are 802.11ac on 5 GHz, channel 48:
+
+| Machine | Reported rate | Decodes to | Assessment |
+|---|---|---|---|
+| PC A | **433.3 Mbps** | 1x1 VHT80 **MCS9** (short GI) | **Maxed out.** Single-stream card — a hardware ceiling, not a signal problem |
+| PC B | **650 Mbps** | 2x2 VHT80 **MCS7** (short GI) | Two-stream card, but **two steps below** its 866.7 ceiling |
+
+PC A is at the top rate its radio can produce, so moving it will not help — only a new
+adapter would. PC B has headroom that costs nothing: MCS7 → MCS9 is a signal/interference
+issue, so better placement or line of sight to the AX50 should close it. The reported rate
+is instantaneous and fluctuates — sample it several times over a minute before concluding.
+
+Note both clients share airtime on the same 80 MHz channel, so simultaneous transfers
+**split** the capacity rather than adding to it. Neither benefits from the AX50's Wi-Fi 6
+features (OFDMA, improved MU-MIMO), which need `ax` clients.
+
+#### What this means for a large one-time transfer (1 TB reference)
+
+Real TCP throughput runs ~45–60% of the PHY rate quoted above:
+
+| Path | Real throughput | 1 TB |
+|---|---|---|
+| Today, over the 100 Mb switch | ~11 MB/s | ~23 h |
+| After swap — PC A (1x1 @ 433) | ~27 MB/s | ~10 h |
+| After swap — PC B (2x2 @ 650) | ~40 MB/s | ~6–7 h |
+| After swap — PC B if it reaches 866.7 | ~57 MB/s | ~4.5–5.5 h |
+| **Wired gigabit** | ~112 MB/s | **~2.5 h** |
+
+**Use a cable for anything of this size.** 2.5 h versus 6–10 h, and a single huge file over
+Wi-Fi is the worst case for an interruption — SMB will not resume it, so a dropout at hour
+five means starting over. If Wi-Fi is genuinely unavoidable: run it from **PC B**, and use
+`robocopy /Z` for restartable mode.
+
+Separately, PC A's 1x1 card caps that machine at ~250 Mbit on an 829 Mbit plan — about 30%,
+permanently, on every download, not just NAS transfers. An Intel AX210 (2x2 Wi-Fi 6, M.2,
+~€25–30) would take it to ~600–700 Mbit real and pairs well with the AX50. Cheap fix, but
+unrelated to the backups — treat it as optional.
 
 ### Ruled out: cron overlap
 
@@ -99,18 +208,19 @@ S=$(curl -o /dev/null --max-time 12 -s -w '%{speed_download}' \
 echo "$S" | awk '{printf "%.1f MB/s = %.0f Mbit/s\n", $1/1000000, ($1*8)/1000000}'
 ```
 
-Expect it to jump to whatever the Ziggo plan actually provides. If it does, the
-investigation is over.
+**Expect ~780–800 Mbit/s**, per the 829 Mbit provisioning read off the modem (above). That
+is now a concrete pass/fail number, not a vague "it should be faster" — if it lands there,
+the investigation is over. Anything under ~400 means something else is still in the way.
 
-If it still feels bad at gigabit, the next two suspects in order — neither fixed by a
-switch:
+If it still feels bad at gigabit, the next suspects — neither fixed by a switch:
 
 1. **Bufferbloat.** Test at `waveform.com/tools/bufferbloat`, 30 seconds, free. Cable
    modems buffer upstream aggressively; a saturated upload collapses downloads too
    because ACKs get delayed. Classic "fast on paper, awful in practice". Needs SQM/QoS,
    not hardware.
-2. **Upstream saturation from the 5 Wyze cameras.** Cable upstream is a fraction of
-   downstream, and five cameras uploading continuously is a real candidate for eating it.
+2. **Upstream saturation from the 5 Wyze cameras.** *Demoted 2026-08-02* — upstream is
+   provisioned at 64.2 Mbit, which five cameras are unlikely to saturate. Still possible
+   if they are streaming at high bitrate continuously, but no longer a leading candidate.
 
 Only if both come up clean does per-device traffic monitoring earn its keep — and the
 Ziggo router's own per-device stats page is the cheap first stop, not a mirrored switch.
@@ -164,6 +274,23 @@ switch's ceiling, not a fault. Mac Mini was measured at `100baseTX` on 2026-07-3
 should change. AmsterdamDesktop was never measured (SSH key auth from WBU was refused)
 — check it, since it owns the largest pending transfer of all.
 
+### Also check the two infrastructure ports — added 2026-08-02
+
+Neither of these is a fleet machine, and both sit upstream of everything else:
+
+1. **The Ziggo modem's LAN port.** *Not yet verified.* A DOCSIS 3.1 gateway provisioned at
+   829 Mbit is almost certainly gigabit, but if that one link comes up at 100 after the
+   swap, nothing downstream matters and the 83 Mbit measurement will not move. Check it on
+   the modem's own status page, or infer it from the throughput test.
+2. **The Archer AX50's uplink.** Confirmed gigabit by spec (1× GbE WAN + 4× GbE LAN), so
+   this is a formality — but worth eyeballing the switch's link LED for that port.
+
+While at the AX50's web UI, confirm **Advanced → Operation Mode** reads *Access Point*, not
+*Router*. The Ziggo box at `192.168.178.1` is doing the routing and NAT; if the AX50 is also
+routing, that's a double-NAT with Wi-Fi clients on a separate subnet. The 1.2 TB Wi-Fi→NAS
+transfer succeeded, which strongly implies AP mode already (same subnet), but it has not
+been directly confirmed.
+
 ### What else gets faster — worth verifying, not just assuming
 
 The Immich→NAS backup is not the main beneficiary. Everything below shares the same wire:
@@ -179,6 +306,12 @@ The Immich→NAS backup is not the main beneficiary. Everything below shares the
   Mbit versus ~2.5 at gigabit. This is the single biggest win, and a good reason to have
   the switch in before starting it.
 - **Mac Mini → NAS Plex library** — same story, also still pending.
+- **Internet for all 43 devices** — the big one, and not what this runbook was scoped for.
+  ~83 Mbit today against **829 Mbit provisioned**. See the 2026-08-02 findings above.
+- **Wi-Fi clients — partially.** The AX50's gigabit uplink stops being throttled, but the
+  two measured clients are 802.11ac 1x1/2x2 and become the new ceiling (~27 and ~40 MB/s).
+  Better than the 11 MB/s they get today, still well short of wire. Details in *The Wi-Fi
+  path, characterized 2026-08-02* above.
 
 ### If WBU comes back at 100, not 1000
 
@@ -400,9 +533,9 @@ appear in the TLDR and that the subject is still OK.
 
 ## 5. Loose ends
 
-### Commit the scripts
+### ~~Commit the scripts~~ — done
 
-Neither script is in git yet:
+**Resolved.** As of 2026-08-02 all three are tracked in git:
 
 ```
 WorkBenchUnix/backup_immich_db_to_fleetnas.sh
@@ -410,9 +543,9 @@ WorkBenchUnix/backup_immich_images_to_fleetnas.sh
 WorkBenchUnix/post-1gig-switch.md
 ```
 
-`sync-this` stages with **`git add -A`**, which sweeps everything untracked in the repo —
-check `git status` first, since this directory already carries tracked `.bak.2026-07-*`
-files.
+Still worth remembering when syncing: `sync-this` stages with **`git add -A`**, which sweeps
+everything untracked in the repo — check `git status` first, since this directory already
+carries tracked `.bak.2026-07-*` files.
 
 ### Btrfs snapshots on the NAS — the important one
 
