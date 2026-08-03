@@ -59,6 +59,7 @@ fi
 
 log "=== Plex sync to FleetNAS complete (source1 exit=$RSYNC1_EXIT, source2 exit=$RSYNC2_EXIT) ==="
 
-# --- Cron placeholder — NOT yet installed. Install with `crontab -e` once the first
-# manual run has been reviewed. Daily, off-peak:
+# --- Cron: installed live 2026-08-03 UTC, daily at 4am (first manual run kicked off
+# same day, ahead of the initial cron firing, to seed the mirror before the schedule
+# takes over):
 # 0 4 * * * /Users/dennishmathes/repos/scripts/MathesMacMini/backup_plex_to_fleetnas.sh >> /Users/dennishmathes/.cache/fleetnas-sync/cron.log 2>&1
