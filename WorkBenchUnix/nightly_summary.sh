@@ -18,6 +18,18 @@
 #                  (3) kernel crash-capture (/sys/fs/pstore) dump. Each contributes
 #                  a TLDR line and can flip STATUS to NOT OK. Pairs with the
 #                  kernel.panic_on_rcu_stall sysctl (99-wbu-crash-capture.conf).
+# 2026-08-03 UTC — added the two daily FleetNAS Immich backups (db 05:00, images
+#                  05:20, both well finished by the 06:30 send). Unlike the
+#                  Friday-only Mac Mini logs these are daily, so they get the
+#                  full treatment: tail + TLDR line, success-string check, and a
+#                  24h staleness check that catches a missed night on the very
+#                  next email.
+# 2026-08-03 UTC — every TLDR log line now carries a relative age "[3d ago]". The
+#                  subject gate reports only the single highest-priority failure,
+#                  so a stale log was invisible whenever another check won the
+#                  gate — which is exactly what happened on the first FleetNAS
+#                  email: a 3-day-old db log displayed its cheerful "complete"
+#                  last line while the images check owned the subject.
 
 TO="dennyrgood@yahoo.com"
 LINES=5
@@ -28,6 +40,13 @@ MACMINI_DB=$(ls -1t /home/dhm/.cache/export-sync/macmini_db_*.log 2>/dev/null | 
 MACMINI_IMG=$(ls -1t /home/dhm/.cache/export-sync/macmini_images_*.log 2>/dev/null | head -1)
 CWHU_SYNC=$(ls -1t /home/dhm/.cache/cwhu-warm-sync/sync_log_*.txt 2>/dev/null | head -1)
 CWHU_ERRORS=$(ls -1t /home/dhm/.cache/cwhu-warm-sync/sync_errors_*.txt 2>/dev/null | head -1)
+# FleetNAS logs are per-run and timestamped, so pick the newest of each. The `:-`
+# fallback matters: these strings are used as EXPECTED/LABEL array keys below, and
+# an empty key would collide between the two and print an empty name in the subject.
+FLEETNAS_DB=$(ls -1t /home/dhm/.cache/fleetnas-sync/fleetnas_db_*.log 2>/dev/null | head -1)
+FLEETNAS_DB=${FLEETNAS_DB:-/home/dhm/.cache/fleetnas-sync/fleetnas_db_NONE.log}
+FLEETNAS_IMG=$(ls -1t /home/dhm/.cache/fleetnas-sync/fleetnas_images_*.log 2>/dev/null | head -1)
+FLEETNAS_IMG=${FLEETNAS_IMG:-/home/dhm/.cache/fleetnas-sync/fleetnas_images_NONE.log}
 EXPORT_ARCHIVE=$(cat /home/dhm/.cache/immich-export/export_archive.log 2>/dev/null | wc -l > /dev/null; echo /home/dhm/.cache/immich-export/export_archive.log)
 
 LOGS=(
@@ -37,6 +56,8 @@ LOGS=(
     "$MACMINI_IMG"
     "$CWHU_SYNC"
     "$CWHU_ERRORS"
+    "$FLEETNAS_DB"
+    "$FLEETNAS_IMG"
     "/home/dhm/.cache/immich-export/export_archive.log"
     "/home/dhm/.cache/immich-export/export_flat_to_amsterdamdesktop.log"
     "/home/dhm/.cache/immich-export/export_multi_to_amsterdamdesktop.log"
@@ -187,14 +208,31 @@ if [ -n "$PREV_BOOT_ID" ]; then
 fi
 BODY+="=== Unclean-reboot post-mortem ===\n${REBOOT_BLOCK}\n\n"
 
-# --- Build TLDR (last line of each log, plus monitor watchdog lines) ---
+# --- Build TLDR (age + last line of each log, plus monitor watchdog lines) ---
+# Age is shown because the last line alone can't be read for staleness: a log that
+# ends in "... complete ===" looks green at a glance whether it ran an hour ago or
+# last Tuesday. The STATUS gate below only ever surfaces ONE failure in the subject,
+# so without an age here a stale log stays invisible whenever some other check wins
+# that gate. No threshold judgement is applied per line — the logs have genuinely
+# different expected cadences (daily, Friday-only, manual-only), so the age is
+# reported plainly and the reader judges it.
+fmt_age() {
+    local secs=$1
+    if   [ "$secs" -lt 3600 ];   then echo "$((secs / 60))m"
+    elif [ "$secs" -lt 172800 ]; then echo "$((secs / 3600))h"   # keep hours up to 48h: "25h" says more than "1d"
+    else echo "$((secs / 86400))d"
+    fi
+}
+
 TLDR="============================= TLDR ===============================\n"
 TLDR+="${REBOOT_TLDR}\n"
 TLDR+="${PSTORE_TLDR}\n"
 TLDR+="${SMART_TLDR}\n"
+NOW_TLDR=$(date +%s)
 for LOG in "${LOGS[@]}"; do
     if [ -f "$LOG" ]; then
-        TLDR+="  $(basename "$LOG"): $(tail -1 "$LOG")\n"
+        AGE=$(fmt_age $(( NOW_TLDR - $(stat -c %Y "$LOG") )))
+        TLDR+="  $(basename "$LOG"): [${AGE} ago] $(tail -1 "$LOG")\n"
     else
         TLDR+="  $(basename "$LOG"): (file not found)\n"
     fi
@@ -234,10 +272,19 @@ declare -A EXPECTED=(
     # ["/var/log/immich-backup-c.log"]="Backup to /mnt/backup-c finished."  # 2026-07-22: backup-c drive retired (repeat failures), cron disabled
     ["/var/log/immich-dump-for-cwhu.log"]="Dump for CWHU complete."
     ["$CWHU_SYNC"]="Warm-sync complete."
+    ["$FLEETNAS_DB"]="Postgres dump sync to FleetNAS complete"
+    # Deliberately NOT the trailing "=== Live image sync ... complete ===" banner:
+    # that line prints even when the post-sync verification found drift, so it says
+    # only "the script reached the end", not "the backup is good". The 0-differences
+    # line is the real success signal. It sits 2 lines above the banner — inside the
+    # tail -5 window the checker uses.
+    ["$FLEETNAS_IMG"]="FleetNAS matches WBU exactly"
 )
 declare -A LABEL=(
     ["/var/log/immich-dump-for-cwhu.log"]="CWHU DB dump"
     ["$CWHU_SYNC"]="CWHU warm-sync"
+    ["$FLEETNAS_DB"]="FleetNAS DB backup"
+    ["$FLEETNAS_IMG"]="FleetNAS image backup"
 )
 if [ "$OK" -eq 1 ]; then
     for LOG in "${!EXPECTED[@]}"; do
@@ -259,6 +306,23 @@ if [ "$OK" -eq 1 ] && [ -f "$CWHU_SYNC" ]; then
     if [ "$FILE_AGE" -gt 21600 ]; then  # 6 hours
         OK=0; REASON="CWHU warm-sync stale ($((FILE_AGE / 3600))h)"
     fi
+fi
+
+# --- Staleness check for the daily FleetNAS backups ---
+# A success string alone can't tell "ran fine this morning" from "ran fine last
+# Tuesday and the cron has been dead since" — the newest log still ends in success
+# either way. 24h is the exact right threshold here: both jobs run ~05:00-05:20 and
+# this email goes at 06:30, so a healthy log is ~1-1.5h old, and one missed night
+# puts it at ~25h — caught on the very next email with margin to spare.
+if [ "$OK" -eq 1 ]; then
+    for LOG in "$FLEETNAS_DB" "$FLEETNAS_IMG"; do
+        [ -f "$LOG" ] || continue   # missing case already handled by the EXPECTED loop
+        FILE_AGE=$(( $(date +%s) - $(stat -c %Y "$LOG") ))
+        if [ "$FILE_AGE" -gt 86400 ]; then
+            OK=0; REASON="${LABEL[$LOG]:-$(basename "$LOG")} stale ($((FILE_AGE / 3600))h)"
+            break
+        fi
+    done
 fi
 
 # --- Health monitor watchdog contributes to STATUS ---
