@@ -77,9 +77,9 @@ die() {
 
 usage() {
     cat <<'EOF'
-Usage: clean.ubuntu.shutdown [--reboot] [-y|--yes] [--force] [--dry-run]
+Usage: clean.ubuntu.shutdown [-r|--reboot] [-y|--yes] [--force] [--dry-run]
 
-  --reboot     Reboot instead of powering off (this is what clean.ubuntu.reboot uses).
+  -r, --reboot Reboot instead of powering off (this is what clean.ubuntu.reboot uses).
   -y, --yes    Skip the confirmation prompt.
   --force      Proceed even if a backup/dump/package operation is running. Don't.
   --dry-run    Show what would be stopped, stop nothing, and do not power down.
@@ -92,7 +92,7 @@ EOF
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --reboot)    ACTION="reboot" ;;
+        -r|--reboot) ACTION="reboot" ;;
         -y|--yes)    ASSUME_YES=1 ;;
         --force)     FORCE=1 ;;
         --dry-run)   DRY_RUN=1 ;;
