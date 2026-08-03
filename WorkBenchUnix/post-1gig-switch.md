@@ -2,31 +2,35 @@
 
 **Written 2026-07-31. Updated 2026-08-02** with the Ziggo provisioning numbers, the 1.2 TB
 SMB corroboration, and the Wi-Fi chain (AP + client cards) characterization.
+**Updated 2026-08-03: the switch is in, and sections 1–3 are done.**
 
-Everything here was blocked on the network, not on the scripts.
-The two backup scripts are written, tested against the real NAS, and working — the DB
-half ran clean end-to-end twice. What remains is: get the link to gigabit, run the
-one-time 111GB image load, put it on cron, and teach the nightly checker to watch it.
+Everything here was blocked on the network, not on the scripts — and that block is now
+gone. The gigabit switch is installed, WBU links at 1000 Mb/s, the one-time image load
+has run, and both FleetNAS jobs are on cron. What remains is section 4 (nightly checker
+integration) and the Btrfs snapshots in section 5.
 
-Work through the sections in order. Sections 1 and 2 must happen before 3.
+Sections 1–3 are kept as a record of what was done and what the numbers were, not as
+instructions to follow again.
 
 ---
 
-## State as of 2026-07-31
+## State as of 2026-08-03 — sections 1–3 complete
 
 | Thing | Status |
 |---|---|
 | `backup_immich_db_to_fleetnas.sh` | Written, **validated twice** end-to-end |
-| `backup_immich_images_to_fleetnas.sh` | Written, syntax-checked, **never run** |
+| `backup_immich_images_to_fleetnas.sh` | ✅ **Run 2026-08-03 — 118 GB / 283,460 files in 16m58s** |
+| `export_flat_to_fleetnas.sh` / `export_multi_to_fleetnas.sh` | ✅ Written 2026-08-03, destination validated by dry run, **bulk transfer not yet run** |
 | SSH key `~/.ssh/id_ed25519_fleetnas` | Installed on NAS, working, no password anywhere |
 | WBU `~/.ssh/config` | Created; `ssh fleetnas` / `ssh 192.168.178.123` work keyless |
-| WBU link speed | Autonegotiates **100 Mb/s** correctly — no `ethtool` override active, nothing to undo |
+| WBU link speed | ✅ **1000 Mb/s full duplex**, autonegotiated against the new switch |
 | NAS `/volume1/immich/postgres-dumps/` | Holds `immich-dump_2026-07-31_0330.sql` |
-| NAS `/volume1/immich/images/` | **Empty — the 111GB has not been pushed** |
-| Crontab entries | **Not added** |
-| Nightly checker integration | **Not added** |
-| Scripts committed to git | **No** |
-| Btrfs snapshots on NAS | **Not configured** |
+| NAS `/volume1/immich/images/` | ✅ **118 GB, 283,460 files — verified identical to WBU** |
+| NAS `/volume1/immich/export_flat/`, `export_multi/` | Created, **empty** — ~199 GB still to push |
+| Crontab entries | ✅ **Added 2026-08-03** (05:00 DB, 05:20 images) |
+| Nightly checker integration | **Not added** — section 4 is the remaining work |
+| Scripts committed to git | ✅ Yes |
+| Btrfs snapshots on NAS | **Not configured** — still the most important loose end |
 
 ### Why the network was the blocker
 
@@ -198,19 +202,38 @@ Checked the fleet schedule, since overlapping jobs were a plausible alternative 
 Well spaced, no overlaps, and the single heavy job is ~3 minutes even at 100 Mb. WBU's
 own volume is modest too: 27 GB across 3¾ days on `enp9s0`, ~7 GB/day. **Not the cause.**
 
-### After the swap — verify, then chase what's left
+### After the swap — verified 2026-08-03
 
-Re-run the same throughput test once the gigabit switch is in:
+**The 100 Mb ceiling is gone.** Measured on WBU the day the switch went in:
+
+| Measurement | Before (DES-1024D) | After (TL-SG1024) |
+|---|---|---|
+| WBU `enp9s0` link | 100 Mb/s (10 Mb/s before 08-01) | **1000 Mb/s full duplex** |
+| FleetNAS `eth0` link | 100 Mb/s | **1000 Mb/s** |
+| LAN pull, WBU ← NAS (800 MB) | 6.77 MB/s | **111 MB/s (~890 Mbit)** |
+| Internet, single stream | 83 Mbit | ~206 Mbit — see the caveat below |
+
+The LAN number is the one that matters and it is essentially line rate: 111 MB/s against
+a theoretical 125. **16× the contended 100 Mb figure.**
+
+> **Methodology correction — the internet test above expects the wrong number.** The
+> `ash-speed.hetzner.com` target is in **Ashburn, Virginia**. A single TCP stream from
+> Amsterdam to US-East is bounded by round-trip latency and the congestion window, not by
+> the local link, so it cannot reach 780–800 Mbit no matter how good the LAN is. The 206
+> Mbit measured there proves the 100 Mb ceiling is gone; it is **not** a pass/fail read on
+> the 829 Mbit provisioning, and the "anything under ~400 means something else is in the
+> way" rule below it was wrong for this target.
+>
+> To actually test the plan, use a **Netherlands-local** server — `speedtest.net` /
+> `fast.com` in a browser, or a multi-stream download from an NL mirror. Expect
+> ~780–800 Mbit there. That test has not been run yet.
 
 ```bash
+# Kept for reference — but read the correction above before trusting the number.
 S=$(curl -o /dev/null --max-time 12 -s -w '%{speed_download}' \
       https://ash-speed.hetzner.com/100MB.bin)
 echo "$S" | awk '{printf "%.1f MB/s = %.0f Mbit/s\n", $1/1000000, ($1*8)/1000000}'
 ```
-
-**Expect ~780–800 Mbit/s**, per the 829 Mbit provisioning read off the modem (above). That
-is now a concrete pass/fail number, not a vague "it should be faster" — if it lands there,
-the investigation is over. Anything under ~400 means something else is still in the way.
 
 If it still feels bad at gigabit, the next suspects — neither fixed by a switch:
 
@@ -228,11 +251,26 @@ See `network-analyzer.md` (archived) for why the full-capture route wasn't worth
 
 ---
 
-## 1. Network settings — do this first
+## 1. Network settings — ✅ done 2026-08-03
 
-**Nothing to undo — this section is now just verification.** As of 2026-08-01 WBU is
+**WBU came up at gigabit on its own. Nothing in this section needed doing.** Confirmed by
+`ethtool`, which shows real autonegotiation rather than a forced fallback:
+
+```
+Speed: 1000Mb/s   Duplex: Full   Auto-negotiation: on
+Link partner advertised link modes: ... 1000baseT/Full
+```
+
+The feared outcome below — "If WBU comes back at 100, not 1000", where the run's other two
+pairs turn out to be bad — **did not happen**. All four pairs on that cable are good.
+FleetNAS `eth0` also reports `1000`.
+
+The rest of this section is kept as the procedure that was followed, and as contingency
+if a link ever regresses.
+
+**Nothing to undo.** As of 2026-08-01 WBU was already
 advertising all modes (10/100/1000) and autonegotiating 100 Mb/s correctly against the
-old DES-1024D. There is no `ethtool` override in place, and none is needed. *(Earlier drafts
+old DES-1024D. There was no `ethtool` override in place, and none was needed. *(Earlier drafts
 of this runbook told you to revert one. That override is gone; ignore any such
 instruction.)*
 
@@ -258,30 +296,37 @@ an override:
 sudo ethtool -r enp9s0
 ```
 
-### Expected: `1000`
+### Expected: `1000` — got `1000` ✅
 
 Then confirm the rest of the fleet, since the old switch was capping **every** machine on
 the LAN, not just WBU:
 
 ```bash
-ssh fleetnas 'cat /sys/class/net/eth0/speed'
+ssh fleetnas 'cat /sys/class/net/eth0/speed'                                   # ✅ 1000
 ssh -i ~/.ssh/id_ed25519_macmini dennishmathes@mathes-mac-mini 'networksetup -getmedia Ethernet | grep -i active'
 ssh amsterdamdesktop 'powershell -NoProfile -Command "Get-NetAdapter | Where-Object {$_.Status -eq \"Up\"} | Select-Object Name,LinkSpeed"'
 ```
 
+| Box | Status |
+|---|---|
+| WBU `enp9s0` | ✅ **1000 Mb/s full duplex**, confirmed 2026-08-03 |
+| FleetNAS `eth0` | ✅ **1000**, confirmed 2026-08-03 |
+| Mac Mini | ⚠️ **Still unverified.** Was `100baseTX` on 2026-07-31, so it should have changed |
+| AmsterdamDesktop | ⚠️ **Still unverified**, and it owns the largest pending transfer of all |
+
 FleetNAS has **dual 10GbE**, so on a 1GbE switch it will report `1000` — that's the
-switch's ceiling, not a fault. Mac Mini was measured at `100baseTX` on 2026-07-31, so it
-should change. AmsterdamDesktop was never measured (SSH key auth from WBU was refused)
-— check it, since it owns the largest pending transfer of all.
+switch's ceiling, not a fault. AmsterdamDesktop was never measured (SSH key auth from WBU
+was refused), so it needs checking from the box itself.
 
 ### Also check the two infrastructure ports — added 2026-08-02
 
 Neither of these is a fleet machine, and both sit upstream of everything else:
 
-1. **The Ziggo modem's LAN port.** *Not yet verified.* A DOCSIS 3.1 gateway provisioned at
-   829 Mbit is almost certainly gigabit, but if that one link comes up at 100 after the
-   swap, nothing downstream matters and the 83 Mbit measurement will not move. Check it on
-   the modem's own status page, or infer it from the throughput test.
+1. **The Ziggo modem's LAN port.** *Still not directly verified as of 2026-08-03,* but
+   **partially answered by inference**: internet throughput moved from 83 Mbit to ~206
+   Mbit after the swap, which is impossible through a 100 Mb uplink. So that port is not
+   capped at 100. Whether it is actually gigabit — rather than merely above 100 — still
+   needs the modem's status page or a Netherlands-local speed test.
 2. **The Archer AX50's uplink.** Confirmed gigabit by spec (1× GbE WAN + 4× GbE LAN), so
    this is a formality — but worth eyeballing the switch's link LED for that port.
 
@@ -291,27 +336,36 @@ routing, that's a double-NAT with Wi-Fi clients on a separate subnet. The 1.2 TB
 transfer succeeded, which strongly implies AP mode already (same subnet), but it has not
 been directly confirmed.
 
-### What else gets faster — worth verifying, not just assuming
+### What else gets faster — still worth verifying, not just assuming
 
-The Immich→NAS backup is not the main beneficiary. Everything below shares the same wire:
+The Immich→NAS backup is not the main beneficiary. Everything below shares the same wire.
+**Only the WBU↔NAS path has actually been measured post-swap** — the rest remains
+inference, and is listed here as work to confirm rather than as results.
 
-- **CWHU's nightly warm-sync.** `restore_from_wbu.sh` rsyncs the latest dump, and since
-  the dump gets a fresh datestamped filename daily, that is a **full 2.25GB transfer
-  every night**, not an incremental one. Measured at 10 Mbit that step alone is ~32
-  minutes; at gigabit it's under a minute. Worth confirming CWHU's job actually got
-  shorter — its ceiling is chatworkhorse's physical NIC, since CWHU is a VM.
-- **Mac Mini Friday pushes** (`backup_immich_db_to_macmini.sh` 05:00,
-  `backup_immich_images_to_macmini.sh` 05:05) — capped at 100 today.
+- **✅ WBU ↔ FleetNAS.** Measured 2026-08-03: **111 MB/s** on an 800 MB pull, **107 MB/s**
+  sustained across the 118 GB image load. Essentially line rate. This one is done.
+- **CWHU's nightly warm-sync — not yet confirmed.** `restore_from_wbu.sh` rsyncs the latest
+  dump, and since the dump gets a fresh datestamped filename daily, that is a **full 2.25GB
+  transfer every night**, not an incremental one. Measured at 10 Mbit that step alone is
+  ~32 minutes; at gigabit it should be under a minute. Its ceiling is chatworkhorse's
+  physical NIC, since CWHU is a VM — so check that box's link speed too, not just the
+  elapsed time.
+- **Mac Mini Friday pushes — not yet confirmed** (`backup_immich_db_to_macmini.sh` 05:00,
+  `backup_immich_images_to_macmini.sh` 05:05). The Mac Mini's own link speed is still
+  unverified; it was `100baseTX` on 2026-07-31.
 - **AmsterdamDesktop → NAS `photo_legacy`, ~975GB one-time.** Roughly 22 hours at 100
-  Mbit versus ~2.5 at gigabit. This is the single biggest win, and a good reason to have
-  the switch in before starting it.
-- **Mac Mini → NAS Plex library** — same story, also still pending.
+  Mbit versus ~2.5 at gigabit. This is the single biggest remaining win, and the switch is
+  now in — but AmsterdamDesktop's link speed has not been checked, so confirm that first.
+- **Mac Mini → NAS Plex library** — same story, also still pending. (Sync scripts for this
+  landed separately in commit `d7ca1e1`.)
 - **Internet for all 43 devices** — the big one, and not what this runbook was scoped for.
-  ~83 Mbit today against **829 Mbit provisioned**. See the 2026-08-02 findings above.
-- **Wi-Fi clients — partially.** The AX50's gigabit uplink stops being throttled, but the
-  two measured clients are 802.11ac 1x1/2x2 and become the new ceiling (~27 and ~40 MB/s).
-  Better than the 11 MB/s they get today, still well short of wire. Details in *The Wi-Fi
-  path, characterized 2026-08-02* above.
+  Moved from 83 Mbit to ~206 Mbit single-stream, which proves the ceiling is gone but does
+  not measure the 829 Mbit plan. Needs a Netherlands-local test — see the methodology
+  correction in *After the swap* above.
+- **Wi-Fi clients — partially, unmeasured.** The AX50's gigabit uplink stops being
+  throttled, but the two measured clients are 802.11ac 1x1/2x2 and become the new ceiling
+  (~27 and ~40 MB/s predicted). Better than the 11 MB/s they got before, still well short
+  of wire. Details in *The Wi-Fi path, characterized 2026-08-02* above.
 
 ### If WBU comes back at 100, not 1000
 
@@ -355,18 +409,27 @@ there is nothing to persist and nothing to re-apply after a reboot.
 
 ---
 
-## 2. The one-time 111GB image load
+## 2. The one-time image load — ✅ done 2026-08-03
 
-Run this **by hand, once**, before it ever runs from cron. It is the only part of the
-system that has never executed.
+**Ran clean.** 118 GB / 283,460 files in **16m58s** (16:26:13 → 16:43:11 UTC) at a
+sustained **~107 MB/s**, measured NAS-side mid-transfer. Destination verified byte-for-byte
+against WBU: identical file count, no transfers pending, no deletions pending.
 
-Expected duration:
+Estimate versus actual:
 
-| Link | Estimate |
-|---|---|
-| 1 Gb/s | ~20 minutes |
-| 100 Mb/s | ~2.5 hours |
-| 100 Mb/s, contended with SMB pushes | ~4.7 hours |
+| Link | Estimate | Actual |
+|---|---|---|
+| **1 Gb/s** | ~20 minutes | ✅ **16m58s** |
+| 100 Mb/s | ~2.5 hours | — |
+| 100 Mb/s, contended with SMB pushes | ~4.7 hours | — |
+| 10 Mb/s (WBU before 08-01) | ~27 hours | — |
+
+That last row is why the switch was the blocker rather than an optimization: at 10 Mbit
+this transfer does not fit in a nightly window at all — it would still be running when the
+next night's job fired, and it would have to survive 27 uninterrupted hours on a box whose
+I/O faults have corrupted a backup before.
+
+The procedure below is kept for the record and for any future full reload.
 
 Run it detached so an SSH drop doesn't kill it partway:
 
@@ -398,6 +461,39 @@ for a re-run to do, so any output is real remaining difference. If it reports dr
 the differing paths are listed in the log and in
 `/home/dhm/.cache/fleetnas-sync/verify-work-images/drift.txt`.
 
+### Found on the first real run: the verification could never pass — fixed 2026-08-03
+
+The initial load transferred perfectly and the verification still reported **283,460 of
+283,460 paths as drift.** Every entry carried the identical itemize flag:
+
+```
+.f...p.....|encoded-video/6f28ca07-.../52a1ee3a-....mp4
+```
+
+Decoded: leading `.` = **no transfer needed**, `f` = file, and `p` = the only differing
+field, **permissions**. Not one `>f` (would transfer), not one `*deleting`. Confirmed
+directly on both sides — source is 100% mode `644`, the NAS is 100% mode `777`, because
+**the UGREEN share forces its own permission model on everything it stores.**
+
+So `-a` (which implies `-p`) was asking rsync to preserve something the destination
+overrides by design. The check was **structurally incapable of ever passing**, and left
+alone it would have written a 283,460-line WARNING into `cron.log` every night about a
+backup that was correct — which is exactly how a drift report that matters gets ignored.
+
+**Fix:** `--no-perms` on *both* rsync calls in `backup_immich_images_to_fleetnas.sh` — the
+sync and the verification. They must stay in sync; adding it to only one reintroduces the
+problem. Re-verified after the change: **0 drift.** The same flag is in
+`export_flat_to_fleetnas.sh` and `export_multi_to_fleetnas.sh` from birth for the same
+reason.
+
+`backup_immich_db_to_fleetnas.sh` is unaffected — it checks rsync's exit code and has no
+dry-run verification pass.
+
+> Ignore the `du -sb` totals when comparing the two sides: 118,306,295,066 on WBU versus
+> 118,332,715,470 on the NAS, a 26 MB gap across 118 GB. That is block-allocation
+> difference between ext4 and Btrfs, not content. rsync confirmed size and mtime match on
+> every file, which is the meaningful check.
+
 ### If it aborts on `--max-delete`
 
 ```
@@ -412,16 +508,22 @@ I/O faults have corrupted a backup once already (backup-c).
 
 ---
 
-## 3. Crontab entries
+## 3. Crontab entries — ✅ added 2026-08-03
 
-Only after section 2 has completed cleanly. These go in **`dhm`'s** crontab
-(`crontab -e`), alongside the existing Friday Mac Mini entries:
+Live in **`dhm`'s** crontab, alongside the existing Friday Mac Mini entries. The previous
+crontab was saved to `~/.cache/fleetnas-sync/crontab.bak.2026-08-03` before the edit:
 
 ```cron
 # --- FleetNAS Immich backup — daily (added post-1GbE-switch) ---
 0  5 * * * /home/dhm/repos/scripts/WorkBenchUnix/backup_immich_db_to_fleetnas.sh >> /home/dhm/.cache/fleetnas-sync/cron.log 2>&1
 20 5 * * * /home/dhm/repos/scripts/WorkBenchUnix/backup_immich_images_to_fleetnas.sh >> /home/dhm/.cache/fleetnas-sync/cron.log 2>&1
 ```
+
+> **Friday 05:00 now has two DB pushes.** The new daily FleetNAS DB job lands on the same
+> minute as the weekly `backup_immich_db_to_macmini.sh`. They read the same dump and write
+> to different destinations, so it is correct either way, and at gigabit both finish in
+> well under a minute. Noted rather than changed — see *Mac Mini Friday cron spacing* in
+> section 5, which would move the Mac Mini pair to 05:00/05:20 anyway.
 
 **Why 5:00 / 5:20.** It lands after the 3:30am dump (`dump_immich_db_for_cwhu.sh`) and
 after CWHU's 4:00am pull, so all three read a consistent dump. The 20-minute gap is
@@ -533,6 +635,38 @@ appear in the TLDR and that the subject is still OK.
 
 ## 5. Loose ends
 
+### export_flat / export_multi to FleetNAS — new 2026-08-03, bulk transfer still pending
+
+Two new scripts, the FleetNAS counterparts to the existing Mac Mini pair:
+
+```
+WorkBenchUnix/export_flat_to_fleetnas.sh     → /volume1/immich/export_flat    (83 GB, 69,474 files)
+WorkBenchUnix/export_multi_to_fleetnas.sh    → /volume1/immich/export_multi  (116 GB, 98,702 files)
+```
+
+**Status:** written, syntax-checked, destination directories created on the NAS, and the
+share-name rsync destination **validated by dry run** — `export_flat` enumerated 69,474
+would-transfer files with 0 errors, exactly matching the source count. The ~199 GB bulk
+transfer has **not** been run. At the measured 107 MB/s expect roughly 13 and 18 minutes
+respectively.
+
+They are modelled on `backup_immich_images_to_fleetnas.sh`, **not** on their Mac Mini
+namesakes. The Mac Mini scripts verify with a bulk scan plus a per-file `ssh test -e`
+recheck; that loop exists solely to work around a reproducible FSKit/ExFAT bug on the Mac
+Mini's Expansion drive where bulk enumeration silently omits files that are present (286
+flagged, 0 genuinely missing, 2026-06-29). FleetNAS is Btrfs and has no such bug, so
+carrying that workaround across would have cost an SSH round-trip per flagged file to
+solve a problem this destination does not have. It also matched on *basename anywhere in
+the tree*, so a file in the wrong directory counted as present.
+
+Like the images script, both are **manual-only by design** — `export_flat` and
+`export_multi` only change when `export_archive.py` is re-run by hand (~11 hours), so
+there is nothing for a nightly job to pick up most nights. Cron placeholders are in the
+script footers, commented out, matching the Mac Mini convention.
+
+When they do run for the first time, remember section 4: `nightly_summary.sh` knows
+nothing about them either.
+
 ### ~~Commit the scripts~~ — done
 
 **Resolved.** As of 2026-08-02 all three are tracked in git:
@@ -542,6 +676,8 @@ WorkBenchUnix/backup_immich_db_to_fleetnas.sh
 WorkBenchUnix/backup_immich_images_to_fleetnas.sh
 WorkBenchUnix/post-1gig-switch.md
 ```
+
+As of 2026-08-03 the two export scripts above are tracked as well.
 
 Still worth remembering when syncing: `sync-this` stages with **`git add -A`**, which sweeps
 everything untracked in the repo — check `git status` first, since this directory already
