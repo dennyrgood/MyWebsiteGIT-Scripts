@@ -1,0 +1,258 @@
+#!/usr/bin/env bash
+# Created: 2026-08-03 — clean shutdown for the Ubuntu fleet boxes (WBU, CWHU).
+#
+# Brings Docker Compose stacks (Immich, primarily) down gracefully BEFORE handing off
+# to systemd, then powers off. Also usable as `clean.ubuntu.reboot`, which is a thin
+# wrapper that passes --reboot.
+#
+# WHY THIS EXISTS — a bare `sudo reboot` is not equivalent:
+#
+#   systemd does stop docker.service on its way down, and docker does signal its
+#   containers, but the grace period is short and the stop order across the stack is
+#   not guaranteed. immich_postgres is the one that matters: its image sets
+#   STOPSIGNAL=SIGINT (Postgres "fast shutdown" — correct), but the container has no
+#   StopTimeout, so Compose's 10-second default applies. A checkpoint on a multi-GB
+#   database can outrun 10s, at which point Docker SIGKILLs Postgres mid-write. That
+#   survives (Postgres replays WAL on next start) but it is an unclean stop, and the
+#   backup-c corruption of 2026-07-23 is the reminder that this box's I/O path does not
+#   always forgive. So: stop explicitly, with real headroom, and verify it worked.
+#
+# TWO DELIBERATE CHOICES:
+#
+#   1. `docker compose stop`, NOT `down`. The stacks are declared `restart: always`,
+#      which means a manually-stopped container IS restarted when the Docker daemon
+#      restarts — i.e. on boot. `down` instead REMOVES the containers, so Immich would
+#      stay dead after the reboot until someone ran `up -d` by hand. `stop` is what
+#      makes this a reboot rather than an outage.
+#
+#   2. Stop order is left to Compose. immich-server declares `depends_on: [redis,
+#      database]`, so Compose stops the server first and Postgres last — the API stops
+#      issuing queries before the database goes away. Stopping containers individually
+#      would mean re-deriving that order by hand, and getting it wrong silently.
+#
+# It refuses to run while a backup, dump, or package operation is in flight — see
+# BUSY_PATTERNS. Rebooting mid-rsync costs a re-run; rebooting mid-dpkg costs an
+# afternoon.
+set -euo pipefail
+
+STOP_TIMEOUT="${STOP_TIMEOUT:-60}"   # seconds Compose waits per container before SIGKILL
+ACTION="poweroff"
+ASSUME_YES=0
+FORCE=0
+DRY_RUN=0
+
+LOG_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/clean-ubuntu-shutdown"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/$(date -u +%Y%m%d_%H%M%SZ).log"
+
+# Things that must not be interrupted. Matched against the full process command line.
+# rsync is included bare: any rsync on this box is moving fleet data somewhere, and
+# there is no version of "reboot in the middle of it" that is better than waiting.
+BUSY_PATTERNS=(
+    'backup_immich_.*\.sh'
+    'dump_immich_db_for_cwhu\.sh'
+    'restore_from_wbu\.sh'
+    'export_archive\.py'
+    'export_(flat|multi)_to_.*\.sh'
+    '(^|/)rsync '
+    '(^|/)pg_dump'
+    '(^|/)(apt|apt-get|dpkg)([[:space:]]|$)'
+    # Deliberately NOT a bare 'unattended-upgrade': the permanently-resident
+    # `unattended-upgrade-shutdown --wait-for-signal` helper would match it, and does
+    # on every Ubuntu box, so the script would refuse to run 100% of the time. This
+    # form requires whitespace or end-of-line straight after "upgrade", which the
+    # "-shutdown" helper and the "unattended-upgrades/" path component both fail —
+    # while a real `/usr/bin/unattended-upgrade` run still matches.
+    'unattended-upgrade([[:space:]]|$)'
+)
+
+log() {
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $1" | tee -a "$LOG_FILE"
+}
+
+die() {
+    log "ABORTED: $1"
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: clean.ubuntu.shutdown [--reboot] [-y|--yes] [--force] [--dry-run]
+
+  --reboot     Reboot instead of powering off (this is what clean.ubuntu.reboot uses).
+  -y, --yes    Skip the confirmation prompt.
+  --force      Proceed even if a backup/dump/package operation is running. Don't.
+  --dry-run    Show what would be stopped, stop nothing, and do not power down.
+  -h, --help   This text.
+
+Env:
+  STOP_TIMEOUT   Seconds Compose waits per container before SIGKILL (default 60).
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --reboot)    ACTION="reboot" ;;
+        -y|--yes)    ASSUME_YES=1 ;;
+        --force)     FORCE=1 ;;
+        --dry-run)   DRY_RUN=1 ;;
+        -h|--help)   usage; exit 0 ;;
+        *)           usage >&2; die "unknown argument: $1" ;;
+    esac
+    shift
+done
+
+log "=== clean.ubuntu.$ACTION starting on $(hostname) ==="
+log "Log: $LOG_FILE"
+
+# ---------------------------------------------------------------------------
+# 1. Busy check — before anything is touched, so a refusal costs nothing.
+# ---------------------------------------------------------------------------
+BUSY=""
+for pat in "${BUSY_PATTERNS[@]}"; do
+    # Exclude this script and its own pgrep so we don't detect ourselves.
+    hits=$(pgrep -af "$pat" 2>/dev/null | grep -v "clean\.ubuntu\." || true)
+    if [ -n "$hits" ]; then
+        BUSY+="$hits"$'\n'
+    fi
+done
+
+if [ -n "$BUSY" ]; then
+    log "In-flight work detected:"
+    printf '%s' "$BUSY" | while IFS= read -r line; do [ -n "$line" ] && log "  BUSY: $line"; done
+    if [ "$FORCE" -eq 0 ]; then
+        die "refusing to $ACTION while the above is running. Wait, or re-run with --force."
+    fi
+    log "WARNING: --force given, proceeding over the top of in-flight work."
+else
+    log "Busy check clean — no backup, dump, or package operation running."
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Cache sudo credentials NOW.
+#    Otherwise the stack is already down when sudo prompts for a password, and an
+#    unattended run stalls there indefinitely with Immich offline.
+# ---------------------------------------------------------------------------
+if [ "$DRY_RUN" -eq 0 ]; then
+    log "Caching sudo credentials up front (needed for $ACTION)..."
+    sudo -v || die "sudo authentication failed — nothing was stopped."
+fi
+
+# ---------------------------------------------------------------------------
+# 3. Discover running Compose stacks from container labels.
+#    Label-derived rather than a hardcoded path, so this works on any Ubuntu box in
+#    the fleet and picks up stacks added later without editing this script.
+# ---------------------------------------------------------------------------
+PROJECTS=""
+WAS_RUNNING=""   # container IDs running before we stopped anything, for the check in §6
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    # `.Label "x"`, not `index .Labels "x"` — in `docker ps --format`, .Labels is a
+    # flat comma-separated string, so `index` raises a template error, docker exits
+    # non-zero, and the stack list silently comes back empty.
+    PROJECTS=$(docker ps --filter 'label=com.docker.compose.project' \
+        --format '{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.project.config_files"}}' \
+        2>/dev/null | sort -u || true)
+    WAS_RUNNING=$(docker ps -q --filter 'label=com.docker.compose.project' 2>/dev/null || true)
+
+    # Containers running outside Compose would otherwise be killed by the daemon stop
+    # with no grace at all. Name them so it's a known trade-off, not a surprise.
+    all_names=$(docker ps --format '{{.Names}}' 2>/dev/null | sort || true)
+    compose_names=$(docker ps --filter 'label=com.docker.compose.project' \
+        --format '{{.Names}}' 2>/dev/null | sort || true)
+    LOOSE=$(comm -23 <(printf '%s\n' "$all_names") <(printf '%s\n' "$compose_names") || true)
+    if [ -n "${LOOSE//[[:space:]]/}" ]; then
+        log "NOTE: containers running outside Compose (left to the daemon's own stop):"
+        printf '%s\n' "$LOOSE" | while IFS= read -r c; do [ -n "$c" ] && log "  LOOSE: $c"; done
+    fi
+else
+    log "Docker not present or not running — skipping container teardown."
+fi
+
+if [ -z "$PROJECTS" ]; then
+    log "No running Compose stacks found."
+else
+    log "Running Compose stacks:"
+    printf '%s\n' "$PROJECTS" | while IFS='|' read -r proj cfg; do
+        [ -n "$proj" ] && log "  $proj  ($cfg)"
+    done
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Confirm.
+# ---------------------------------------------------------------------------
+if [ "$DRY_RUN" -eq 1 ]; then
+    log "--dry-run: stopping nothing, not powering down. Exiting."
+    exit 0
+fi
+
+if [ "$ASSUME_YES" -eq 0 ]; then
+    printf 'Stop the above and %s this machine? [y/N] ' "$ACTION"
+    read -r reply
+    case "$reply" in
+        [yY]|[yY][eE][sS]) ;;
+        *) die "cancelled at the prompt — nothing was stopped." ;;
+    esac
+fi
+
+# ---------------------------------------------------------------------------
+# 5. Stop each stack. Compose handles intra-stack ordering via depends_on.
+# ---------------------------------------------------------------------------
+STOP_FAILED=0
+if [ -n "$PROJECTS" ]; then
+    while IFS='|' read -r proj cfg; do
+        [ -n "$proj" ] || continue
+        log "Stopping Compose stack '$proj' (timeout ${STOP_TIMEOUT}s per container)..."
+        # First config file only; Compose records overlays comma-separated.
+        primary_cfg="${cfg%%,*}"
+        if [ -n "$primary_cfg" ] && [ -f "$primary_cfg" ]; then
+            compose_cmd=(docker compose -f "$primary_cfg" -p "$proj")
+        else
+            log "  config file not readable ('$cfg') — addressing by project name only."
+            compose_cmd=(docker compose -p "$proj")
+        fi
+        if "${compose_cmd[@]}" stop -t "$STOP_TIMEOUT" >>"$LOG_FILE" 2>&1; then
+            log "  '$proj' stopped."
+        else
+            log "  WARNING: 'docker compose stop' returned non-zero for '$proj'."
+            STOP_FAILED=1
+        fi
+    done <<< "$PROJECTS"
+fi
+
+# ---------------------------------------------------------------------------
+# 6. Verify nothing was SIGKILLed.
+#    Exit 137 = 128+9 = the grace period expired and Docker killed it. For Postgres
+#    that means the checkpoint did not finish and the next start replays WAL. If this
+#    fires, raise STOP_TIMEOUT rather than ignoring it.
+#
+#    Only containers that were running when we started are checked — a container that
+#    was already stopped days ago may still carry a 137 from that occasion, and
+#    re-reporting it every shutdown would turn this warning into noise.
+# ---------------------------------------------------------------------------
+UNCLEAN=""
+for c in $WAS_RUNNING; do
+    read -r name code <<< "$(docker inspect --format '{{.Name}} {{.State.ExitCode}}' "$c" 2>/dev/null || echo "? ?")"
+    if [ "$code" = "137" ]; then
+        UNCLEAN+="  ${name#/} exited 137 (SIGKILL — grace period expired)"$'\n'
+    fi
+done
+if [ -n "$UNCLEAN" ]; then
+    log "WARNING: at least one container was killed rather than stopping cleanly:"
+    printf '%s' "$UNCLEAN" | while IFS= read -r l; do [ -n "$l" ] && log "$l"; done
+    log "Re-run with a larger STOP_TIMEOUT (currently ${STOP_TIMEOUT}s) next time."
+    STOP_FAILED=1
+fi
+
+if [ "$STOP_FAILED" -eq 0 ]; then
+    log "All Compose stacks stopped cleanly."
+fi
+
+# Flush page cache to disk before handing control to systemd. systemd does this too;
+# it costs nothing here and this box has a history of I/O faults.
+log "Syncing filesystems..."
+sync
+
+log "=== Teardown complete — issuing $ACTION ==="
+log "On boot, dockerd restarts these containers automatically (restart: always)."
+
+exec sudo systemctl "$ACTION"

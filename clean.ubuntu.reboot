@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Created: 2026-08-03 — clean reboot for the Ubuntu fleet boxes (WBU, CWHU).
+#
+# Thin wrapper around clean.ubuntu.shutdown --reboot. All the logic, and the reasoning
+# behind it, lives in that script; this exists so `clean.ubuntu.reboot` is a real
+# command rather than a flag you have to remember. Deliberately not a symlink, so it
+# survives being copied around the fleet rather than silently breaking.
+#
+# Every other flag is passed straight through:
+#   clean.ubuntu.reboot -y
+#   clean.ubuntu.reboot --dry-run
+#   STOP_TIMEOUT=120 clean.ubuntu.reboot
+set -euo pipefail
+
+# Resolve alongside this script, following a symlink if invoked through one, so it
+# works from PATH regardless of cwd.
+SELF="${BASH_SOURCE[0]}"
+while [ -L "$SELF" ]; do
+    target="$(readlink "$SELF")"
+    case "$target" in
+        /*) SELF="$target" ;;
+        *)  SELF="$(dirname "$SELF")/$target" ;;
+    esac
+done
+SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+
+SHUTDOWN="$SCRIPT_DIR/clean.ubuntu.shutdown"
+if [ ! -x "$SHUTDOWN" ]; then
+    echo "clean.ubuntu.reboot: cannot find executable $SHUTDOWN" >&2
+    exit 1
+fi
+
+exec "$SHUTDOWN" --reboot "$@"

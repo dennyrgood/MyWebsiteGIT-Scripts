@@ -105,7 +105,13 @@ ssh -n -i "$SSH_KEY" $SSH_TIMEOUT_OPTS "$DEST_HOST" "mkdir -p '$DEST_PATH'"
 
 log "Syncing images (--delete, --max-delete=$MAX_DELETE)..."
 set +e
-rsync -aq --delete --max-delete="$MAX_DELETE" -e "$SSH_OPTS" "$SRC" "$DEST" >/dev/null 2>>"$LOG_FILE"
+# --no-perms: the UGREEN share forces mode 777 on everything it stores, so the 644 of
+# the source can never be represented there. Measured on the 2026-08-03 initial load —
+# all 283,460 files landed with size and mtime intact and mode 777. Asking rsync to
+# preserve perms against a destination that overrides them is a request that cannot
+# succeed, and it made the verification pass below flag every file in the library as
+# drift. Must stay in sync with the --no-perms on the verification rsync.
+rsync -aq --no-perms --delete --max-delete="$MAX_DELETE" -e "$SSH_OPTS" "$SRC" "$DEST" >/dev/null 2>>"$LOG_FILE"
 RSYNC_EXIT=$?
 set -e
 # Exit 25 is specifically --max-delete tripping. Call that out, because unlike a
@@ -125,8 +131,15 @@ DRIFT_FILE="$WORK_DIR/drift.txt"
 # A clean sync leaves nothing to do on a rerun. Whatever this prints is real
 # remaining difference: new/changed files (>f...), or pending deletions (*deleting).
 # Unchanged directories still itemize as ".d..t......" — those are noise, so drop them.
+#
+# --no-perms must match the sync rsync above. Without it this check was structurally
+# incapable of ever passing: the 2026-08-03 initial load transferred all 283,460 files
+# correctly, and every single one still itemized as ".f...p....." — leading "." meaning
+# no transfer needed, "p" meaning the destination's forced 777 differs from the source's
+# 644. That is a 283,460-line WARNING in cron.log every night, on a backup that is
+# actually perfect, which is precisely how a real drift report gets ignored.
 set +e
-rsync -ain --delete -e "$SSH_OPTS" --out-format='%i|%n' "$SRC" "$DEST" 2>>"$LOG_FILE" \
+rsync -ain --no-perms --delete -e "$SSH_OPTS" --out-format='%i|%n' "$SRC" "$DEST" 2>>"$LOG_FILE" \
     | grep -v '^\.d' > "$DRIFT_FILE"
 set -e
 DRIFT_COUNT=$(wc -l < "$DRIFT_FILE")
