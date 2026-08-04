@@ -15,6 +15,9 @@ at every login, restart automatically if they crash, and log to files.
 | `com.dennis.tmdb-explorer` | TMDB explorer web GUI — raw TMDB lookup/browse (`tmdb_explorer/.venv` python, `tmdb_explorer.py`) | 5035 | `~/Library/Logs/tmdb_explorer.log` |
 | `com.dennis.heartbeat-writer` | `Status/onedrive_heartbeat_writer_all_macs.py` (fleet heartbeat → local `~/fleet_monitor`) | — | `~/Library/Logs/heartbeat_writer.log` |
 | `com.dennis.fleet-metrics-server` | `Status/fleet_metrics_server.py` (serves `~/fleet_monitor` to the checker over Tailscale) | 9100 | `~/Library/Logs/fleet_metrics_server.log` |
+| `com.dennis.mmm-plex-backup` | `MathesMacMini/backup_plex_to_fleetnas.sh` — daily 4am rsync mirror, Mac Mini Plex library → FleetNAS | — | `~/Library/Logs/mmm_plex_backup.log` (script's own detailed log: `~/.cache/fleetnas-sync/plex_*.log`) |
+| `com.dennis.mmm-nightly-summary` | `MathesMacMini/nightly_summary.sh` — daily 7am email report on the Plex backup's health | — | `~/Library/Logs/mmm_nightly_summary.log` |
+| `com.dennis.mmm-health-monitor` | `MathesMacMini/mathes-mac-mini-health-monitor.sh` — every 5 min, Plex/Syncthing process+API health + disk usage, alert/all-clear emails | — | `~/Library/Logs/mmm_health_monitor.log` |
 
 Port notes: 5000 is taken by macOS AirPlay; travel deliberately sits at 5030
 so the 8xxx range stays free for ad-hoc testing (the generic `start_http`
@@ -27,10 +30,11 @@ grant), see `MIGRATION.md`.
 
 `install.sh` is host-aware — it looks at `scutil --get ComputerName` and
 only installs the agents that machine should run: mb (`denniss-macbook-air`,
-primary) gets all 6; mb2 (`denniss-2nd-macbook-air`) and mmm
-(`mathes-mac-mini`) are fleet-only (`heartbeat-writer` +
-`fleet-metrics-server` — no Ollama, no search_adv/search_shows/travel/tmdb
-GUIs). An unrecognized host aborts with an error rather than silently
+primary) gets everything; mb2 (`denniss-2nd-macbook-air`) is fleet-only
+(`heartbeat-writer` + `fleet-metrics-server` — no Ollama, no
+search_adv/search_shows/travel/tmdb GUIs); mmm (`mathes-mac-mini`) gets
+those two plus its own three Plex/Syncthing agents (`mmm-plex-backup`,
+`mmm-nightly-summary`, `mmm-health-monitor`). An unrecognized host aborts with an error rather than silently
 installing everything; add it to the `case` statement in `install.sh` first.
 
 ```bash

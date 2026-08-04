@@ -21,7 +21,11 @@ DEST="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u)"
 
 FLEET_ONLY="com.dennis.heartbeat-writer com.dennis.fleet-metrics-server"
-ALL_AGENTS="com.dennis.search-adv-web com.dennis.search-shows-web com.dennis.travel-http com.dennis.tmdb-explorer $FLEET_ONLY"
+# Mac Mini-specific: FleetNAS Plex backup + its nightly report + the Plex/Syncthing
+# health monitor. None of these apply to mb2 (no Plex/Syncthing there), so they're a
+# separate list rather than folded into FLEET_ONLY.
+MMM_ONLY="$FLEET_ONLY com.dennis.mmm-plex-backup com.dennis.mmm-nightly-summary com.dennis.mmm-health-monitor"
+ALL_AGENTS="com.dennis.search-adv-web com.dennis.search-shows-web com.dennis.travel-http com.dennis.tmdb-explorer $MMM_ONLY"
 
 RAW_HOST="$(scutil --get ComputerName 2>/dev/null || hostname -s)"
 # Normalize: lowercase, spaces -> hyphens. Not every Mac has been renamed to
@@ -32,8 +36,10 @@ HOST="$(echo "$RAW_HOST" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')"
 case "$HOST" in
     denniss-macbook-air)
         LABELS="$ALL_AGENTS" ;;
-    denniss-2nd-macbook-air|mathes-mac-mini)
+    denniss-2nd-macbook-air)
         LABELS="$FLEET_ONLY" ;;
+    mathes-mac-mini)
+        LABELS="$MMM_ONLY" ;;
     *)
         if [[ "${1:-}" == "--all" ]]; then
             LABELS="$ALL_AGENTS"
