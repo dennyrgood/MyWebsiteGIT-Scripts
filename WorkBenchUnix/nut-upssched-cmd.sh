@@ -39,7 +39,10 @@ case "$CASE_NAME" in
         # Proves ONBATT reached upssched and the 10-minute timer is now running.
         # Without this, a working timer and a NOTIFYCMD that never fired produce
         # identical (empty) logs.
-        log "ONBATT — 10-minute shutdown timer STARTED (running as $(id -un))"
+        # Duration deliberately not named here: this same script is installed on
+        # CWHU with a 5-minute timer, and a hardcoded "10-minute" would be a lie
+        # there. The real value lives in upssched.conf on each box.
+        log "ONBATT — on-battery shutdown timer STARTED (running as $(id -un))"
         ;;
 
     online-notice)
