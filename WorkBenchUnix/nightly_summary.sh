@@ -208,6 +208,49 @@ if [ -n "$PREV_BOOT_ID" ]; then
 fi
 BODY+="=== Unclean-reboot post-mortem ===\n${REBOOT_BLOCK}\n\n"
 
+# --- UPS / NUT (added 2026-08-04) ---
+# WBU became the NUT server for UPS #2 on 2026-08-04, and WorkBenchUnix,
+# ChatWorkhorseUnix, ChatWorkhorse and ImageBeast all take their shutdown signal
+# from it. Real-time faults — driver dead, replace-battery — are wbu-health-monitor's
+# job and already surface through the active-alerts line above; this block is the
+# nightly view instead: what the UPS says right now, and whether we ran on battery
+# overnight.
+#
+# On-battery events are deliberately NOT a real-time alert. A brief flicker would
+# page for nothing, and during a genuine outage the box may be shutting down before
+# the mail leaves. But "we were on battery at 3am and you slept through it" is worth
+# knowing over coffee, so it is counted here.
+UPS_BAD=0
+UPS_REASON=""
+UPS_TLDR="  ups: (unavailable)"
+UPS_BLOCK="(upsc returned nothing for ups2@localhost — see wbu-health-monitor alerts)"
+UPS_OUT=$(upsc ups2@localhost 2>/dev/null)
+if [ -n "$UPS_OUT" ]; then
+    U_STATUS=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="ups.status"{print $2}')
+    U_CHARGE=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="battery.charge"{print $2}')
+    U_LOAD=$(printf '%s\n'   "$UPS_OUT" | awk -F': ' '$1=="ups.load"{print $2}')
+    # grep -c exits 1 on zero matches; || true keeps that from emptying the variable.
+    ONBATT_N=$(journalctl -u nut-monitor --since '24 hours ago' --no-pager 2>/dev/null \
+               | grep -c 'running on battery' || true)
+    ONBATT_N=${ONBATT_N:-0}
+    UPS_TLDR="  ups: ${U_STATUS} charge=${U_CHARGE}% load=${U_LOAD}% on-battery-events-24h=${ONBATT_N}"
+    case " $U_STATUS " in
+        *" OB "*) UPS_BAD=1; UPS_REASON="UPS on battery";      UPS_TLDR="⚠️${UPS_TLDR} — ON BATTERY NOW" ;;
+        *" RB "*) UPS_BAD=1; UPS_REASON="UPS replace battery"; UPS_TLDR="⚠️${UPS_TLDR} — REPLACE BATTERY" ;;
+        *)        if [ "$ONBATT_N" -gt 0 ]; then
+                      UPS_TLDR="${UPS_TLDR} (ran on battery in the last 24h)"
+                  else
+                      UPS_TLDR="${UPS_TLDR} ✓"
+                  fi ;;
+    esac
+    UPS_BLOCK="$UPS_OUT"
+else
+    UPS_BAD=1
+    UPS_REASON="UPS unreadable"
+    UPS_TLDR="⚠️  ups: unreadable (upsc ups2@localhost returned nothing)"
+fi
+BODY+="=== UPS (ups2@localhost) ===\n${UPS_BLOCK}\n\n"
+
 # --- Build TLDR (age + last line of each log, plus monitor watchdog lines) ---
 # Age is shown because the last line alone can't be read for staleness: a log that
 # ends in "... complete ===" looks green at a glance whether it ran an hour ago or
@@ -228,6 +271,7 @@ TLDR="============================= TLDR ===============================\n"
 TLDR+="${REBOOT_TLDR}\n"
 TLDR+="${PSTORE_TLDR}\n"
 TLDR+="${SMART_TLDR}\n"
+TLDR+="${UPS_TLDR}\n"
 NOW_TLDR=$(date +%s)
 for LOG in "${LOGS[@]}"; do
     if [ -f "$LOG" ]; then
@@ -261,6 +305,11 @@ elif [ "$REBOOT_BAD" -eq 1 ]; then
     OK=0; REASON="unclean reboot in last 24h"
 elif [ "$SMART_BAD" -eq 1 ]; then
     OK=0; REASON="NVMe SMART warning"
+elif [ "$UPS_BAD" -eq 1 ]; then
+    # Below the hardware/kernel headlines but above the log-string checks: an
+    # unreadable UPS means this box and three others have no shutdown signal at all,
+    # which outranks a stale backup log.
+    OK=0; REASON="$UPS_REASON"
 fi
 
 # Check each log for its expected success string rather than scanning for bad words.

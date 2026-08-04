@@ -12,8 +12,14 @@
 #                 writes while keeping iowait moderate; only a genuinely
 #                 hung/failing device drives iowait high. This stops the backup
 #                 window from paging every night.
+# 2026-08-04 UTC: added UPS/NUT checks. WBU became the NUT server for UPS #2 on
+#                 this date, and three other machines now take their shutdown
+#                 signal from it. Its failure mode is silent: clients that lose
+#                 the server just log comms-lost and quietly have no protection —
+#                 nothing breaks until the power actually goes.
 # WBU system health monitor. Runs every 5 minutes via cron.
-# Checks: iowait, D-state processes, disk usage, missing mounts, docker containers.
+# Checks: iowait, D-state processes, disk usage, missing mounts, docker containers,
+#         UPS readability and replace-battery.
 # Emails on first detection and every 30 minutes while condition persists.
 # Sends all-clear when condition resolves. No email if all healthy.
 
@@ -30,11 +36,20 @@ DOCKER_CONTAINERS=(immich_machine_learning immich_server immich_postgres immich_
 DOCKER_FAIL_THRESHOLD=2   # consecutive failures before alerting (anti-flap on restart)
 DSTATE_FAIL_THRESHOLD=2   # consecutive samples with D-state processes before alerting
 
+UPS_NAME="ups2"
+UPS_HOST="localhost"
+UPS_FAIL_THRESHOLD=2      # consecutive failures before alerting (anti-flap on restart)
+
 # --- Load state (defaults to zero/inactive if file absent) ---
 IOWAIT_LAST_ALERT=0; IOWAIT_ACTIVE=0
 DSTATE_LAST_ALERT=0; DSTATE_ACTIVE=0; DSTATE_STREAK=0
 DISK_LAST_ALERT=0;   DISK_ACTIVE=0
 MOUNT_LAST_ALERT=0;  MOUNT_ACTIVE=0
+# Names are load-bearing: nightly_summary.sh lists active alerts by grepping
+# '_ACTIVE=1$' and stripping the suffix, so the variable prefix IS the label that
+# appears in the morning email. Keep them self-describing.
+UPS_UNREADABLE_LAST_ALERT=0;      UPS_UNREADABLE_ACTIVE=0; UPS_UNREADABLE_STREAK=0
+UPS_REPLACE_BATTERY_LAST_ALERT=0; UPS_REPLACE_BATTERY_ACTIVE=0
 
 # Per-container state initialized dynamically below
 for c in "${DOCKER_CONTAINERS[@]}"; do
@@ -95,6 +110,30 @@ for c in "${DOCKER_CONTAINERS[@]}"; do
         fi
     fi
 done
+
+# --- Check 6: UPS / NUT (added 2026-08-04) ---
+# Queries the UPS rather than checking `systemctl is-active nut-server`. The unit can
+# sit there "active" while the nutdrv_qx driver is dead — a USB reset or a knocked
+# cable takes the driver out and leaves the listener running — so a service check
+# would report green on precisely the failure this exists to catch. Only an actual
+# read proves the whole path works.
+UPS_OUT=$(upsc "${UPS_NAME}@${UPS_HOST}" 2>/dev/null)
+UPS_STATUS=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="ups.status"{print $2}')
+UPS_CHARGE=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="battery.charge"{print $2}')
+
+UPS_UNREADABLE_TRIGGERED=0
+[ -z "$UPS_STATUS" ] && UPS_UNREADABLE_TRIGGERED=1
+
+# RB = replace battery. Worth alerting on because it is the only UPS fault that warns
+# you in advance; everything else in this system only tells you after the power has
+# already gone.
+UPS_REPLACE_BATTERY_TRIGGERED=0
+case " $UPS_STATUS " in *" RB "*) UPS_REPLACE_BATTERY_TRIGGERED=1 ;; esac
+
+# Deliberately NOT alerting on OB (on battery). That is an outage, not a health
+# condition: upssched already handles it, a brief flicker would page for nothing, and
+# the box may be shutting down before the mail leaves. It is reported instead as a
+# nightly count in nightly_summary.sh.
 
 # --- Evaluate each condition: alert / suppress / clear / ok ---
 check_condition() {
@@ -187,6 +226,43 @@ case "$(check_condition $MOUNT_TRIGGERED $MOUNT_LAST_ALERT $MOUNT_ACTIVE)" in
     clear)   MOUNT_ACTIVE=0; CLEAR_BODY+="  - ${BACKUP_C_MOUNT} mount is back\n" ;;
     suppress) MOUNT_ACTIVE=1 ;;
     ok)       MOUNT_ACTIVE=0 ;;
+esac
+
+# UPS unreadable (streak-based: `systemctl restart nut-server` makes upsc fail for a
+# few seconds, and that happened four times during setup on 2026-08-04 alone)
+read verdict new_streak <<< "$(check_condition_streak $UPS_UNREADABLE_TRIGGERED $UPS_UNREADABLE_LAST_ALERT $UPS_UNREADABLE_ACTIVE $UPS_UNREADABLE_STREAK $UPS_FAIL_THRESHOLD)"
+UPS_UNREADABLE_STREAK=$new_streak
+case "$verdict" in
+    alert)
+        UPS_UNREADABLE_LAST_ALERT=$NOW; UPS_UNREADABLE_ACTIVE=1
+        ALERT_BODY+="=== UPS UNREADABLE ===\n"
+        ALERT_BODY+="upsc ${UPS_NAME}@${UPS_HOST} returned nothing for ${new_streak} consecutive checks (~$((new_streak * 5)) min).\n"
+        ALERT_BODY+="WBU is the NUT server for UPS #2. While this is broken, WorkBenchUnix,\n"
+        ALERT_BODY+="ChatWorkhorseUnix, ChatWorkhorse and ImageBeast have NO shutdown signal.\n\n"
+        ALERT_BODY+="Check, in order:\n"
+        ALERT_BODY+="  1. lsusb | grep 0665:5161        -- is the UPS still on the USB bus?\n"
+        ALERT_BODY+="  2. systemctl status nut-server   -- may say active even when the driver is dead\n"
+        ALERT_BODY+="  3. journalctl -u nut-server -n 50\n"
+        ALERT_BODY+="  4. sudo systemctl restart nut-server\n\n"
+        ;;
+    clear)   UPS_UNREADABLE_ACTIVE=0; CLEAR_BODY+="  - UPS readable again (${UPS_STATUS}, ${UPS_CHARGE}%)\n" ;;
+    suppress) UPS_UNREADABLE_ACTIVE=1 ;;
+    wait|ok) UPS_UNREADABLE_ACTIVE=0 ;;
+esac
+
+# UPS replace-battery. No streak: RB is a sticky fault, not a transient, and one
+# sample is enough. Uses the 30-minute re-alert interval like everything else.
+case "$(check_condition $UPS_REPLACE_BATTERY_TRIGGERED $UPS_REPLACE_BATTERY_LAST_ALERT $UPS_REPLACE_BATTERY_ACTIVE)" in
+    alert)
+        UPS_REPLACE_BATTERY_LAST_ALERT=$NOW; UPS_REPLACE_BATTERY_ACTIVE=1
+        ALERT_BODY+="=== UPS REPLACE BATTERY ===\n"
+        ALERT_BODY+="${UPS_NAME} reports RB (status: ${UPS_STATUS}, charge: ${UPS_CHARGE}%).\n"
+        ALERT_BODY+="The UPS believes its battery can no longer hold a useful charge. Runtime\n"
+        ALERT_BODY+="during the next outage may be far shorter than the 10-minute timer assumes.\n\n"
+        ;;
+    clear)   UPS_REPLACE_BATTERY_ACTIVE=0; CLEAR_BODY+="  - UPS no longer reporting replace-battery\n" ;;
+    suppress) UPS_REPLACE_BATTERY_ACTIVE=1 ;;
+    ok)       UPS_REPLACE_BATTERY_ACTIVE=0 ;;
 esac
 
 # --- Evaluate each docker container ---
@@ -295,6 +371,11 @@ What to do:
     echo "DISK_ACTIVE=$DISK_ACTIVE"
     echo "MOUNT_LAST_ALERT=$MOUNT_LAST_ALERT"
     echo "MOUNT_ACTIVE=$MOUNT_ACTIVE"
+    echo "UPS_UNREADABLE_LAST_ALERT=$UPS_UNREADABLE_LAST_ALERT"
+    echo "UPS_UNREADABLE_ACTIVE=$UPS_UNREADABLE_ACTIVE"
+    echo "UPS_UNREADABLE_STREAK=$UPS_UNREADABLE_STREAK"
+    echo "UPS_REPLACE_BATTERY_LAST_ALERT=$UPS_REPLACE_BATTERY_LAST_ALERT"
+    echo "UPS_REPLACE_BATTERY_ACTIVE=$UPS_REPLACE_BATTERY_ACTIVE"
     for c in "${DOCKER_CONTAINERS[@]}"; do
         for k in MISSING_${c}_LAST_ALERT MISSING_${c}_ACTIVE MISSING_${c}_STREAK \
                  UNHEALTHY_${c}_LAST_ALERT UNHEALTHY_${c}_ACTIVE UNHEALTHY_${c}_STREAK; do

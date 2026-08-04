@@ -27,10 +27,26 @@ DOCKER_CONTAINERS=(immich_server immich_postgres immich_redis)
 DOCKER_FAIL_THRESHOLD=2
 DSTATE_FAIL_THRESHOLD=2
 
+# UPS (added 2026-08-04). CWHU is a NUT client of ups2 on WorkBenchUnix — the UPS
+# that powers its host, and therefore this VM.
+#
+# This checks REACHABILITY over the network, which WBU's own monitor cannot do.
+# WBU queries ups2@localhost; that proves the driver works, but not that upsd is
+# listening on the LAN interface or that anything can get to it. A LISTEN
+# misconfiguration, or someone enabling ufw on WBU later, would break every client
+# while WBU's own check stayed green. This is the check that validates what the
+# clients actually depend on.
+UPS_NAME="ups2"
+UPS_HOST="192.168.178.242"   # WBU LAN address; works whether this VM is bridged or NAT'd
+UPS_FAIL_THRESHOLD=2
+
 # --- Load state (defaults to zero/inactive if file absent) ---
 IOWAIT_LAST_ALERT=0; IOWAIT_ACTIVE=0
 DSTATE_LAST_ALERT=0; DSTATE_ACTIVE=0; DSTATE_STREAK=0
 DISK_LAST_ALERT=0;   DISK_ACTIVE=0
+# Name is load-bearing: the nightly summary lists active alerts by grepping
+# '_ACTIVE=1$' and stripping the suffix, so this prefix is the label in the email.
+UPS_UNREACHABLE_LAST_ALERT=0; UPS_UNREACHABLE_ACTIVE=0; UPS_UNREACHABLE_STREAK=0
 
 # Per-container state initialized dynamically below
 for c in "${DOCKER_CONTAINERS[@]}"; do
@@ -75,6 +91,21 @@ for c in "${DOCKER_CONTAINERS[@]}"; do
         fi
     fi
 done
+
+# --- Check 5: UPS reachable on WorkBenchUnix (added 2026-08-04) ---
+# Silent no-op until nut-client is actually installed here (see
+# ChatWorkhorseUnix/setup-nut-client.sh). Without this guard the check would alert
+# every five minutes from the moment this script lands until NUT is deployed, and an
+# alert that fires before the thing it watches exists just teaches you to ignore it.
+UPS_UNREACHABLE_TRIGGERED=0
+UPS_STATUS=""
+UPS_CHARGE=""
+if command -v upsc >/dev/null 2>&1; then
+    UPS_OUT=$(upsc "${UPS_NAME}@${UPS_HOST}" 2>/dev/null)
+    UPS_STATUS=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="ups.status"{print $2}')
+    UPS_CHARGE=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="battery.charge"{print $2}')
+    [ -z "$UPS_STATUS" ] && UPS_UNREACHABLE_TRIGGERED=1
+fi
 
 # --- Evaluate each condition: alert / suppress / clear / ok ---
 check_condition() {
@@ -154,6 +185,30 @@ case "$(check_condition $DISK_TRIGGERED $DISK_LAST_ALERT $DISK_ACTIVE)" in
     clear)    DISK_ACTIVE=0; CLEAR_BODY+="  - disk usage returned to normal\n" ;;
     suppress) DISK_ACTIVE=1 ;;
     ok)       DISK_ACTIVE=0 ;;
+esac
+
+# UPS unreachable on WBU (streak-based: restarting nut-server on WBU drops clients
+# for a few seconds, and WBU reboots for its own reasons)
+read verdict new_streak <<< "$(check_condition_streak $UPS_UNREACHABLE_TRIGGERED $UPS_UNREACHABLE_LAST_ALERT $UPS_UNREACHABLE_ACTIVE $UPS_UNREACHABLE_STREAK $UPS_FAIL_THRESHOLD)"
+UPS_UNREACHABLE_STREAK=$new_streak
+case "$verdict" in
+    alert)
+        UPS_UNREACHABLE_LAST_ALERT=$NOW; UPS_UNREACHABLE_ACTIVE=1
+        ALERT_BODY+="=== UPS UNREACHABLE ===\n"
+        ALERT_BODY+="Cannot read ${UPS_NAME}@${UPS_HOST} for ${new_streak} consecutive checks (~$((new_streak * 5)) min).\n"
+        ALERT_BODY+="This VM has no shutdown signal: on a power failure it would run until its\n"
+        ALERT_BODY+="host shut down on top of it, with Postgres live.\n\n"
+        ALERT_BODY+="Note this may be a NETWORK problem rather than a UPS one — WBU's own monitor\n"
+        ALERT_BODY+="checks ups2@localhost and would stay green if only reachability is broken.\n\n"
+        ALERT_BODY+="Check:\n"
+        ALERT_BODY+="  1. upsc ${UPS_NAME}@${UPS_HOST}          -- from here\n"
+        ALERT_BODY+="  2. Is WBU up at all?\n"
+        ALERT_BODY+="  3. On WBU: sudo ufw status               -- must be inactive, or 3493 allowed\n"
+        ALERT_BODY+="  4. On WBU: systemctl status nut-server\n\n"
+        ;;
+    clear)    UPS_UNREACHABLE_ACTIVE=0; CLEAR_BODY+="  - UPS reachable again (${UPS_STATUS}, ${UPS_CHARGE}%)\n" ;;
+    suppress) UPS_UNREACHABLE_ACTIVE=1 ;;
+    wait|ok)  UPS_UNREACHABLE_ACTIVE=0 ;;
 esac
 
 # Docker containers
@@ -254,6 +309,9 @@ host stays up.
     echo "DSTATE_STREAK=$DSTATE_STREAK"
     echo "DISK_LAST_ALERT=$DISK_LAST_ALERT"
     echo "DISK_ACTIVE=$DISK_ACTIVE"
+    echo "UPS_UNREACHABLE_LAST_ALERT=$UPS_UNREACHABLE_LAST_ALERT"
+    echo "UPS_UNREACHABLE_ACTIVE=$UPS_UNREACHABLE_ACTIVE"
+    echo "UPS_UNREACHABLE_STREAK=$UPS_UNREACHABLE_STREAK"
     for c in "${DOCKER_CONTAINERS[@]}"; do
         for k in MISSING_${c}_LAST_ALERT MISSING_${c}_ACTIVE MISSING_${c}_STREAK \
                  UNHEALTHY_${c}_LAST_ALERT UNHEALTHY_${c}_ACTIVE UNHEALTHY_${c}_STREAK; do
