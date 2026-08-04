@@ -18,6 +18,8 @@ STALE_SECS=108000   # 30h — backup cron fires ~4am, report runs a few hours la
                      # a healthy log is a few hours old, a missed night pushes past 24h.
                      # Padded beyond WBU's 24h since this job's steady-state runtime
                      # (large media files over RAID5) is less predictable than WBU's.
+MONITOR_STATE="/tmp/mathes-mac-mini-monitor-state.tmp"
+MONITOR_STALE_SECS=600   # 10 min — mmm-health-monitor runs every 5 min via launchd
 
 PLEX_LOG=$(ls -1t "$HOME/.cache/fleetnas-sync/plex_"*.log 2>/dev/null | head -1)
 PLEX_LOG=${PLEX_LOG:-"$HOME/.cache/fleetnas-sync/plex_NONE.log"}
@@ -47,17 +49,69 @@ if [ -f "$PLEX_LOG" ]; then
     AGE=$(fmt_age "$AGE_SECS")
     TLDR+="  $(basename "$PLEX_LOG"): [${AGE} ago] $(tail -1 "$PLEX_LOG")\n"
 
-    if ! tail -5 "$PLEX_LOG" | grep -q "source1 exit=0, source2 exit=0"; then
+    # rsync exit 24 ("vanished source files") is benign — Plex actively renaming/
+    # scanning library files mid-transfer, not a real failure (confirmed 2026-08-04:
+    # the very first full run hit exactly this on source1 and completed correctly).
+    # Anything else non-zero is a real problem.
+    COMPLETE_LINE=$(tail -5 "$PLEX_LOG" | grep "=== Plex sync to FleetNAS complete")
+    S1_EXIT=$(echo "$COMPLETE_LINE" | grep -oE 'source1 exit=[0-9]+' | sed 's/.*exit=//')
+    S2_EXIT=$(echo "$COMPLETE_LINE" | grep -oE 'source2 exit=[0-9]+' | sed 's/.*exit=//')
+    VANISHED_COUNT=$(grep -c "file has vanished" "$PLEX_LOG" 2>/dev/null)
+    VANISHED_COUNT=${VANISHED_COUNT:-0}
+    if [ -z "$COMPLETE_LINE" ]; then
         OK=0; REASON="Plex sync to FleetNAS did not complete cleanly"
+    elif ! [[ "$S1_EXIT" =~ ^(0|24)$ ]] || ! [[ "$S2_EXIT" =~ ^(0|24)$ ]]; then
+        OK=0; REASON="Plex sync to FleetNAS did not complete cleanly (source1 exit=${S1_EXIT}, source2 exit=${S2_EXIT})"
     elif [ "$AGE_SECS" -gt "$STALE_SECS" ]; then
         OK=0; REASON="Plex sync log stale (${AGE})"
+    elif [ "$VANISHED_COUNT" -gt 0 ]; then
+        # Transfer succeeded (exit 0/24), but don't fold this into a bare "all
+        # healthy" — files missing from the NAS copy is worth seeing even when
+        # it's the benign case (Plex renamed/deleted them mid-scan). Not an
+        # alarm (still ✅), just visible instead of buried in the log body.
+        REASON="${VANISHED_COUNT} file(s) vanished during sync — verify if unexpected (see log below)"
     fi
 else
     TLDR+="  plex_*.log: (file not found)\n"
     OK=0; REASON="Plex sync log missing — cron may not have run yet"
 fi
+
+# --- Health monitor watchdog (freshness + active alerts) in TLDR ---
+if [ -f "$MONITOR_STATE" ]; then
+    MONITOR_AGE=$(( $(date +%s) - $(stat -f %m "$MONITOR_STATE") ))
+    if [ "$MONITOR_AGE" -gt "$MONITOR_STALE_SECS" ]; then
+        TLDR+="  mmm-health-monitor: ⚠️ stale (last-run $((MONITOR_AGE / 60))m ago; threshold $((MONITOR_STALE_SECS / 60))m)\n"
+        [ "$OK" -eq 1 ] && { OK=0; REASON="health monitor stale/missing"; }
+    else
+        TLDR+="  mmm-health-monitor: last-run $((MONITOR_AGE / 60))m ago ✓\n"
+    fi
+    MONITOR_ACTIVE=$(grep "_ACTIVE=1" "$MONITOR_STATE" 2>/dev/null)
+    if [ -n "$MONITOR_ACTIVE" ]; then
+        TLDR+="  mmm-health-monitor: ⚠️ active alerts\n"
+        [ "$OK" -eq 1 ] && { OK=0; REASON="active health alerts"; }
+    else
+        TLDR+="  mmm-health-monitor: no active alerts ✓\n"
+    fi
+else
+    TLDR+="  mmm-health-monitor: ⚠️ state file missing ($MONITOR_STATE)\n"
+    [ "$OK" -eq 1 ] && { OK=0; REASON="health monitor stale/missing"; }
+fi
+
 TLDR+="===================================================================\n\n"
 BODY="${TLDR}${BODY}"
+
+# --- Health monitor state (full dump, appended at the end) ---
+BODY+="=== HEALTH MONITOR STATE ===\n"
+if [ -f "$MONITOR_STATE" ]; then
+    if [ -n "$MONITOR_ACTIVE" ]; then
+        BODY+="ACTIVE ALERTS:\n$MONITOR_ACTIVE\n"
+    else
+        BODY+="No active alerts.\n"
+    fi
+    BODY+="\n$(cat "$MONITOR_STATE")\n"
+else
+    BODY+="⚠️ WARNING: state file not found — health monitor has not run\n"
+fi
 
 if [ "$OK" -eq 1 ]; then EMOJI="✅"; else EMOJI="⚠️"; fi
 SUBJECT="${EMOJI} Mac Mini nightly $(date '+%Y-%m-%d') — ${REASON}"
