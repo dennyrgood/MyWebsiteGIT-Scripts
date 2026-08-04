@@ -5,6 +5,8 @@ Not implemented. This captures everything learned building/deploying
 2026-07-29), translated to what a Mac/Ubuntu equivalent would need. Written
 so a future session (or you) can pick this up without re-deriving any of it.
 
+Note, the ubuntu machines and the mac mini have a health check monitor that this could be added to/extended in.
+
 ## Why this wasn't just "port the .ps1"
 
 The Windows watchdog exists because Task Scheduler has **no native
