@@ -13,6 +13,19 @@ cp -p ~/immich-app/.env "$DEST/.env"
 crontab -l > "$DEST/crontab-l-dhm.txt"
 sudo crontab -l > "$DEST/crontab-l-root.txt"
 
+# NUT client (UPS clean-shutdown, added 2026-08-04). upsmon.conf is captured IN FULL,
+# password included: it holds the upsd credential for the `nut` account on FleetNAS,
+# and a redacted copy would not rebuild the box. That is only acceptable because
+# fleet-configs is private — do not copy this file into the scripts repo, which is
+# not. Mode 600 in the repo to match /etc/nut's 640 root:nut.
+#
+# upssched.conf and upssched-cmd are deliberately NOT copied: they carry no secrets
+# and are version-controlled in the scripts repo as WorkBenchUnix/nut-upssched.conf
+# and nut-upssched-cmd.sh — same rule as fleet_metrics_server below.
+sudo install -o "$(id -un)" -g "$(id -gn)" -m 600 /etc/nut/upsmon.conf "$DEST/nut-upsmon.conf"
+sudo install -o "$(id -un)" -g "$(id -gn)" -m 644 /etc/nut/nut.conf    "$DEST/nut-nut.conf"
+systemctl is-enabled nut-monitor > "$DEST/nut-monitor.enabled.txt" 2>&1 || true
+
 # Fleet metrics server (systemd). Unit + writer + fleet_metrics_server.py are all
 # version-controlled in the scripts repo (Status/), and the writer's cron line is
 # captured above — so nothing new to copy. We only record that the server is a
