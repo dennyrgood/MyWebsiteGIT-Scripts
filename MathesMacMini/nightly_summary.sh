@@ -18,6 +18,8 @@ STALE_SECS=108000   # 30h — backup cron fires ~4am, report runs a few hours la
                      # a healthy log is a few hours old, a missed night pushes past 24h.
                      # Padded beyond WBU's 24h since this job's steady-state runtime
                      # (large media files over RAID5) is less predictable than WBU's.
+MONITOR_STATE="/tmp/mathes-mac-mini-monitor-state.tmp"
+MONITOR_STALE_SECS=600   # 10 min — mmm-health-monitor runs every 5 min via launchd
 
 PLEX_LOG=$(ls -1t "$HOME/.cache/fleetnas-sync/plex_"*.log 2>/dev/null | head -1)
 PLEX_LOG=${PLEX_LOG:-"$HOME/.cache/fleetnas-sync/plex_NONE.log"}
@@ -73,8 +75,43 @@ else
     TLDR+="  plex_*.log: (file not found)\n"
     OK=0; REASON="Plex sync log missing — cron may not have run yet"
 fi
+
+# --- Health monitor watchdog (freshness + active alerts) in TLDR ---
+if [ -f "$MONITOR_STATE" ]; then
+    MONITOR_AGE=$(( $(date +%s) - $(stat -f %m "$MONITOR_STATE") ))
+    if [ "$MONITOR_AGE" -gt "$MONITOR_STALE_SECS" ]; then
+        TLDR+="  mmm-health-monitor: ⚠️ stale (last-run $((MONITOR_AGE / 60))m ago; threshold $((MONITOR_STALE_SECS / 60))m)\n"
+        [ "$OK" -eq 1 ] && { OK=0; REASON="health monitor stale/missing"; }
+    else
+        TLDR+="  mmm-health-monitor: last-run $((MONITOR_AGE / 60))m ago ✓\n"
+    fi
+    MONITOR_ACTIVE=$(grep "_ACTIVE=1" "$MONITOR_STATE" 2>/dev/null)
+    if [ -n "$MONITOR_ACTIVE" ]; then
+        TLDR+="  mmm-health-monitor: ⚠️ active alerts\n"
+        [ "$OK" -eq 1 ] && { OK=0; REASON="active health alerts"; }
+    else
+        TLDR+="  mmm-health-monitor: no active alerts ✓\n"
+    fi
+else
+    TLDR+="  mmm-health-monitor: ⚠️ state file missing ($MONITOR_STATE)\n"
+    [ "$OK" -eq 1 ] && { OK=0; REASON="health monitor stale/missing"; }
+fi
+
 TLDR+="===================================================================\n\n"
 BODY="${TLDR}${BODY}"
+
+# --- Health monitor state (full dump, appended at the end) ---
+BODY+="=== HEALTH MONITOR STATE ===\n"
+if [ -f "$MONITOR_STATE" ]; then
+    if [ -n "$MONITOR_ACTIVE" ]; then
+        BODY+="ACTIVE ALERTS:\n$MONITOR_ACTIVE\n"
+    else
+        BODY+="No active alerts.\n"
+    fi
+    BODY+="\n$(cat "$MONITOR_STATE")\n"
+else
+    BODY+="⚠️ WARNING: state file not found — health monitor has not run\n"
+fi
 
 if [ "$OK" -eq 1 ]; then EMOJI="✅"; else EMOJI="⚠️"; fi
 SUBJECT="${EMOJI} Mac Mini nightly $(date '+%Y-%m-%d') — ${REASON}"
