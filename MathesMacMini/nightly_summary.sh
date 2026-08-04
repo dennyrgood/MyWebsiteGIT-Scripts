@@ -47,10 +47,27 @@ if [ -f "$PLEX_LOG" ]; then
     AGE=$(fmt_age "$AGE_SECS")
     TLDR+="  $(basename "$PLEX_LOG"): [${AGE} ago] $(tail -1 "$PLEX_LOG")\n"
 
-    if ! tail -5 "$PLEX_LOG" | grep -q "source1 exit=0, source2 exit=0"; then
+    # rsync exit 24 ("vanished source files") is benign — Plex actively renaming/
+    # scanning library files mid-transfer, not a real failure (confirmed 2026-08-04:
+    # the very first full run hit exactly this on source1 and completed correctly).
+    # Anything else non-zero is a real problem.
+    COMPLETE_LINE=$(tail -5 "$PLEX_LOG" | grep "=== Plex sync to FleetNAS complete")
+    S1_EXIT=$(echo "$COMPLETE_LINE" | grep -oE 'source1 exit=[0-9]+' | sed 's/.*exit=//')
+    S2_EXIT=$(echo "$COMPLETE_LINE" | grep -oE 'source2 exit=[0-9]+' | sed 's/.*exit=//')
+    VANISHED_COUNT=$(grep -c "file has vanished" "$PLEX_LOG" 2>/dev/null)
+    VANISHED_COUNT=${VANISHED_COUNT:-0}
+    if [ -z "$COMPLETE_LINE" ]; then
         OK=0; REASON="Plex sync to FleetNAS did not complete cleanly"
+    elif ! [[ "$S1_EXIT" =~ ^(0|24)$ ]] || ! [[ "$S2_EXIT" =~ ^(0|24)$ ]]; then
+        OK=0; REASON="Plex sync to FleetNAS did not complete cleanly (source1 exit=${S1_EXIT}, source2 exit=${S2_EXIT})"
     elif [ "$AGE_SECS" -gt "$STALE_SECS" ]; then
         OK=0; REASON="Plex sync log stale (${AGE})"
+    elif [ "$VANISHED_COUNT" -gt 0 ]; then
+        # Transfer succeeded (exit 0/24), but don't fold this into a bare "all
+        # healthy" — files missing from the NAS copy is worth seeing even when
+        # it's the benign case (Plex renamed/deleted them mid-scan). Not an
+        # alarm (still ✅), just visible instead of buried in the log body.
+        REASON="${VANISHED_COUNT} file(s) vanished during sync — verify if unexpected (see log below)"
     fi
 else
     TLDR+="  plex_*.log: (file not found)\n"
