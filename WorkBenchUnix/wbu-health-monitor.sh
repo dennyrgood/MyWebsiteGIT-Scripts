@@ -1,5 +1,5 @@
 #!/bin/bash
-# /srv/immich/scripts/wbu-health-monitor.sh
+# /home/dhm/repos/scripts/WorkBenchUnix/wbu-health-monitor.sh
 # 2026-07-01 UTC
 # 2026-07-12 UTC: added docker container health checks (missing + unhealthy)
 #                 for all four Immich containers, with 2-consecutive-failure

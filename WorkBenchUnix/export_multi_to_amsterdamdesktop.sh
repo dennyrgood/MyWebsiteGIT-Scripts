@@ -113,5 +113,5 @@ fi
 log "=== Export sync to AmsterdamDesktop (export_multi) complete ==="
 
 # --- Cron placeholder — NOT ACTIVE, comment-only quick-reference ---
-# 0 7 * * * /srv/immich/scripts/export_multi_to_amsterdamdesktop.sh >> /home/dhm/.cache/export-sync/cron.log 2>&1
+# 0 7 * * * /home/dhm/repos/scripts/WorkBenchUnix/export_multi_to_amsterdamdesktop.sh >> /home/dhm/.cache/export-sync/cron.log 2>&1
 # 2026-06-30 UTC: path updated win-d -> immich-data (mount rename)

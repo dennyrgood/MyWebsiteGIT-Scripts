@@ -1,5 +1,5 @@
 #!/bin/bash
-# /srv/immich/scripts/monthly_motd_summary.sh
+# /home/dhm/repos/scripts/WorkBenchUnix/monthly_motd_summary.sh
 # 2026-07-02 HH:MM UTC
 # Monthly MOTD/system status email — sends via msmtp.
 

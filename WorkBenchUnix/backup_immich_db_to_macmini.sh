@@ -77,5 +77,5 @@ log "Prune complete. $REMAINING dump file(s) remain at destination (expected: 1)
 log "=== Postgres dump sync to Mac Mini complete ==="
 
 # --- Cron placeholder — converted to live weekly cron 2026-06-30, see crontab ---
-# 0 7 * * 5 /srv/immich/scripts/backup_immich_db_to_macmini.sh >> /home/dhm/.cache/export-sync/cron.log 2>&1
+# 0 7 * * 5 /home/dhm/repos/scripts/WorkBenchUnix/backup_immich_db_to_macmini.sh >> /home/dhm/.cache/export-sync/cron.log 2>&1
 # 2026-06-30 UTC: path updated win-d -> immich-data (mount rename)
