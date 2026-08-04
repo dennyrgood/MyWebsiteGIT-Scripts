@@ -27,6 +27,17 @@
 # alone). If this script is ever re-run as a repeatable sync, decide deliberately whether
 # --delete belongs, the same way the fleetnas image/db scripts do (with --max-delete as a
 # guard rail), rather than adding it back reflexively.
+#
+# --exclude=Immich: F:\Media\Immich (populated by WorkBenchUnix/export_flat_to_
+# amsterdamdesktop.sh and export_multi_to_amsterdamdesktop.sh) is out of scope for this
+# push — confirmed 2026-08-04 the NAS's photo_legacy/Immich already holds this content
+# (dated 2026-06-29, matching when those export scripts started populating it), and Immich
+# has its own separate backup path to FleetNAS anyway (WorkBenchUnix/backup_immich_
+# images_to_fleetnas.sh, targeting the immich share, not photo_legacy). A partial run on
+# 2026-08-04 had already started re-copying Immich/export_flat/Archive/2001/* into
+# photo_legacy/Immich before being caught and stopped — harmless (rsync without --delete
+# only adds/updates matching files), but excluded going forward to avoid the wasted
+# bandwidth/time on a multi-hundred-GB directory that doesn't need to move again.
 set -e
 
 SRC="/mnt/f/Media/"
@@ -36,6 +47,7 @@ SSH_TIMEOUT_OPTS="-o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCo
 SSH_OPTS="ssh -i $SSH_KEY $SSH_TIMEOUT_OPTS"
 DEST_PATH="/volume1/photo_legacy"
 DEST_RSYNC="$DEST_HOST:photo_legacy/"
+RSYNC_EXCLUDE="--exclude=Immich"
 
 LOG_DIR="$HOME/.cache/fleetnas-sync"
 TS=$(date -u +%Y%m%d_%H%M%SZ)
@@ -52,7 +64,7 @@ ssh -n -i "$SSH_KEY" $SSH_TIMEOUT_OPTS "$DEST_HOST" "mkdir -p '$DEST_PATH'"
 
 log "Syncing $SRC -> $DEST_RSYNC ..."
 set +e
-rsync -av -e "$SSH_OPTS" "$SRC" "$DEST_RSYNC" >>"$LOG_FILE" 2>&1
+rsync -av $RSYNC_EXCLUDE -e "$SSH_OPTS" "$SRC" "$DEST_RSYNC" >>"$LOG_FILE" 2>&1
 RSYNC_EXIT=$?
 set -e
 if [ "$RSYNC_EXIT" -ne 0 ]; then
@@ -62,7 +74,7 @@ fi
 log "Sync complete. Verifying with a dry-run pass..."
 
 set +e
-rsync -ain -e "$SSH_OPTS" --out-format='%i|%n' "$SRC" "$DEST_RSYNC" 2>>"$LOG_FILE" \
+rsync -ain $RSYNC_EXCLUDE -e "$SSH_OPTS" --out-format='%i|%n' "$SRC" "$DEST_RSYNC" 2>>"$LOG_FILE" \
     | grep -v '^\.d' > "$LOG_DIR/amsdt_media_drift_${TS}.txt"
 set -e
 DRIFT_COUNT=$(wc -l < "$LOG_DIR/amsdt_media_drift_${TS}.txt")
