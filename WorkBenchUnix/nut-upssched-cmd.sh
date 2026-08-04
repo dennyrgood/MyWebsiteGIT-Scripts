@@ -35,6 +35,17 @@ case "$CASE_NAME" in
         fi
         ;;
 
+    onbatt-notice)
+        # Proves ONBATT reached upssched and the 10-minute timer is now running.
+        # Without this, a working timer and a NOTIFYCMD that never fired produce
+        # identical (empty) logs.
+        log "ONBATT — 10-minute shutdown timer STARTED (running as $(id -un))"
+        ;;
+
+    online-notice)
+        log "ONLINE — shutdown timer CANCELLED, mains are back."
+        ;;
+
     commok-selftest)
         # Proves NOTIFYCMD -> upssched -> this script works, without a power cut.
         # Reports the effective user, which is the thing that decides whether the
