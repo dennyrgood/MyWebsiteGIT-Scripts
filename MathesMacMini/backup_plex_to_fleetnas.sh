@@ -83,10 +83,23 @@ log "=== Starting Plex sync: Mac Mini -> FleetNAS ==="
 
 ssh -n -i "$SSH_KEY" $SSH_TIMEOUT_OPTS "$DEST_HOST" "mkdir -p '$DEST_PATH/MacMiniExt4g' '$DEST_PATH/Expansion'"
 
+# 2026-08-05 UTC — added --itemize-changes so the log actually shows what happened
+# (new/updated/deleted files), not just start/end + exit code — a silent no-op run
+# and one that quietly deleted 500 files under --delete looked identical before this.
+# First real run showed EVERY file (6596 entries) itemized as changed — turned out to
+# be pure noise: itemize code ".f...p....." on every single file, meaning only the
+# permissions flag differed (content/size/time all unchanged). -a's -p never actually
+# lands on the NAS side (likely the same non-root-account limitation as the earlier
+# "cannot set euid as root" quirk) and gets endlessly re-flagged as pending. Added
+# --no-perms to stop attempting it at all — not meaningful for exFAT-sourced media
+# files anyway — plus a matching grep filter as a backstop for any that still slip
+# through. Piped through grep to drop that noise plus "unchanged directory" lines
+# (^.d...), which together dominated the output and buried real changes.
+# PIPESTATUS[0] (not $?) captures rsync's own exit code, not grep's.
 log "Syncing $SRC1 -> $DEST1 ..."
 set +e
-"$RSYNC" -a --delete --timeout="$RSYNC_TIMEOUT" --rsync-path="$RSYNC_PATH_REMOTE" -e "$SSH_OPTS" "$SRC1" "$DEST1" >>"$LOG_FILE" 2>&1
-RSYNC1_EXIT=$?
+"$RSYNC" -a --no-perms --delete --itemize-changes --timeout="$RSYNC_TIMEOUT" --rsync-path="$RSYNC_PATH_REMOTE" -e "$SSH_OPTS" "$SRC1" "$DEST1" 2>&1 | grep -vE '^\.d|^\.f\.\.\.p' >>"$LOG_FILE"
+RSYNC1_EXIT=${PIPESTATUS[0]}
 set -e
 if [ "$RSYNC1_EXIT" -ne 0 ]; then
     log "WARNING: rsync (source 1) exited with code $RSYNC1_EXIT. See $LOG_FILE."
@@ -94,8 +107,8 @@ fi
 
 log "Syncing $SRC2 -> $DEST2 ..."
 set +e
-"$RSYNC" -a --delete --timeout="$RSYNC_TIMEOUT" --rsync-path="$RSYNC_PATH_REMOTE" -e "$SSH_OPTS" "$SRC2" "$DEST2" >>"$LOG_FILE" 2>&1
-RSYNC2_EXIT=$?
+"$RSYNC" -a --no-perms --delete --itemize-changes --timeout="$RSYNC_TIMEOUT" --rsync-path="$RSYNC_PATH_REMOTE" -e "$SSH_OPTS" "$SRC2" "$DEST2" 2>&1 | grep -vE '^\.d|^\.f\.\.\.p' >>"$LOG_FILE"
+RSYNC2_EXIT=${PIPESTATUS[0]}
 set -e
 if [ "$RSYNC2_EXIT" -ne 0 ]; then
     log "WARNING: rsync (source 2) exited with code $RSYNC2_EXIT. See $LOG_FILE."
