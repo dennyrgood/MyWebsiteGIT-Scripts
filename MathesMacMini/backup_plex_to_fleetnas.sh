@@ -14,8 +14,21 @@
 # prefix ("plex/MacMiniExt4g/"). Plain ssh commands (mkdir below) are unaffected and
 # still need the real absolute path. Ref:
 # https://www.kevinhooke.com/2025/10/19/rsync-files-to-a-ugreen-nas/
+# 2026-08-05 UTC — pinned RSYNC to the full Homebrew path. First real launchd-fired
+# run (as opposed to the manual nohup'd first sync) failed both sources with
+# "Operation not permitted" on open() — two compounding causes: (1) launchd's minimal
+# PATH has no /opt/homebrew/bin, so bare `rsync` silently resolved to Apple's bundled
+# /usr/bin/rsync instead of the Homebrew 3.4.4 the manual run actually used; (2)
+# whichever rsync launchd invokes is a fresh, ungranted TCC "responsible process" —
+# Terminal.app's Full Disk Access grant does not carry over to a launchd-spawned
+# process, so it needs its own explicit grant (System Settings -> Privacy & Security
+# -> Full Disk Access -> add /opt/homebrew/bin/rsync). EPERM ("Operation not
+# permitted"), not EACCES ("Permission denied"), is the TCC-denial signature. Full
+# path here fixes cause (1); cause (2) has to be granted once via the GUI, can't be
+# scripted.
 set -e
 
+RSYNC="/opt/homebrew/bin/rsync"
 SRC1="/Volumes/MacMiniExt4g/PlexServer/"
 SRC2="/Volumes/Expansion/plexServer/"
 DEST_HOST="dhm@192.168.178.123"
@@ -41,7 +54,7 @@ ssh -n -i "$SSH_KEY" $SSH_TIMEOUT_OPTS "$DEST_HOST" "mkdir -p '$DEST_PATH/MacMin
 
 log "Syncing $SRC1 -> $DEST1 ..."
 set +e
-rsync -a --delete -e "$SSH_OPTS" "$SRC1" "$DEST1" >>"$LOG_FILE" 2>&1
+"$RSYNC" -a --delete -e "$SSH_OPTS" "$SRC1" "$DEST1" >>"$LOG_FILE" 2>&1
 RSYNC1_EXIT=$?
 set -e
 if [ "$RSYNC1_EXIT" -ne 0 ]; then
@@ -50,7 +63,7 @@ fi
 
 log "Syncing $SRC2 -> $DEST2 ..."
 set +e
-rsync -a --delete -e "$SSH_OPTS" "$SRC2" "$DEST2" >>"$LOG_FILE" 2>&1
+"$RSYNC" -a --delete -e "$SSH_OPTS" "$SRC2" "$DEST2" >>"$LOG_FILE" 2>&1
 RSYNC2_EXIT=$?
 set -e
 if [ "$RSYNC2_EXIT" -ne 0 ]; then
