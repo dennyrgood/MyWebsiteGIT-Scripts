@@ -34,8 +34,15 @@ primary) gets everything; mb2 (`denniss-2nd-macbook-air`) is fleet-only
 (`heartbeat-writer` + `fleet-metrics-server` — no Ollama, no
 search_adv/search_shows/travel/tmdb GUIs); mmm (`mathes-mac-mini`) gets
 those two plus its own three Plex/Syncthing agents (`mmm-plex-backup`,
-`mmm-nightly-summary`, `mmm-health-monitor`). An unrecognized host aborts with an error rather than silently
-installing everything; add it to the `case` statement in `install.sh` first.
+`mmm-nightly-summary`, `mmm-health-monitor`). An unrecognized host aborts with an
+error rather than silently installing everything; add it to the `case` statement in
+`install.sh` first.
+
+`mmm-plex-backup` briefly lived as a crontab entry instead (2026-08-05) while a
+launchd-specific rsync timeout was being chased down — see the script's own header
+for the full investigation. Root cause turned out to be an unanswered TCC "Removable
+Volumes" consent dialog (cron hit it too, just hadn't been caught in testing yet), not
+launchd itself — fixed by granting it, moved back to launchd for consistency.
 
 ```bash
 cd ~/repos/scripts/launchagents

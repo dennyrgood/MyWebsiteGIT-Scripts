@@ -28,7 +28,38 @@
 # scripted.
 set -e
 
+# 2026-08-05 UTC — RESOLVED, real root cause. After the Full Disk Access fix above,
+# every launchd/cron-fired run (interactive runs were unaffected) instead started
+# fine and then hung indefinitely mid-transfer, eventually dying at ~300s with
+# "[Receiver] io timeout" once the NAS gave up waiting. Chased this down several wrong
+# paths first — UGOS server-side timeout defaults, launchd's background process
+# throttling (added ProcessType=Interactive to the plist, which helped but didn't
+# fully fix it), NAS-side Btrfs/RAID5 scan slowness (disproven: a local --dry-run
+# scan took 0.018s) — before getting an actual kernel stack trace via `sample <pid>`
+# on a stuck run: the sender was blocked inside opendir() -> open$NOCANCEL, i.e. a
+# LOCAL syscall that never returned, not a network stall at all. The real cause: a
+# macOS TCC "Removable Volumes" consent dialog (kTCCServiceSystemPolicyRemovableVolumes
+# for /opt/homebrew/bin/rsync) was sitting unanswered on the Mac's screen — a
+# GUI-session process (launchd gui/$UID OR cron; both hit this identically) can
+# trigger that dialog but nothing automated can click it, so the syscall blocks
+# forever until something else intervenes (here, the NAS's own 300s timeout tearing
+# down the connection, which is what finally interrupts the hung syscall — the
+# "Interrupted system call" errors seen throughout were the dialog's absence, not its
+# cause). Fixed by clicking Allow once on the Mac's screen; confirmed via
+# `sqlite3 ~/Library/Application\ Support/com.apple.TCC/TCC.db "SELECT * FROM access
+# WHERE client LIKE '%rsync%'"` showing auth_value=2 (granted). This is a DIFFERENT,
+# narrower grant than the Full Disk Access one above (System Policy category:
+# Removable Volumes, not All Files) — both were needed.
+#
+# --timeout/--rsync-path below were added while chasing the wrong NAS-timeout theory
+# and did NOT fix anything (confirmed via `ps` that --rsync-path's injected
+# --timeout=1800 really did land in the remote command, and it still died at 300s
+# regardless — proof the stall was never actually a network/protocol timeout). Left
+# in as a harmless safety net against a genuine future network stall, not because
+# they're doing anything today.
+RSYNC_TIMEOUT=1800   # 30 min — generous headroom over the observed ~300s failure point
 RSYNC="/opt/homebrew/bin/rsync"
+RSYNC_PATH_REMOTE="rsync --timeout=$RSYNC_TIMEOUT"
 SRC1="/Volumes/MacMiniExt4g/PlexServer/"
 SRC2="/Volumes/Expansion/plexServer/"
 DEST_HOST="dhm@192.168.178.123"
@@ -54,7 +85,7 @@ ssh -n -i "$SSH_KEY" $SSH_TIMEOUT_OPTS "$DEST_HOST" "mkdir -p '$DEST_PATH/MacMin
 
 log "Syncing $SRC1 -> $DEST1 ..."
 set +e
-"$RSYNC" -a --delete -e "$SSH_OPTS" "$SRC1" "$DEST1" >>"$LOG_FILE" 2>&1
+"$RSYNC" -a --delete --timeout="$RSYNC_TIMEOUT" --rsync-path="$RSYNC_PATH_REMOTE" -e "$SSH_OPTS" "$SRC1" "$DEST1" >>"$LOG_FILE" 2>&1
 RSYNC1_EXIT=$?
 set -e
 if [ "$RSYNC1_EXIT" -ne 0 ]; then
@@ -63,7 +94,7 @@ fi
 
 log "Syncing $SRC2 -> $DEST2 ..."
 set +e
-"$RSYNC" -a --delete -e "$SSH_OPTS" "$SRC2" "$DEST2" >>"$LOG_FILE" 2>&1
+"$RSYNC" -a --delete --timeout="$RSYNC_TIMEOUT" --rsync-path="$RSYNC_PATH_REMOTE" -e "$SSH_OPTS" "$SRC2" "$DEST2" >>"$LOG_FILE" 2>&1
 RSYNC2_EXIT=$?
 set -e
 if [ "$RSYNC2_EXIT" -ne 0 ]; then
@@ -72,7 +103,11 @@ fi
 
 log "=== Plex sync to FleetNAS complete (source1 exit=$RSYNC1_EXIT, source2 exit=$RSYNC2_EXIT) ==="
 
-# --- Cron: installed live 2026-08-03 UTC, daily at 4am (first manual run kicked off
-# same day, ahead of the initial cron firing, to seed the mirror before the schedule
-# takes over):
-# 0 4 * * * /Users/dennishmathes/repos/scripts/MathesMacMini/backup_plex_to_fleetnas.sh >> /Users/dennishmathes/.cache/fleetnas-sync/cron.log 2>&1
+# --- Scheduling: launchd LaunchAgent, daily at 4am, via
+# launchagents/com.dennis.mmm-plex-backup.plist (installed to
+# ~/Library/LaunchAgents by launchagents/install.sh). Crontab is empty on this box.
+# History: crontab 2026-08-03 -> launchd 2026-08-04 -> crontab again 2026-08-05
+# (chasing what looked like a launchd-specific rsync timeout) -> back to launchd
+# 2026-08-05 once the real cause (a TCC dialog, not the scheduler) was found — see
+# the RESOLVED comment above. Kept on launchd for consistency with
+# mmm-nightly-summary/mmm-health-monitor now that it isn't actually the culprit.

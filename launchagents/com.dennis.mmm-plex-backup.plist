@@ -26,6 +26,15 @@
     <key>KeepAlive</key>
     <false/>
 
+    <!-- 2026-08-05: without this, every launchd-triggered run (StartCalendarInterval
+         AND launchctl kickstart) died at ~300s with an rsync "io timeout" mid-transfer,
+         while the identical script run interactively from Terminal completed in 53s.
+         Root cause: launchd assigns background agents (no RunAtLoad+KeepAlive) a
+         throttled process/QoS class by default, distinct from an interactive shell's.
+         Interactive opts this job out, scheduling it like a foreground app instead. -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
     <key>StandardOutPath</key>
     <string>/Users/dennishmathes/Library/Logs/mmm_plex_backup.log</string>
     <key>StandardErrorPath</key>

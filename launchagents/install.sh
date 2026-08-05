@@ -24,6 +24,19 @@ FLEET_ONLY="com.dennis.heartbeat-writer com.dennis.fleet-metrics-server"
 # Mac Mini-specific: FleetNAS Plex backup + its nightly report + the Plex/Syncthing
 # health monitor. None of these apply to mb2 (no Plex/Syncthing there), so they're a
 # separate list rather than folded into FLEET_ONLY.
+#
+# mmm-plex-backup briefly lived as a plain crontab entry instead (2026-08-05) after
+# every launchd-triggered run — StartCalendarInterval AND manual `launchctl kickstart`
+# alike — died at ~300s with an rsync io-timeout, while the identical script run
+# interactively from Terminal completed in 53s. Root cause turned out to be a TCC
+# "Removable Volumes" consent dialog that only a GUI-session-present user can answer —
+# cron isn't actually immune to this (a cron-fired attempt hung identically), it just
+# hadn't hit the unanswered dialog yet in testing before the mechanism got blamed.
+# Once the dialog was granted (kTCCServiceSystemPolicyRemovableVolumes for
+# /opt/homebrew/bin/rsync, confirmed via TCC.db), the underlying problem was gone
+# regardless of launchd vs cron — moved back to launchd for consistency with the other
+# two agents. See MathesMacMini/backup_plex_to_fleetnas.sh's header for the full
+# investigation.
 MMM_ONLY="$FLEET_ONLY com.dennis.mmm-plex-backup com.dennis.mmm-nightly-summary com.dennis.mmm-health-monitor"
 ALL_AGENTS="com.dennis.search-adv-web com.dennis.search-shows-web com.dennis.travel-http com.dennis.tmdb-explorer $MMM_ONLY"
 

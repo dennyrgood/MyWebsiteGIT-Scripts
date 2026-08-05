@@ -26,6 +26,13 @@
     <key>KeepAlive</key>
     <false/>
 
+    <!-- 2026-08-05: matches mmm-plex-backup.plist's fix — background launchd agents
+         (no RunAtLoad+KeepAlive) get throttled by macOS by default, which caused that
+         agent's rsync to die at ~300s under launchd but not interactively. Applied
+         here too since this job also does network I/O (msmtp send). -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
     <key>StandardOutPath</key>
     <string>/Users/dennishmathes/Library/Logs/mmm_nightly_summary.log</string>
     <key>StandardErrorPath</key>
