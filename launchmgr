@@ -7,17 +7,41 @@
 # 2026-08-05 14:15 UTC (approx) - added usage()/-h; dedupe logs when stdout/stderr share a file
 # 2026-08-05 14:40 UTC (approx) - label now matches by substring; picker on multiple matches
 # 2026-08-05 15:00 UTC (approx) - bare label defaults to status for that agent; status accepts a label filter
+# 2026-08-06 UTC (approx) - status now also shows Enabled (launchctl print-disabled) and Schedule (StartCalendarInterval/StartInterval/KeepAlive/RunAtLoad)
 
 AGENT_DIR=$HOME/Library/LaunchAgents
 DOMAIN="gui/$(id -u)"
 
 die() { echo "$@" >&2; exit 1; }
 
+# schedule_of PLIST - best-effort human description of when an agent fires.
+# Only handles a single StartCalendarInterval dict (Hour/Minute), not an array
+# of multiple times-per-day - those print as "-".
+schedule_of() {
+  local plist=$1 iv hour minute keepalive runatload
+  iv=$(plutil -extract StartInterval raw "$plist" 2>/dev/null)
+  if [[ -n $iv ]]; then
+    echo "every ${iv}s"
+    return
+  fi
+  hour=$(plutil -extract StartCalendarInterval.Hour raw "$plist" 2>/dev/null)
+  minute=$(plutil -extract StartCalendarInterval.Minute raw "$plist" 2>/dev/null)
+  if [[ -n $hour || -n $minute ]]; then
+    printf "daily %02d:%02d\n" "${hour:-0}" "${minute:-0}"
+    return
+  fi
+  keepalive=$(plutil -extract KeepAlive raw "$plist" 2>/dev/null)
+  [[ $keepalive == true ]] && { echo "keepalive"; return }
+  runatload=$(plutil -extract RunAtLoad raw "$plist" 2>/dev/null)
+  [[ $runatload == true ]] && { echo "run-at-load"; return }
+  echo "-"
+}
+
 usage() {
   cat <<EOF
 usage: ${0:t} <command> [label]
        ${0:t} <label>              (shorthand for: status <label>)
-  status   - PID + last exit code for com.dennis agents (label optional)
+  status   - PID + last exit code + enabled state + schedule for com.dennis agents (label optional)
   kick     - kickstart -k (restart now)
   logs     - tail the agent's StandardOutPath/StandardErrorPath files
   info     - launchctl print (full runtime state, next run, run count)
@@ -53,7 +77,18 @@ case $cmd in
 esac
 
 if [[ $cmd == status ]]; then
-  launchctl list | awk -v pat="com\\.dennis\\..*$LABEL" 'NR==1 || $3 ~ pat'
+  pat="com\\.dennis\\..*$LABEL"
+  disabled_txt=$(launchctl print-disabled "$DOMAIN" 2>/dev/null)
+  printf "%-8s %-6s %-8s %-12s %s\n" "PID" "Status" "Enabled" "Schedule" "Label"
+  launchctl list | awk -v pat="$pat" 'NR>1 && $3 ~ pat {print $1, $2, $3}' |
+  while read -r pid xstatus label; do
+    plist="$AGENT_DIR/$label.plist"
+    enabled="yes"
+    [[ -f $plist ]] && echo "$disabled_txt" | grep -q "\"$label\" => disabled" && enabled="no"
+    sched="-"
+    [[ -f $plist ]] && sched=$(schedule_of "$plist")
+    printf "%-8s %-6s %-8s %-12s %s\n" "$pid" "$xstatus" "$enabled" "$sched" "$label"
+  done
   exit
 fi
 
