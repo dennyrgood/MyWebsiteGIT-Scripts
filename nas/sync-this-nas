@@ -1,0 +1,79 @@
+#!/bin/bash
+# ~/repos/scripts/nas/sync-this-nas
+# 2026-08-06 19:30 UTC
+# 2026-08-06 20:00 UTC: rewrote to scp changed files to WBU and run sync-this
+#                       there, since the Docker git container cannot push to
+#                       GitHub interactively and git is not installed on FleetNAS.
+
+WBU="dhm@192.168.178.242"
+NAS_REPO="/home/dhm/repos/scripts"
+WBU_REPO="/home/dhm/repos/scripts"
+WBU_SYNC="/home/dhm/repos/scripts/sync-this"
+
+echo "=========================================="
+echo "         NAS SYNC: PRE-SYNC STATUS        "
+echo "=========================================="
+
+# Show local changes via Docker git
+GIT="sudo docker run --rm -v ${NAS_REPO}:/data -w /data alpine/git -c safe.directory=/data"
+echo "=== Local changes on FleetNAS ==="
+if $GIT diff --quiet && $GIT diff --staged --quiet; then
+    CHANGED=$($GIT status --short)
+    if [ -z "$CHANGED" ]; then
+        echo "✓ No uncommitted changes"
+    else
+        echo "$CHANGED"
+    fi
+else
+    $GIT status --short
+fi
+
+echo ""
+
+# Commit message
+DEFAULT_MESSAGE="Sync from FleetNAS"
+if [ -n "$1" ]; then
+    COMMIT_MESSAGE="$1"
+else
+    echo "Enter commit message (or press Enter to use default):"
+    read -r USER_MESSAGE
+    if [ -z "$USER_MESSAGE" ]; then
+        COMMIT_MESSAGE="$DEFAULT_MESSAGE"
+    else
+        COMMIT_MESSAGE="$USER_MESSAGE"
+    fi
+fi
+echo "--- Using commit message: \"$COMMIT_MESSAGE\" ---"
+
+echo "=========================================="
+echo "       NAS SYNC: COPYING TO WBU           "
+echo "=========================================="
+
+# rsync nas/ to WBU with --delete so removals on FleetNAS are reflected on WBU
+echo "Syncing ${NAS_REPO}/nas/ to ${WBU}:${WBU_REPO}/nas/ ..."
+rsync -av --delete "${NAS_REPO}/nas/" "${WBU}:${WBU_REPO}/nas/"
+SYNC_STATUS=$?
+
+if [ "$SYNC_STATUS" -ne 0 ]; then
+    echo "❌ rsync failed — aborting."
+    exit 1
+fi
+
+echo "✓ Files synced to WBU"
+
+echo "=========================================="
+echo "       NAS SYNC: RUNNING SYNC-THIS ON WBU "
+echo "=========================================="
+
+ssh -o BatchMode=yes "$WBU" "cd ${WBU_REPO} && ${WBU_SYNC} \"${COMMIT_MESSAGE}\""
+
+echo "=========================================="
+echo "       NAS SYNC: PULLING BACK FROM REMOTE "
+echo "=========================================="
+
+# Pull the result back so FleetNAS is in sync with what WBU pushed
+$GIT pull origin main
+
+echo "=========================================="
+echo "           NAS SYNC: FINISHED             "
+echo "=========================================="
