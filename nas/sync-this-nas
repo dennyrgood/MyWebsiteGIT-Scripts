@@ -1,11 +1,12 @@
 #!/bin/bash
 # ~/repos/scripts/nas/sync-this-nas
 # 2026-08-06 19:30 UTC
-# 2026-08-06 20:00 UTC: rewrote to scp changed files to WBU and run sync-this
-#                       there, since the Docker git container cannot push to
-#                       GitHub interactively and git is not installed on FleetNAS.
+# 2026-08-06 20:30 UTC: rewrote to have WBU pull from FleetNAS via rsync
+#                       rather than FleetNAS pushing to WBU — avoids rsync
+#                       permission mangling on the UGREEN NAS sender side.
 
 WBU="dhm@192.168.178.242"
+FLEETNAS_IP="192.168.178.123"
 NAS_REPO="/home/dhm/repos/scripts"
 WBU_REPO="/home/dhm/repos/scripts"
 WBU_SYNC="/home/dhm/repos/scripts/sync-this"
@@ -14,18 +15,13 @@ echo "=========================================="
 echo "         NAS SYNC: PRE-SYNC STATUS        "
 echo "=========================================="
 
-# Show local changes via Docker git
 GIT="sudo docker run --rm -v ${NAS_REPO}:/data -w /data alpine/git -c safe.directory=/data"
 echo "=== Local changes on FleetNAS ==="
-if $GIT diff --quiet && $GIT diff --staged --quiet; then
-    CHANGED=$($GIT status --short)
-    if [ -z "$CHANGED" ]; then
-        echo "✓ No uncommitted changes"
-    else
-        echo "$CHANGED"
-    fi
+CHANGED=$($GIT status --short)
+if [ -z "$CHANGED" ]; then
+    echo "✓ No uncommitted changes"
 else
-    $GIT status --short
+    echo "$CHANGED"
 fi
 
 echo ""
@@ -46,16 +42,16 @@ fi
 echo "--- Using commit message: \"$COMMIT_MESSAGE\" ---"
 
 echo "=========================================="
-echo "       NAS SYNC: COPYING TO WBU           "
+echo "       NAS SYNC: WBU PULLS FROM NAS       "
 echo "=========================================="
 
-# rsync nas/ to WBU with --delete so removals on FleetNAS are reflected on WBU
-echo "Syncing ${NAS_REPO}/nas/ to ${WBU}:${WBU_REPO}/nas/ ..."
-rsync -av --delete "${NAS_REPO}/nas/" "${WBU}:${WBU_REPO}/nas/"
+# WBU pulls the nas/ directory from FleetNAS — WBU owns its own filesystem
+ssh -o BatchMode=yes "$WBU" \
+    "rsync -av --delete dhm@${FLEETNAS_IP}:${NAS_REPO}/nas/ ${WBU_REPO}/nas/"
 SYNC_STATUS=$?
 
 if [ "$SYNC_STATUS" -ne 0 ]; then
-    echo "❌ rsync failed — aborting."
+    echo "❌ rsync on WBU failed — aborting."
     exit 1
 fi
 
@@ -71,7 +67,6 @@ echo "=========================================="
 echo "       NAS SYNC: PULLING BACK FROM REMOTE "
 echo "=========================================="
 
-# Pull the result back so FleetNAS is in sync with what WBU pushed
 $GIT pull origin main
 
 echo "=========================================="
