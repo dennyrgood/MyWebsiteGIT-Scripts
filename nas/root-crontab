@@ -1,0 +1,23 @@
+# root crontab for FleetNAS — backup copy.
+#
+# Root's real crontab lives in /var/spool/cron/crontabs/ on the OS OVERLAY,
+# which a UGREEN firmware update can reset. This file lives in ~/repos/scripts,
+# which is on the btrfs DATA VOLUME (the RAID array) and survives.
+#
+# Restore after a firmware update (run ON FleetNAS):
+#     sudo crontab ~/repos/scripts/nas/root-crontab
+#
+# Verify:
+#     sudo crontab -l
+#
+# WARNING: `crontab <file>` REPLACES root's entire crontab. If UGREEN ever adds
+# its own root cron entries, check `sudo crontab -l` first and merge rather than
+# blindly replacing.
+#
+# Note the failure mode this guards against: if the crontab is lost, both
+# scripts still exist and still work, but nothing runs them — and no email is
+# also what "everything is healthy" looks like. The tell is the 05:00 nightly
+# going missing, since that one always sends.
+
+*/5 * * * * /home/dhm/repos/scripts/nas/nas-health-monitor.sh 2>&1 | logger -t nas-health-monitor
+0 5 * * * /home/dhm/repos/scripts/nas/nas-nightly-summary.sh 2>&1 | logger -t nas-nightly-summary
