@@ -1,5 +1,5 @@
 #!/bin/bash
-# ~/repos/scripts/nas/nas-health-monitor.sh
+# ~/repos/scripts/FleetNAS/nas-health-monitor.sh
 # 2026-08-07: FIXED: smartctl was called as a bare command. root's cron PATH is
 #             /usr/bin:/bin but smartctl lives in /sbin, so it was never found;
 #             stderr went to /dev/null and every reading defaulted to 0 via :-,

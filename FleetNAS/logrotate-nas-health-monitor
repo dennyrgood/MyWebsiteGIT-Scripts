@@ -3,7 +3,7 @@
 # Install on FleetNAS (the repo copy is not read by logrotate):
 #
 #   sudo install -o root -g root -m 644 \
-#       ~/repos/scripts/nas/logrotate-nas-health-monitor \
+#       ~/repos/scripts/FleetNAS/logrotate-nas-health-monitor \
 #       /etc/logrotate.d/nas-health-monitor
 #   sudo logrotate -d /etc/logrotate.d/nas-health-monitor   # dry run, verify
 #

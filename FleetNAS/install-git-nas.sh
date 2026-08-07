@@ -1,5 +1,5 @@
 #!/bin/bash
-# ~/repos/scripts/nas/install-git-nas.sh
+# ~/repos/scripts/FleetNAS/install-git-nas.sh
 # 2026-08-07
 #
 # Installs a real, native git on FleetNAS WITHOUT touching the appliance OS:

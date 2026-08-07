@@ -18,8 +18,8 @@ works there. See [Editing and deploying](#editing-and-deploying).
 Root's crontab on FleetNAS:
 
 ```
-*/5 * * * * /home/dhm/repos/scripts/nas/nas-health-monitor.sh 2>&1 | logger -t nas-health-monitor
-0 5 * * *   /home/dhm/repos/scripts/nas/nas-nightly-summary.sh 2>&1 | logger -t nas-nightly-summary
+*/5 * * * * /home/dhm/repos/scripts/FleetNAS/nas-health-monitor.sh 2>&1 | logger -t nas-health-monitor
+0 5 * * *   /home/dhm/repos/scripts/FleetNAS/nas-nightly-summary.sh 2>&1 | logger -t nas-nightly-summary
 ```
 
 Cron runs the **working copy in the repo directly**, so getting a commit onto the
@@ -144,7 +144,7 @@ weekly, 8 rotations, compressed, rotating early if it passes 1M.
 `/etc`. On FleetNAS:
 
 ```
-cd ~/repos/scripts/nas
+cd ~/repos/scripts/FleetNAS
 sudo cp logrotate-nas-health-monitor /etc/logrotate.d/nas-health-monitor
 sudo chown root:root /etc/logrotate.d/nas-health-monitor
 sudo chmod 644 /etc/logrotate.d/nas-health-monitor
@@ -251,7 +251,7 @@ it. The monitor also takes `NAS_STATE_FILE` and `NAS_LOG_FILE` so a test run
 can't disturb live state:
 
 ```
-cd ~/repos/scripts/nas
+cd ~/repos/scripts/FleetNAS
 sudo NAS_DRYRUN=1 ./nas-nightly-summary.sh | head -20
 ```
 

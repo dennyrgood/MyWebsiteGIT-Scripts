@@ -5,7 +5,7 @@
 # which is on the btrfs DATA VOLUME (the RAID array) and survives.
 #
 # Restore after a firmware update (run ON FleetNAS):
-#     sudo crontab ~/repos/scripts/nas/root-crontab
+#     sudo crontab ~/repos/scripts/FleetNAS/root-crontab
 #
 # Verify:
 #     sudo crontab -l
@@ -19,5 +19,5 @@
 # also what "everything is healthy" looks like. The tell is the 05:00 nightly
 # going missing, since that one always sends.
 
-*/5 * * * * /home/dhm/repos/scripts/nas/nas-health-monitor.sh 2>&1 | logger -t nas-health-monitor
-0 5 * * * /home/dhm/repos/scripts/nas/nas-nightly-summary.sh 2>&1 | logger -t nas-nightly-summary
+*/5 * * * * /home/dhm/repos/scripts/FleetNAS/nas-health-monitor.sh 2>&1 | logger -t nas-health-monitor
+0 5 * * * /home/dhm/repos/scripts/FleetNAS/nas-nightly-summary.sh 2>&1 | logger -t nas-nightly-summary

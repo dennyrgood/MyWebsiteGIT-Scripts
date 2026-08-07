@@ -1,5 +1,5 @@
 #!/bin/bash
-# ~/repos/scripts/nas/nas-nightly-summary.sh
+# ~/repos/scripts/FleetNAS/nas-nightly-summary.sh
 # 2026-08-07: FIXED: smartctl was called as a bare command but lives in /sbin,
 #             which is not on root's cron PATH. Every drive therefore reported
 #             health= realloc=0 pending=0 temp=0, and the empty health string
