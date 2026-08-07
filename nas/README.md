@@ -176,6 +176,14 @@ FleetNAS has **no git binary** — `sync-this-nas` does its git through an
 Deletions are one-way: if you delete a file on FleetNAS, delete it on WBU too,
 then sync.
 
+**Don't leave scratch files in `nas/` on either side.** `sync-this` stages with
+`git add -A`, and pull mode tars the NAS's whole `nas/` directory back, so any
+stray file there gets committed and pushed. (A throwaway `cmd` file used to run
+a `sudo` step on the NAS ended up on GitHub this way on 2026-08-07.) Pull mode
+also carries the NAS's permissions back — files land there mode 777, which is
+how the logrotate config briefly became executable. Keep scratch work in
+`~/nastest/` or `/tmp`, not in the repo.
+
 ## Testing without sending mail
 
 Both scripts honour `NAS_DRYRUN=1`, which prints the message instead of emailing
