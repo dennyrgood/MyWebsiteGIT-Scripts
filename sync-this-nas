@@ -49,7 +49,7 @@ echo "=========================================="
 echo "       NAS SYNC: FLEETNAS PULLS BACK      "
 echo "=========================================="
 
-ssh "${FLEETNAS}" "sudo docker run --rm -v /home/dhm/repos/scripts:/data -w /data alpine/git -c safe.directory=/data pull origin main"
+ssh "${FLEETNAS}" "sudo docker run --rm -v /home/dhm/repos/scripts:/data -w /data alpine/git -c safe.directory=/data fetch origin && sudo docker run --rm -v /home/dhm/repos/scripts:/data -w /data alpine/git -c safe.directory=/data reset --hard origin/main"
 
 echo "=========================================="
 echo "           NAS SYNC: FINISHED             "
