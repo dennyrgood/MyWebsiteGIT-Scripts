@@ -62,7 +62,10 @@ sudo crontab -l > "$DEST/crontab-l-root.txt"
 # own separate UPS. Captured in full, credentials included, because a redacted
 # copy would not rebuild the box; that is only acceptable because fleet-configs
 # is PRIVATE. Do not copy these into the scripts repo, which is public.
-# Mode 600 in the repo regardless of the (loose) source permissions.
+#
+# The -m 600 below sets the mode on THIS box only. Git records nothing but the
+# executable bit, so these land as 0644 in every other checkout regardless —
+# the privacy of the repo is the actual control here, not the file mode.
 for f in nut.conf ups.conf upsd.conf upsd.users upsmon.conf upssched.conf; do
     [ -f "/etc/nut/$f" ] && sudo install -o "$ME_U" -g "$ME_G" -m 600 "/etc/nut/$f" "$DEST/nut-$f"
 done
