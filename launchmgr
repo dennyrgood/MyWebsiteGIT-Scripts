@@ -8,6 +8,7 @@
 # 2026-08-05 14:40 UTC (approx) - label now matches by substring; picker on multiple matches
 # 2026-08-05 15:00 UTC (approx) - bare label defaults to status for that agent; status accepts a label filter
 # 2026-08-06 UTC (approx) - status now also shows Enabled (launchctl print-disabled) and Schedule (StartCalendarInterval/StartInterval/KeepAlive/RunAtLoad)
+# 2026-08-07 UTC (approx) - status now enumerates plists on disk (not just launchctl list) and adds a Loaded column; Enabled != Loaded (disable only vetoes the *next* bootstrap, an already-loaded job keeps firing)
 
 AGENT_DIR=$HOME/Library/LaunchAgents
 DOMAIN="gui/$(id -u)"
@@ -41,7 +42,7 @@ usage() {
   cat <<EOF
 usage: ${0:t} <command> [label]
        ${0:t} <label>              (shorthand for: status <label>)
-  status   - PID + last exit code + enabled state + schedule for com.dennis agents (label optional)
+  status   - PID + last exit code + loaded + enabled state + schedule for com.dennis agents (label optional)
   kick     - kickstart -k (restart now)
   logs     - tail the agent's StandardOutPath/StandardErrorPath files
   info     - launchctl print (full runtime state, next run, run count)
@@ -77,17 +78,25 @@ case $cmd in
 esac
 
 if [[ $cmd == status ]]; then
-  pat="com\\.dennis\\..*$LABEL"
   disabled_txt=$(launchctl print-disabled "$DOMAIN" 2>/dev/null)
-  printf "%-8s %-6s %-8s %-12s %s\n" "PID" "Status" "Enabled" "Schedule" "Label"
-  launchctl list | awk -v pat="$pat" 'NR>1 && $3 ~ pat {print $1, $2, $3}' |
-  while read -r pid xstatus label; do
-    plist="$AGENT_DIR/$label.plist"
+  list_txt=$(launchctl list)
+  printf "%-8s %-6s %-8s %-8s %-12s %s\n" "PID" "Status" "Loaded" "Enabled" "Schedule" "Label"
+  for plist in $AGENT_DIR/com.dennis.*$LABEL*.plist(N); do
+    label=${plist:t:r}
+    line=$(echo "$list_txt" | awk -v l="$label" '$3==l{print $1, $2}')
+    if [[ -n $line ]]; then
+      pid=${line%% *}
+      xstatus=${line##* }
+      loaded="yes"
+    else
+      pid="-"
+      xstatus="-"
+      loaded="no"
+    fi
     enabled="yes"
-    [[ -f $plist ]] && echo "$disabled_txt" | grep -q "\"$label\" => disabled" && enabled="no"
-    sched="-"
-    [[ -f $plist ]] && sched=$(schedule_of "$plist")
-    printf "%-8s %-6s %-8s %-12s %s\n" "$pid" "$xstatus" "$enabled" "$sched" "$label"
+    echo "$disabled_txt" | grep -q "\"$label\" => disabled" && enabled="no"
+    sched=$(schedule_of "$plist")
+    printf "%-8s %-6s %-8s %-8s %-12s %s\n" "$pid" "$xstatus" "$loaded" "$enabled" "$sched" "$label"
   done
   exit
 fi
