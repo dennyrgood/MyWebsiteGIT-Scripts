@@ -1,6 +1,9 @@
 #!/bin/bash
 # /home/dhm/repos/scripts/sync-this-nas
 # 2026-08-06 21:00 UTC
+# 2026-08-06 21:30 UTC: replaced scp/rsync with tar over SSH — UGREEN rsync
+#                       daemon only serves defined shares, not arbitrary home
+#                       directories; tar over SSH bypasses it entirely.
 # Run on WBU. Pulls nas/ from FleetNAS, commits and pushes to GitHub via
 # sync-this, then SSHes to FleetNAS to pull the result back from GitHub.
 # FleetNAS has no git binary — all git operations go through WBU.
@@ -13,11 +16,11 @@ echo "=========================================="
 echo "       NAS SYNC: PULL FROM FLEETNAS       "
 echo "=========================================="
 
-scp -r "${FLEETNAS}:/home/dhm/repos/scripts/nas" "${WBU_REPO}/"
-SYNC_STATUS=$?
+ssh "${FLEETNAS}" "tar -czf - -C /home/dhm/repos/scripts nas" | tar -xzf - -C "${WBU_REPO}/"
+SYNC_STATUS=${PIPESTATUS[0]}
 
 if [ "$SYNC_STATUS" -ne 0 ]; then
-    echo "❌ rsync from FleetNAS failed — aborting."
+    echo "❌ tar pull from FleetNAS failed — aborting."
     exit 1
 fi
 
@@ -46,7 +49,7 @@ echo "=========================================="
 echo "       NAS SYNC: FLEETNAS PULLS BACK      "
 echo "=========================================="
 
-ssh "${FLEETNAS}" "sync-this-nas"
+ssh "${FLEETNAS}" "sudo docker run --rm -v /home/dhm/repos/scripts:/data -w /data alpine/git -c safe.directory=/data pull origin main"
 
 echo "=========================================="
 echo "           NAS SYNC: FINISHED             "
