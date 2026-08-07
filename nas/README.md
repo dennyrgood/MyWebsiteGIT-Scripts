@@ -160,7 +160,26 @@ Re-run the install after any change to the config in the repo.
 
 ## Editing and deploying
 
-Edit on **WBU**, in `~/repos/scripts/nas/`. Then from `~/repos/scripts`:
+Since FleetNAS got [native git](#native-git-on-fleetnas), the standard
+`sync-this` works there like on any other box — edit on the NAS, then:
+
+```
+cd ~/repos/scripts
+./sync-this "commit message"
+```
+
+`sync-this` is unmodified and host-agnostic; the NAS just needed a git binary
+and a commit identity. Its `git push` prompts for a GitHub username and a
+**Personal Access Token** (the token goes in the password field). That is
+deliberate: no credential helper is configured on the NAS, so the token is
+typed each time and never stored on the appliance. A classic PAT needs `repo`
+scope; a fine-grained one needs Contents: Read and write.
+
+`git pull` on the NAS needs no credentials at all — the repo is public.
+
+### The older two-box route
+
+Editing on **WBU** and pushing out to the NAS still works and is unchanged:
 
 ```
 ./sync-this-nas "commit message"
@@ -170,8 +189,9 @@ It asks both sides whether `nas/` is dirty and picks the direction: NAS dirty �
 pull, WBU dirty → push, both dirty → it stops and makes you choose. Either way
 FleetNAS ends `reset --hard origin/main`, so both sides finish identical.
 
-FleetNAS has **no git binary** — `sync-this-nas` does its git through an
-`alpine/git` Docker container. Don't try to run git there directly.
+FleetNAS **now has a real native git** — see [Native git on FleetNAS](#native-git-on-fleetnas).
+`sync-this-nas` still drives the NAS side through an `alpine/git` Docker
+container, which continues to work; it just isn't the only option any more.
 
 Deletions are one-way: if you delete a file on FleetNAS, delete it on WBU too,
 then sync.
@@ -183,6 +203,53 @@ a `sudo` step on the NAS ended up on GitHub this way on 2026-08-07.) Pull mode
 also carries the NAS's permissions back — files land there mode 777, which is
 how the logrotate config briefly became executable. Keep scratch work in
 `~/nastest/` or `/tmp`, not in the repo.
+
+## Native git on FleetNAS
+
+FleetNAS runs a **real git 2.39.5**, installed by `install-git-nas.sh`. It is not
+a Docker wrapper and not an apt package — nothing outside `$HOME` was touched.
+
+```
+~/git/          unpacked Debian bookworm git package
+~/bin/git       wrapper that points git at ~/git's helpers
+```
+
+### Why this works
+
+The appliance is genuine Debian 12 (bookworm), and every one of git's runtime
+dependencies — `libc6`, `libcurl3-gnutls`, `libexpat1`, `libpcre2-8-0`,
+`zlib1g`, plus `perl`, `less`, `ssh` — was already installed. So the stock
+Debian git binary runs natively; it only needed unpacking and pointing at its
+own helper directory.
+
+`~/git` lives on `/home`, a btrfs subvolume of the **RAID array**, so it
+survives an OS reinstall — more durable than `apt install` would have been.
+
+### Two traps this avoids
+
+**Don't grab the newest git from the Debian pool.** That one is built against a
+later glibc and dies with `GLIBC_2.38 not found`. The version and SHA256 in
+`install-git-nas.sh` are pinned to the *bookworm* build for that reason.
+
+**Debian's git hardcodes `/usr/lib/git-core` as its exec path,** which doesn't
+exist here. Without the wrapper you get a confusing
+`git: 'remote-https' is not a git command` on any network operation, even though
+the helper is sitting right there in `~/git/usr/lib/git-core`. The wrapper sets
+`GIT_EXEC_PATH` and `GIT_TEMPLATE_DIR` itself, so **scripts can call
+`/home/dhm/bin/git` by absolute path with no environment setup** — verified
+working under `env -i`.
+
+### Why not the alternatives
+
+| Option | Verdict |
+|---|---|
+| `apt install git` | Would work — sources are the real Debian repos and all deps are present. Rejected: mutates the appliance's package state, and a UGREEN firmware update wipes it. |
+| Docker | `dhm` is **not** in the `docker` group, so every call would be `sudo docker ...`. The container also runs as root — that's what left root-owned 777 files across `~/repos`. |
+
+Reinstall or upgrade any time by re-running `install-git-nas.sh`; it's idempotent.
+
+**Note:** `fetch`/`pull` work against the public GitHub repo with no credentials.
+**Pushing from the NAS is not set up** and would need a token or SSH key.
 
 ## Testing without sending mail
 
@@ -236,8 +303,13 @@ specified 'weekly'`.
 land as mode 777, so install into `/etc/logrotate.d/` with an explicit
 `chmod 644`, not a bare `cp`.
 
-**`scp`/SFTP is restricted on FleetNAS.** To copy a file there ad hoc:
-`ssh dhm@192.168.178.123 'cat > ~/dest' < localfile`.
+**Plain `scp` fails to FleetNAS — use `scp -O`.** UGREEN replaced
+`/usr/lib/openssh/sftp-server` with a 95-byte shell stub that silently exits
+unless SFTP is enabled in their config tool, so modern `scp` (which speaks SFTP)
+dies with `remote mkdir ... Permission denied`. `scp -O` uses the legacy SCP
+protocol and works fine. `rsync` over SSH also hits a UGREEN wrapper
+(`ug_start_server ... cannot set euid as root`) and mangles relative paths —
+prefer `scp -O`, or `ssh host 'cat > ~/dest' < localfile`.
 
 **`sudo` over non-interactive SSH can't prompt for a password.** Anything needing
 root on FleetNAS — `smartctl`, `mdadm`, installing to `/etc` — has to be run
