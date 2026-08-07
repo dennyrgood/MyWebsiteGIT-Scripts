@@ -12,6 +12,16 @@ FLEETNAS="dhm@192.168.178.123"
 WBU_REPO="/home/dhm/repos/scripts"
 WBU_SYNC="${WBU_REPO}/sync-this"
 
+# Safety check — this script must run on WBU only
+if [ "$(hostname)" != "workbenchunix" ]; then
+    echo ""
+    echo "  ❌ This script must be run on WBU (workbenchunix), not $(hostname)."
+    echo "  To sync NAS scripts, SSH to WBU and run:"
+    echo "    ./sync-this-nas \"your commit message\""
+    echo ""
+    exit 1
+fi
+
 echo "=========================================="
 echo "       NAS SYNC: PULL FROM FLEETNAS       "
 echo "=========================================="
