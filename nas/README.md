@@ -3,15 +3,17 @@
 Monitoring for **FleetNAS** (`192.168.178.123`), a UGREEN NAS running a 3-drive
 RAID5 array. Two scripts: a 5-minute alerting monitor and a daily summary email.
 
-Both scripts **run on FleetNAS** (from root's crontab) but are **edited on WBU**
-and deployed with `sync-this-nas`. See [Editing and deploying](#editing-and-deploying).
+Both scripts **run on FleetNAS**, from root's crontab. Edit them on either box —
+FleetNAS has [native git](#native-git-on-fleetnas), so the standard `sync-this`
+works there. See [Editing and deploying](#editing-and-deploying).
 
 | File | What it is |
 |---|---|
 | `nas-health-monitor.sh` | Every 5 min. Silent unless something is wrong; emails alerts and all-clears. |
 | `nas-nightly-summary.sh` | 05:00 UTC. Always emails a full status report. |
 | `logrotate-nas-health-monitor` | logrotate config for the monitor's alert log. Must be **installed** into `/etc/logrotate.d/`; syncing the repo is not enough. |
-| `sync-this-nas` | A reminder stub. The real script lives on WBU at `~/repos/scripts/sync-this-nas`. |
+| `install-git-nas.sh` | Installs native git on FleetNAS into `$HOME`. Idempotent; no root, no apt, no Docker. |
+| `root-crontab` | Backup of root's crontab, on the volume that survives a firmware wipe. |
 
 Root's crontab on FleetNAS:
 
@@ -20,8 +22,8 @@ Root's crontab on FleetNAS:
 0 5 * * *   /home/dhm/repos/scripts/nas/nas-nightly-summary.sh 2>&1 | logger -t nas-nightly-summary
 ```
 
-Cron runs the **working copy in the repo directly**, so a successful
-`sync-this-nas` is the whole deploy.
+Cron runs the **working copy in the repo directly**, so getting a commit onto the
+NAS is the whole deploy — no install step for the scripts themselves.
 
 ## How mail gets out
 
@@ -138,8 +140,8 @@ having died.
 `/var/log/nas-health-monitor.log` had no rotation and grew forever. Config is
 weekly, 8 rotations, compressed, rotating early if it passes 1M.
 
-**Installing it is a separate manual step** — `sync-this-nas` updates the repo,
-not `/etc`. On FleetNAS:
+**Installing it is a separate manual step** — syncing updates the repo, not
+`/etc`. On FleetNAS:
 
 ```
 cd ~/repos/scripts/nas
@@ -177,32 +179,23 @@ scope; a fine-grained one needs Contents: Read and write.
 
 `git pull` on the NAS needs no credentials at all — the repo is public.
 
-### The older two-box route
+Editing on WBU works exactly the same way: `./sync-this "msg"` there, then
+`git pull` on the NAS to pick it up.
 
-Editing on **WBU** and pushing out to the NAS still works and is unchanged:
+There used to be a `sync-this-nas` script that drove the NAS side from WBU over
+tar-and-SSH plus an `alpine/git` Docker container, because the NAS had no git.
+It was **deleted on 2026-08-07** once native git made it redundant. If you ever
+need unattended commits *from* the NAS, note that the PAT prompt blocks
+automation — that is the one thing the old route could do that this cannot.
 
-```
-./sync-this-nas "commit message"
-```
+Deletions propagate normally now that git does the work on both sides. The old
+tar-based sync could not delete files at all, which is why this section used to
+carry a warning about deleting on both boxes by hand.
 
-It asks both sides whether `nas/` is dirty and picks the direction: NAS dirty →
-pull, WBU dirty → push, both dirty → it stops and makes you choose. Either way
-FleetNAS ends `reset --hard origin/main`, so both sides finish identical.
-
-FleetNAS **now has a real native git** — see [Native git on FleetNAS](#native-git-on-fleetnas).
-`sync-this-nas` still drives the NAS side through an `alpine/git` Docker
-container, which continues to work; it just isn't the only option any more.
-
-Deletions are one-way: if you delete a file on FleetNAS, delete it on WBU too,
-then sync.
-
-**Don't leave scratch files in `nas/` on either side.** `sync-this` stages with
-`git add -A`, and pull mode tars the NAS's whole `nas/` directory back, so any
-stray file there gets committed and pushed. (A throwaway `cmd` file used to run
-a `sudo` step on the NAS ended up on GitHub this way on 2026-08-07.) Pull mode
-also carries the NAS's permissions back — files land there mode 777, which is
-how the logrotate config briefly became executable. Keep scratch work in
-`~/nastest/` or `/tmp`, not in the repo.
+**Don't leave scratch files in `nas/`.** `sync-this` stages with `git add -A`, so
+any stray file in the repo gets committed and pushed. (A throwaway `cmd` file
+used to run a `sudo` step on the NAS reached GitHub this way on 2026-08-07.)
+Keep scratch work in `/tmp` or outside the repo.
 
 ## Native git on FleetNAS
 
