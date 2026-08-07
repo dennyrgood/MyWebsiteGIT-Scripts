@@ -1,0 +1,26 @@
+# /etc/logrotate.d/nas-health-monitor
+#
+# Install on FleetNAS (the repo copy is not read by logrotate):
+#
+#   sudo install -o root -g root -m 644 \
+#       ~/repos/scripts/nas/logrotate-nas-health-monitor \
+#       /etc/logrotate.d/nas-health-monitor
+#   sudo logrotate -d /etc/logrotate.d/nas-health-monitor   # dry run, verify
+#
+# logrotate refuses any config file that is group- or world-writable, which the
+# repo copy may well be after a sync — hence `install -m 644` rather than `cp`.
+#
+# nas-health-monitor.sh appends an alert entry plus a ~60-line remediation
+# footer every time a condition fires, so a flapping sensor can add a few
+# hundred KB a day. Nothing had ever rotated this file.
+
+/var/log/nas-health-monitor.log {
+    weekly
+    rotate 8
+    size 1M
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 root root
+}
