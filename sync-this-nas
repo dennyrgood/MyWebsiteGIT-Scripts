@@ -4,13 +4,31 @@
 # 2026-08-06 21:30 UTC: replaced scp/rsync with tar over SSH — UGREEN rsync
 #                       daemon only serves defined shares, not arbitrary home
 #                       directories; tar over SSH bypasses it entirely.
-# Run on WBU. Pulls nas/ from FleetNAS, commits and pushes to GitHub via
-# sync-this, then SSHes to FleetNAS to pull the result back from GitHub.
-# FleetNAS has no git binary — all git operations go through WBU.
+# 2026-08-07: auto-detects which side you edited. No mode argument needed.
+#
+# Run on WBU. Syncs ~/repos/scripts/nas between WBU and FleetNAS via GitHub.
+# FleetNAS has no git binary — all git operations go through WBU, and FleetNAS
+# updates itself with `git reset --hard origin/main` inside an alpine/git
+# container.
+#
+#   sync-this-nas "msg"      figures out which side has edits and syncs that way
+#
+# It decides by asking both sides whether nas/ is dirty:
+#   FleetNAS dirty  -> pull  (tar nas/ to WBU, commit, NAS resets to the commit)
+#   WBU dirty       -> push  (commit WBU's nas/, NAS resets to the commit)
+#   both dirty      -> stops and shows you both; you pick with an explicit
+#                      `pull` or `push` first argument
+#   neither dirty   -> just re-points FleetNAS at origin/main
+#
+# Either way FleetNAS ends hard-reset to origin/main, so both sides finish
+# identical to whatever commit just landed.
 
 FLEETNAS="dhm@192.168.178.123"
 WBU_REPO="/home/dhm/repos/scripts"
 WBU_SYNC="${WBU_REPO}/sync-this"
+
+# FleetNAS git, via container (no git binary on the NAS itself)
+NAS_GIT="sudo docker run --rm -v /home/dhm/repos/scripts:/data -w /data alpine/git -c safe.directory=/data"
 
 # Safety check — this script must run on WBU only
 if [ "$(hostname)" != "workbenchunix" ]; then
@@ -22,51 +40,132 @@ if [ "$(hostname)" != "workbenchunix" ]; then
     exit 1
 fi
 
+# --- Optional explicit mode (only needed to break a both-sides-dirty tie) ---
+MODE=""
+case "$1" in
+    pull|push) MODE="$1"; shift ;;
+    -h|--help)
+        echo "usage: sync-this-nas [\"commit message\"]"
+        echo ""
+        echo "Detects which side has edits and syncs in that direction."
+        echo "Force it with an explicit first arg if both sides are dirty:"
+        echo "    sync-this-nas pull \"msg\"    keep FleetNAS's version"
+        echo "    sync-this-nas push \"msg\"    keep WBU's version"
+        exit 0
+        ;;
+esac
+
+# --- Which side has edits? ---
 echo "=========================================="
-echo "       NAS SYNC: PULL FROM FLEETNAS       "
+echo "       NAS SYNC: CHECKING BOTH SIDES      "
 echo "=========================================="
 
-ssh "${FLEETNAS}" "tar -czf - -C /home/dhm/repos/scripts nas" | tar -xzf - -C "${WBU_REPO}/"
-SYNC_STATUS=${PIPESTATUS[0]}
-
-if [ "$SYNC_STATUS" -ne 0 ]; then
-    echo "❌ tar pull from FleetNAS failed — aborting."
+NAS_DIRTY=$(ssh -o BatchMode=yes "${FLEETNAS}" "${NAS_GIT} status --porcelain -- nas" 2>/dev/null)
+if [ $? -ne 0 ]; then
+    echo "❌ Could not reach FleetNAS or run git there — aborting."
+    echo "   Not touching either side without knowing the NAS's state."
     exit 1
 fi
 
-echo "✓ nas/ synced from FleetNAS"
+WBU_DIRTY=$(cd "${WBU_REPO}" && git status --porcelain -- nas)
 
-echo "=========================================="
-echo "       NAS SYNC: COMMIT AND PUSH           "
-echo "=========================================="
+[ -n "$NAS_DIRTY" ] && echo "  FleetNAS: has edits in nas/" || echo "  FleetNAS: clean"
+[ -n "$WBU_DIRTY" ] && echo "  WBU:      has edits in nas/" || echo "  WBU:      clean"
+echo ""
 
-DEFAULT_MESSAGE="Sync nas/ from FleetNAS"
-if [ -n "$1" ]; then
-    COMMIT_MESSAGE="$1"
-else
-    echo "Enter commit message (or press Enter to use default):"
-    read -r USER_MESSAGE
-    if [ -z "$USER_MESSAGE" ]; then
-        COMMIT_MESSAGE="$DEFAULT_MESSAGE"
+if [ -z "$MODE" ]; then
+    if [ -n "$NAS_DIRTY" ] && [ -n "$WBU_DIRTY" ]; then
+        echo "  ❌ BOTH sides have uncommitted edits in nas/. I can't guess."
+        echo ""
+        echo "  FleetNAS:"
+        echo "$NAS_DIRTY" | sed 's/^/      /'
+        echo "  WBU:"
+        echo "$WBU_DIRTY" | sed 's/^/      /'
+        echo ""
+        echo "  Whichever you discard is gone. Look at both, then force a side:"
+        echo "      ./sync-this-nas pull \"msg\"    keep FleetNAS's, overwrite WBU's"
+        echo "      ./sync-this-nas push \"msg\"    keep WBU's, overwrite FleetNAS's"
+        echo ""
+        echo "  To see the difference first:"
+        echo "      ssh ${FLEETNAS} 'tar -czf - -C /home/dhm/repos/scripts nas' \\"
+        echo "        | tar -xzf - -C /tmp/ && diff -ru ${WBU_REPO}/nas /tmp/nas"
+        echo ""
+        exit 1
+    elif [ -n "$NAS_DIRTY" ]; then
+        MODE="pull"
+    elif [ -n "$WBU_DIRTY" ]; then
+        MODE="push"
     else
-        COMMIT_MESSAGE="$USER_MESSAGE"
+        MODE="none"
     fi
 fi
 
-cd "${WBU_REPO}" && "${WBU_SYNC}" "${COMMIT_MESSAGE}"
+case "$MODE" in
+    pull) echo "  -> Direction: FleetNAS edits coming back to WBU + GitHub" ;;
+    push) echo "  -> Direction: WBU edits going out to FleetNAS" ;;
+    none) echo "  -> Nothing to commit; just re-pointing FleetNAS at origin/main" ;;
+esac
+echo ""
+
+# --- Pull mode: grab FleetNAS's nas/ over the local copy ---
+if [ "$MODE" = "pull" ]; then
+    echo "=========================================="
+    echo "       NAS SYNC: PULL FROM FLEETNAS       "
+    echo "=========================================="
+
+    ssh "${FLEETNAS}" "tar -czf - -C /home/dhm/repos/scripts nas" | tar -xzf - -C "${WBU_REPO}/"
+    SYNC_STATUS=${PIPESTATUS[0]}
+
+    if [ "$SYNC_STATUS" -ne 0 ]; then
+        echo "❌ tar pull from FleetNAS failed — aborting."
+        exit 1
+    fi
+
+    echo "✓ nas/ synced from FleetNAS"
+fi
+
+# --- Commit and push (skipped when nothing changed) ---
+if [ "$MODE" != "none" ]; then
+    echo "=========================================="
+    echo "       NAS SYNC: COMMIT AND PUSH           "
+    echo "=========================================="
+
+    if [ "$MODE" = "pull" ]; then
+        DEFAULT_MESSAGE="Sync nas/ from FleetNAS"
+    else
+        DEFAULT_MESSAGE="Update nas/ from WBU"
+    fi
+
+    if [ -n "$1" ]; then
+        COMMIT_MESSAGE="$1"
+    else
+        echo "Enter commit message (or press Enter to use default):"
+        read -r USER_MESSAGE
+        if [ -z "$USER_MESSAGE" ]; then
+            COMMIT_MESSAGE="$DEFAULT_MESSAGE"
+        else
+            COMMIT_MESSAGE="$USER_MESSAGE"
+        fi
+    fi
+
+    cd "${WBU_REPO}" && "${WBU_SYNC}" "${COMMIT_MESSAGE}"
+fi
 
 echo "=========================================="
 echo "       NAS SYNC: FLEETNAS PULLS BACK      "
 echo "=========================================="
 
-ssh "${FLEETNAS}" "sudo docker run --rm -v /home/dhm/repos/scripts:/data -w /data alpine/git -c safe.directory=/data fetch origin && sudo docker run --rm -v /home/dhm/repos/scripts:/data -w /data alpine/git -c safe.directory=/data reset --hard origin/main"
+ssh "${FLEETNAS}" "${NAS_GIT} fetch origin && ${NAS_GIT} reset --hard origin/main"
 
 echo "=========================================="
 echo "           NAS SYNC: FINISHED             "
 echo "=========================================="
-echo ""
-echo "  ⚠️  DELETIONS: tar sync is one-way for deletes."
-echo "  If you deleted a file on FleetNAS, also delete it here:"
-echo "    rm ~/repos/scripts/nas/<filename>"
-echo "  Then re-run sync-this-nas to commit the deletion."
-echo ""
+
+if [ "$MODE" = "pull" ]; then
+    echo ""
+    echo "  ⚠️  DELETIONS: tar sync is one-way for deletes."
+    echo "  If you deleted a file on FleetNAS, also delete it here:"
+    echo "    rm ~/repos/scripts/nas/<filename>"
+    echo "  Then re-run sync-this-nas to commit the deletion."
+    echo ""
+fi

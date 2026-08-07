@@ -3,8 +3,13 @@
 # Reminder script — sync-this-nas runs on WBU, not FleetNAS.
 
 echo ""
-echo "  To sync NAS scripts, run on WBU:"
+echo "  Sync runs on WBU, not here. SSH to WBU, then:"
+echo ""
 echo "    ./sync-this-nas \"your commit message\""
+echo ""
+echo "  It works out on its own which side you edited (here or WBU)"
+echo "  and syncs that direction. FleetNAS always ends up reset --hard"
+echo "  to origin/main."
 echo ""
 echo "  ⚠️  DELETIONS: tar sync is one-way for deletes."
 echo "  If you delete a file on FleetNAS, also delete it on WBU:"
