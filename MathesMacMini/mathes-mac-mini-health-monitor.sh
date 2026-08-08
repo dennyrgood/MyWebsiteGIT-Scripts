@@ -93,6 +93,15 @@ UPS_CHARGE=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="battery.charge"{print $
 
 UPS_UNREADABLE_TRIGGERED=0
 [ -z "$UPS_STATUS" ] && UPS_UNREADABLE_TRIGGERED=1
+# 2026-08-08 real incident: this fired continuously (streak climbed to 26+ over ~2.5h)
+# with "Connection failure: No route to host" -- not a NAS/network outage at all. Root
+# cause: this Mac Mini was dual-homed, Ethernet (en0) AND Wi-Fi (en1) both active on the
+# same 192.168.178.0/24 subnet. upsc opens a fresh connection every run and resolved the
+# route inconsistently under launchd's gui domain; the system-domain upsmon daemon
+# (one long-lived connection made once at boot) was never affected. Fixed by disabling
+# Wi-Fi -- this box has wired Ethernet and gains nothing from being on both. If this
+# fires again, check `ifconfig | grep -E "^en|inet "` for a second active interface on
+# the same subnet before assuming the NAS or network is actually down.
 
 # RB = replace battery — the only UPS fault that warns in advance rather than after
 # the fact. No streak: it's a sticky fault, not a transient.
@@ -410,3 +419,14 @@ if [ -n "$CLEAR_BODY" ]; then
         echo -e "$CLEAR_BODY"
     } | "$MSMTP" -a icloud "$TO"
 fi
+
+# --- Heartbeat (2026-08-08) ---
+# Everything above is silent by design on a healthy run -- that's the right behavior
+# for email, but it means com.dennis.mmm-health-monitor.plist's StandardOutPath
+# (~/Library/Logs/mmm_health_monitor.log) would otherwise sit at 0 bytes forever on
+# the happy path, giving no positive proof the job ever actually ran vs. silently
+# broke. One line per run, always emitted, to plain stdout -- launchd's
+# StandardOutPath captures it, no plist change needed.
+ACTIVE_COUNT=$(grep -c "_ACTIVE=1" "$STATE_FILE" 2>/dev/null || true)
+ACTIVE_COUNT=${ACTIVE_COUNT:-0}
+echo "$(date '+%Y-%m-%d %H:%M:%S') check complete — ${ACTIVE_COUNT} active alert(s)"
