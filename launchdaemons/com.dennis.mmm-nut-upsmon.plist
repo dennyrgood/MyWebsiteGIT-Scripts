@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dennis.mmm-nut-upsmon</string>
+
+    <!-- Absolute path deliberately, not "upsmon" -- a system LaunchDaemon's
+         environment does not include /opt/homebrew on PATH, and a plist that
+         relies on PATH fails silently: launchd reports nothing wrong, upsmon
+         just never starts. See NUT_CLIENT_SETUP.md / UPS-NUT-Guide Section 7. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/sbin/upsmon</string>
+        <string>-F</string>
+    </array>
+
+    <!-- Explicit rather than relying on the system domain's default, for the
+         same reason upsmon.conf sets RUN_AS_USER root: SHUTDOWNCMD needs root
+         for the whole run, not just at startup. -->
+    <key>UserName</key>
+    <string>root</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Library/Logs/mmm_nut_upsmon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Library/Logs/mmm_nut_upsmon.log</string>
+</dict>
+</plist>
