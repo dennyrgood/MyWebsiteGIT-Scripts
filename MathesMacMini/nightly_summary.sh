@@ -26,9 +26,16 @@ MONITOR_STALE_SECS=600   # 10 min — mmm-health-monitor runs every 5 min via la
 # (UPS/NUT setup guide, Section 7). Real-time faults (unreadable, replace-battery,
 # local daemon missing) are mmm-health-monitor's job and already surface via the active-
 # alerts line below; this is the nightly view — what the UPS says right now.
-UPSC="/opt/homebrew/bin/upsc"
+#
+# Reads the real upsmon daemon's own log (UPSMON_LOG) rather than an independent
+# `upsc` query — same-day fix after `upsc` turned out to fail ~100% of the time
+# specifically under launchd (5ms "No route to host", root cause never nailed down
+# despite ruling out interfaces/routes/firewalls/Tailscale/TCC/quarantine) while the
+# real daemon's own connection, made once at boot, stayed rock solid throughout. See
+# mathes-mac-mini-health-monitor.sh's matching 2026-08-08 comment for the full story.
 UPS_NAME="ups0"
 UPS_HOST="192.168.178.123"
+UPSMON_LOG="/Library/Logs/mmm_nut_upsmon.log"
 UPSMON_PROC_PATTERN="/opt/homebrew/sbin/upsmon"
 
 PLEX_LOG=$(ls -1t "$HOME/.cache/fleetnas-sync/plex_"*.log 2>/dev/null | head -1)
@@ -60,33 +67,48 @@ REASON="all healthy"
 # can't clobber this REASON if the UPS is what's actually wrong.
 UPS_BAD=0
 UPS_REASON=""
-UPS_TLDR="  ups: (unavailable)"
-UPS_BLOCK="(${UPSC} returned nothing for ${UPS_NAME}@${UPS_HOST} — see mmm-health-monitor alerts)"
-UPS_OUT=$("$UPSC" "${UPS_NAME}@${UPS_HOST}" 2>/dev/null)
-if [ -n "$UPS_OUT" ]; then
-    U_STATUS=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="ups.status"{print $2}')
-    U_CHARGE=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="battery.charge"{print $2}')
-    UPSMON_ALIVE="no"
-    pgrep -f "$UPSMON_PROC_PATTERN" >/dev/null 2>&1 && UPSMON_ALIVE="yes"
-    UPS_TLDR="  ups: ${U_STATUS} charge=${U_CHARGE}% local-upsmon=${UPSMON_ALIVE}"
-    case " $U_STATUS " in
-        *" OB "*) UPS_BAD=1; UPS_REASON="UPS on battery";      UPS_TLDR="⚠️${UPS_TLDR} — ON BATTERY NOW" ;;
-        *" RB "*) UPS_BAD=1; UPS_REASON="UPS replace battery"; UPS_TLDR="⚠️${UPS_TLDR} — REPLACE BATTERY" ;;
-        *) if [ "$UPSMON_ALIVE" = "no" ]; then
-               # upsc talks straight to the NAS, bypassing our local daemon entirely —
-               # a healthy reading here does NOT mean this box has shutdown protection.
-               UPS_BAD=1; UPS_REASON="local upsmon daemon not running"
-               UPS_TLDR="⚠️${UPS_TLDR} — LOCAL DAEMON DOWN"
-           else
-               UPS_TLDR="${UPS_TLDR} ✓"
-           fi ;;
-    esac
-    UPS_BLOCK="$UPS_OUT"
+
+UPSMON_ALIVE="no"
+pgrep -f "$UPSMON_PROC_PATTERN" >/dev/null 2>&1 && UPSMON_ALIVE="yes"
+
+# NUT only logs on state CHANGE, not periodically — a healthy connection that's never
+# dropped produces zero comms lines after the initial connect, so "none ever logged"
+# reads as healthy-by-default below, not unknown. Same for power state: no ONBATT/
+# ONLINE line ever means it's been on line power the whole time (matches what's
+# actually been observed — the daemon didn't even log an explicit ONLINE at boot).
+LAST_COMMS_LINE=$(grep -E "Communications with UPS ${UPS_NAME}@${UPS_HOST}|UPS ${UPS_NAME}@${UPS_HOST} is unavailable" "$UPSMON_LOG" 2>/dev/null | tail -1)
+COMMS_OK="yes"
+[ -n "$LAST_COMMS_LINE" ] && ! echo "$LAST_COMMS_LINE" | grep -q "established" && COMMS_OK="no"
+
+LAST_POWER_LINE=$(grep -E "UPS ${UPS_NAME}@${UPS_HOST} on (line power|battery)" "$UPSMON_LOG" 2>/dev/null | tail -1)
+ON_BATTERY="no"
+echo "$LAST_POWER_LINE" | grep -q "on battery" && ON_BATTERY="yes"
+
+RB_SEEN="no"
+grep -q "UPS ${UPS_NAME}@${UPS_HOST} battery needs to be replaced" "$UPSMON_LOG" 2>/dev/null && RB_SEEN="yes"
+
+UPS_TLDR="  ups: local-upsmon=${UPSMON_ALIVE} comms=${COMMS_OK} on-battery=${ON_BATTERY}"
+if [ "$UPSMON_ALIVE" = "no" ]; then
+    UPS_BAD=1; UPS_REASON="local upsmon daemon not running"
+    UPS_TLDR="⚠️${UPS_TLDR} — LOCAL DAEMON DOWN"
+elif [ "$COMMS_OK" = "no" ]; then
+    UPS_BAD=1; UPS_REASON="UPS unreadable (comms lost)"
+    UPS_TLDR="⚠️${UPS_TLDR} — COMMS LOST"
+elif [ "$RB_SEEN" = "yes" ]; then
+    UPS_BAD=1; UPS_REASON="UPS replace battery"
+    UPS_TLDR="⚠️${UPS_TLDR} — REPLACE BATTERY"
+elif [ "$ON_BATTERY" = "yes" ]; then
+    UPS_BAD=1; UPS_REASON="UPS on battery"
+    UPS_TLDR="⚠️${UPS_TLDR} — ON BATTERY NOW"
 else
-    UPS_BAD=1
-    UPS_REASON="UPS unreadable"
-    UPS_TLDR="⚠️  ups: unreadable (${UPSC} ${UPS_NAME}@${UPS_HOST} returned nothing)"
+    UPS_TLDR="${UPS_TLDR} ✓"
 fi
+
+UPS_BLOCK="Most recent comms line: ${LAST_COMMS_LINE:-(none logged — healthy default, no drops seen)}
+Most recent power line:  ${LAST_POWER_LINE:-(none logged — assume on line power)}
+(Read from ${UPSMON_LOG}, the real daemon's own log — not a live query. See this
+script's 2026-08-08 comment above for why upsc itself isn't used here.)"
+
 BODY+="=== UPS (${UPS_NAME}@${UPS_HOST}) ===\n${UPS_BLOCK}\n\n"
 [ "$UPS_BAD" -eq 1 ] && { OK=0; REASON="$UPS_REASON"; }
 

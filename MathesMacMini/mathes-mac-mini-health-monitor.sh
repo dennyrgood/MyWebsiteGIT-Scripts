@@ -45,14 +45,30 @@ SYNCTHING_PULL_ERR_THRESHOLD=5
 
 # 2026-08-08: NUT/UPS client checks, added once the Mac Mini's NUT client (netclient
 # only, monitoring ups0 on the NAS) was verified end to end — see the UPS/NUT setup
-# guide, Section 7, and scripts repo launchdaemons/. Modeled on
-# WorkBenchUnix/wbu-health-monitor.sh's UPS check, but this box is a client, not a
-# server, so it needs one extra check WBU's doesn't: see the comment above the check
-# block below for why.
-UPSC="/opt/homebrew/bin/upsc"          # absolute path — launchd's environment has no /opt/homebrew on PATH
+# guide, Section 7, and scripts repo launchdaemons/.
+#
+# Originally modeled on WorkBenchUnix/wbu-health-monitor.sh's UPS check (a fresh `upsc`
+# query every run), but that was replaced same-day after `upsc` turned out to fail
+# ~100% of the time -- in ~5ms, "No route to host" -- specifically when invoked from a
+# gui-domain LaunchAgent, while the same query from an interactive shell, and even a
+# plain `nc` to the identical host:port from the identical LaunchAgent context, both
+# succeeded every time. Ruled out with actual evidence, not assumption: dual-homed
+# interfaces, stale routes, third-party firewalls, macOS's own Application Firewall
+# (disabled), Tailscale route-overlap, Tailscale entirely (tested fully down, still
+# failed), binary quarantine, and the TCC grant table (empty for every relevant
+# service). Root cause was never nailed down.
+#
+# Rather than keep chasing it, this reads the REAL upsmon daemon's own log
+# (UPSMON_LOG below) instead of opening a second, independent connection. This is
+# arguably more correct anyway: upsmon's connection is the one that actually matters
+# for shutdown protection, made once at boot and proven stable since (zero comms drops
+# other than the one expected blip before the network came up post-boot) -- what this
+# check needs to know is whether THAT connection is healthy, not whether some other,
+# unrelated fresh connection attempt from a different process context can succeed.
 UPS_NAME="ups0"
 UPS_HOST="192.168.178.123"             # FleetNAS; ignorelb + override.battery.charge.low=15 there IS this
                                         # box's LOWBATT threshold — no local upssched timer exists here
+UPSMON_LOG="/Library/Logs/mmm_nut_upsmon.log"
 UPS_FAIL_THRESHOLD=2                   # consecutive 5-min samples before alerting (anti-flap)
 UPSMON_PROC_PATTERN="/opt/homebrew/sbin/upsmon"
 
@@ -78,36 +94,33 @@ DISK_TRIGGERED=0
 [ -n "$DISK_OVER" ] && DISK_TRIGGERED=1
 
 # --- Check: NUT/UPS ---
-# Two independent things can go wrong here, and checking only one hides the other:
-#   1. `upsc ups0@192.168.178.123` fails outright — the NAS or the network path to it
-#      is broken. Same class of failure WBU's own monitor watches for.
-#   2. `upsc` succeeds, but the LOCAL com.dennis.mmm-nut-upsmon daemon isn't running.
-#      This is the client-only failure mode WBU's template doesn't need: `upsc` here
-#      opens its own fresh connection straight to the NAS's upsd, completely bypassing
-#      our local upsmon — so a dead local daemon and a healthy one look IDENTICAL to
-#      it. Only a direct process check catches this. If it's not running, this box has
-#      no shutdown protection at all even though the NAS/network look perfectly fine.
-UPS_OUT=$("$UPSC" "${UPS_NAME}@${UPS_HOST}" 2>/dev/null)
-UPS_STATUS=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="ups.status"{print $2}')
-UPS_CHARGE=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="battery.charge"{print $2}')
-
+# Log-based, not a live query -- see the 2026-08-08 comment above for why. NUT only
+# logs on STATE CHANGE, not periodically, so a healthy connection that's never dropped
+# produces zero comms lines after the initial connect. "No matching line ever seen"
+# therefore means healthy by default, not unknown/bad -- only a COMMBAD/NOCOMM line as
+# the MOST RECENT such line (i.e. not yet followed by a COMMOK) means real trouble.
+# Message text matches NUT's own default NOTIFYMSG templates (upsmon.conf.sample),
+# confirmed against this box's actual log output, not guessed.
+LAST_COMMS_LINE=$(grep -E "Communications with UPS ${UPS_NAME}@${UPS_HOST}|UPS ${UPS_NAME}@${UPS_HOST} is unavailable" "$UPSMON_LOG" 2>/dev/null | tail -1)
 UPS_UNREADABLE_TRIGGERED=0
-[ -z "$UPS_STATUS" ] && UPS_UNREADABLE_TRIGGERED=1
-# 2026-08-08 real incident: this fired continuously (streak climbed to 26+ over ~2.5h)
-# with "Connection failure: No route to host" -- not a NAS/network outage at all. Root
-# cause: this Mac Mini was dual-homed, Ethernet (en0) AND Wi-Fi (en1) both active on the
-# same 192.168.178.0/24 subnet. upsc opens a fresh connection every run and resolved the
-# route inconsistently under launchd's gui domain; the system-domain upsmon daemon
-# (one long-lived connection made once at boot) was never affected. Fixed by disabling
-# Wi-Fi -- this box has wired Ethernet and gains nothing from being on both. If this
-# fires again, check `ifconfig | grep -E "^en|inet "` for a second active interface on
-# the same subnet before assuming the NAS or network is actually down.
+if [ -n "$LAST_COMMS_LINE" ] && ! echo "$LAST_COMMS_LINE" | grep -q "established"; then
+    UPS_UNREADABLE_TRIGGERED=1
+fi
 
 # RB = replace battery — the only UPS fault that warns in advance rather than after
-# the fact. No streak: it's a sticky fault, not a transient.
+# the fact. No streak: it's a sticky fault, not a transient. LIMITATION: NUT has no
+# "battery no longer needs replacing" notify type, so a log-based REPLBATT match can
+# never auto-clear the way the old live-query version could -- once this fires, it
+# stays ACTIVE until manually resolved (replace/inspect the battery, then clear
+# UPS_REPLACE_BATTERY_ACTIVE in $STATE_FILE or truncate $UPSMON_LOG).
 UPS_REPLACE_BATTERY_TRIGGERED=0
-case " $UPS_STATUS " in *" RB "*) UPS_REPLACE_BATTERY_TRIGGERED=1 ;; esac
+grep -q "UPS ${UPS_NAME}@${UPS_HOST} battery needs to be replaced" "$UPSMON_LOG" 2>/dev/null && UPS_REPLACE_BATTERY_TRIGGERED=1
 
+# Two independent things can go wrong, and checking only one hides the other: the NAS/
+# network path could be down (caught above), or it could be fine while the LOCAL
+# com.dennis.mmm-nut-upsmon daemon itself isn't running -- a dead local daemon means no
+# log is even being written, so the comms check above would stay stuck on whatever it
+# last saw. Only a direct process check catches that.
 UPSMON_MISSING_TRIGGERED=0
 pgrep -f "$UPSMON_PROC_PATTERN" >/dev/null 2>&1 || UPSMON_MISSING_TRIGGERED=1
 
@@ -223,21 +236,23 @@ case "$(check_condition $DISK_TRIGGERED $DISK_LAST_ALERT $DISK_ACTIVE)" in
 esac
 
 # UPS unreadable (streak-based: a daemon restart during install.sh/kickstart makes
-# upsc/the daemon blip briefly — same reasoning as WBU's identical threshold)
+# the log blip briefly — same reasoning as WBU's identical threshold)
 read verdict new_streak <<< "$(check_condition_streak $UPS_UNREADABLE_TRIGGERED $UPS_UNREADABLE_LAST_ALERT $UPS_UNREADABLE_ACTIVE $UPS_UNREADABLE_STREAK $UPS_FAIL_THRESHOLD)"
 UPS_UNREADABLE_STREAK=$new_streak
 case "$verdict" in
     alert)
         UPS_UNREADABLE_LAST_ALERT=$NOW; UPS_UNREADABLE_ACTIVE=1
         ALERT_BODY+="=== UPS UNREADABLE ===\n"
-        ALERT_BODY+="${UPSC} ${UPS_NAME}@${UPS_HOST} returned nothing for ${new_streak} consecutive checks (~$((new_streak * 5)) min).\n"
+        ALERT_BODY+="${UPSMON_LOG}'s most recent comms line for ${UPS_NAME}@${UPS_HOST} was not"
+        ALERT_BODY+=" 'established', for ${new_streak} consecutive checks (~$((new_streak * 5)) min):\n"
+        ALERT_BODY+="  ${LAST_COMMS_LINE:-(no comms line ever logged, but daemon reports trouble)}\n"
         ALERT_BODY+="This Mac Mini has NO shutdown signal while this is broken.\n\n"
         ALERT_BODY+="Check, in order:\n"
         ALERT_BODY+="  1. Is the Mac Mini's network (Wi-Fi/Ethernet) actually up?\n"
         ALERT_BODY+="  2. Is the NAS (192.168.178.123) reachable at all — ping it.\n"
         ALERT_BODY+="  3. ssh dhm@192.168.178.123 and check upsd is running there.\n\n"
         ;;
-    clear)   UPS_UNREADABLE_ACTIVE=0; CLEAR_BODY+="  - UPS readable again (${UPS_STATUS}, ${UPS_CHARGE}%)\n" ;;
+    clear)   UPS_UNREADABLE_ACTIVE=0; CLEAR_BODY+="  - UPS readable again (${LAST_COMMS_LINE})\n" ;;
     suppress) UPS_UNREADABLE_ACTIVE=1 ;;
     wait|ok) UPS_UNREADABLE_ACTIVE=0 ;;
 esac
@@ -247,9 +262,11 @@ case "$(check_condition $UPS_REPLACE_BATTERY_TRIGGERED $UPS_REPLACE_BATTERY_LAST
     alert)
         UPS_REPLACE_BATTERY_LAST_ALERT=$NOW; UPS_REPLACE_BATTERY_ACTIVE=1
         ALERT_BODY+="=== UPS REPLACE BATTERY ===\n"
-        ALERT_BODY+="${UPS_NAME} reports RB (status: ${UPS_STATUS}, charge: ${UPS_CHARGE}%).\n"
+        ALERT_BODY+="${UPSMON_LOG} logged a battery-needs-replacing notice for ${UPS_NAME}@${UPS_HOST}.\n"
         ALERT_BODY+="This is a fleet-wide fault (UPS #1, on the NAS) — it also affects the\n"
-        ALERT_BODY+="router, switch and NAS itself, not just this Mac Mini.\n\n"
+        ALERT_BODY+="router, switch and NAS itself, not just this Mac Mini. NUT has no 'no longer\n"
+        ALERT_BODY+="needs replacing' event, so this will keep re-alerting every ${ALERT_INTERVAL}s until\n"
+        ALERT_BODY+="manually cleared in \$STATE_FILE once actually resolved.\n\n"
         ;;
     clear)   UPS_REPLACE_BATTERY_ACTIVE=0; CLEAR_BODY+="  - UPS no longer reporting replace-battery\n" ;;
     suppress) UPS_REPLACE_BATTERY_ACTIVE=1 ;;
@@ -350,32 +367,42 @@ What to do:
   2. If hung: quit and relaunch the app (or reboot if it won't quit)
 
 UPS UNREADABLE:
-upsc could not reach ${UPS_NAME}@${UPS_HOST} (the NAS) for ${UPS_FAIL_THRESHOLD} consecutive
-checks. This box has no shutdown signal at all until it clears.
+${UPSMON_LOG}'s most recent comms line for ${UPS_NAME}@${UPS_HOST} was a drop
+(COMMBAD/NOCOMM), not yet followed by a COMMOK, for ${UPS_FAIL_THRESHOLD} consecutive
+checks. This box has no shutdown signal at all until it clears. This reads the
+real upsmon daemon's own log rather than an independent live query — see the
+dated comment above the check in the script for why (upsc turned out to be
+unreliable specifically under launchd for reasons never fully root-caused).
 
 What to do:
-  1. Confirm this Mac Mini's own network is up.
-  2. ping 192.168.178.123 — is the NAS reachable?
-  3. ssh dhm@192.168.178.123 and check upsd/the nutdrv_qx driver are alive.
+  1. tail -50 /Library/Logs/mmm_nut_upsmon.log — see the actual daemon's view
+  2. Confirm this Mac Mini's own network is up.
+  3. ping 192.168.178.123 — is the NAS reachable?
+  4. ssh dhm@192.168.178.123 and check upsd/the nutdrv_qx driver are alive.
 
 UPS REPLACE BATTERY:
-${UPS_NAME} (UPS #1, on the NAS) reports RB — it believes its battery can no
-longer hold a useful charge. Fleet-wide, not specific to this Mac Mini.
+${UPSMON_LOG} logged a battery-needs-replacing notice for ${UPS_NAME} (UPS #1,
+on the NAS) — it believes its battery can no longer hold a useful charge.
+Fleet-wide, not specific to this Mac Mini. Sticky: NUT has no "resolved" event
+for this, so it will keep re-alerting until manually cleared once actioned.
 
 What to do:
   1. Check the physical UPS's own front-panel indicator.
   2. Plan a battery replacement — runtime during a real outage may be far
      shorter than expected.
+  3. Once replaced/resolved: clear UPS_REPLACE_BATTERY_ACTIVE in \$STATE_FILE
+     (or truncate ${UPSMON_LOG}) so this stops re-alerting.
 
 LOCAL UPSMON DAEMON MISSING:
 No process matching '${UPSMON_PROC_PATTERN}' for ${UPS_FAIL_THRESHOLD} consecutive checks.
 The NAS and network can be perfectly healthy and this alert still fires —
-it means THIS box's own shutdown-trigger process died, silently, which upsc
-alone can't detect (see the comment in the script's NUT/UPS check).
+it means THIS box's own shutdown-trigger process died. A dead daemon also means
+${UPSMON_LOG} stops being written at all, so the UPS-unreadable check above
+can't see this on its own — only a direct process check catches it.
 
 What to do:
   1. sudo launchctl print system/com.dennis.mmm-nut-upsmon
-  2. cat /Library/Logs/mmm_nut_upsmon.log — look for why it exited
+  2. cat ${UPSMON_LOG} — look for why it exited
   3. cd ~/repos/scripts/launchdaemons && sudo ./install.sh   -- reinstall
 ------------------------------------------------------------------------"
 
