@@ -8,8 +8,9 @@
 #
 # Unlike WBU's report, this does NOT scan for kernel panics / unclean reboots via
 # journalctl — that's Linux-specific and has no direct macOS equivalent wired up yet.
-# Scope is deliberately narrow (Plex sync only) per 2026-08-04 decision; extend here
-# if/when more jobs run on this box.
+# Scope was Plex sync only per the 2026-08-04 decision; NUT/UPS was added 2026-08-08
+# once this box's own upsmon client was verified end to end. Extend here if/when more
+# jobs run on this box.
 
 MSMTP="/opt/homebrew/bin/msmtp"
 TO="dennyrgood@yahoo.com"
@@ -20,6 +21,15 @@ STALE_SECS=108000   # 30h — backup cron fires ~4am, report runs a few hours la
                      # (large media files over RAID5) is less predictable than WBU's.
 MONITOR_STATE="/tmp/mathes-mac-mini-monitor-state.tmp"
 MONITOR_STALE_SECS=600   # 10 min — mmm-health-monitor runs every 5 min via launchd
+
+# 2026-08-08: NUT/UPS, added once the Mac Mini's NUT client was verified end to end
+# (UPS/NUT setup guide, Section 7). Real-time faults (unreadable, replace-battery,
+# local daemon missing) are mmm-health-monitor's job and already surface via the active-
+# alerts line below; this is the nightly view — what the UPS says right now.
+UPSC="/opt/homebrew/bin/upsc"
+UPS_NAME="ups0"
+UPS_HOST="192.168.178.123"
+UPSMON_PROC_PATTERN="/opt/homebrew/sbin/upsmon"
 
 PLEX_LOG=$(ls -1t "$HOME/.cache/fleetnas-sync/plex_"*.log 2>/dev/null | head -1)
 PLEX_LOG=${PLEX_LOG:-"$HOME/.cache/fleetnas-sync/plex_NONE.log"}
@@ -43,7 +53,45 @@ fmt_age() {
 OK=1
 REASON="all healthy"
 
+# --- UPS / NUT ---
+# Computed and gated FIRST: no shutdown protection outranks a stale backup log, same
+# priority WBU's nightly summary gives its own UPS check relative to log-string checks.
+# Everything below this block that can set OK=0 is guarded with `[ "$OK" -eq 1 ]` so it
+# can't clobber this REASON if the UPS is what's actually wrong.
+UPS_BAD=0
+UPS_REASON=""
+UPS_TLDR="  ups: (unavailable)"
+UPS_BLOCK="(${UPSC} returned nothing for ${UPS_NAME}@${UPS_HOST} — see mmm-health-monitor alerts)"
+UPS_OUT=$("$UPSC" "${UPS_NAME}@${UPS_HOST}" 2>/dev/null)
+if [ -n "$UPS_OUT" ]; then
+    U_STATUS=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="ups.status"{print $2}')
+    U_CHARGE=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="battery.charge"{print $2}')
+    UPSMON_ALIVE="no"
+    pgrep -f "$UPSMON_PROC_PATTERN" >/dev/null 2>&1 && UPSMON_ALIVE="yes"
+    UPS_TLDR="  ups: ${U_STATUS} charge=${U_CHARGE}% local-upsmon=${UPSMON_ALIVE}"
+    case " $U_STATUS " in
+        *" OB "*) UPS_BAD=1; UPS_REASON="UPS on battery";      UPS_TLDR="⚠️${UPS_TLDR} — ON BATTERY NOW" ;;
+        *" RB "*) UPS_BAD=1; UPS_REASON="UPS replace battery"; UPS_TLDR="⚠️${UPS_TLDR} — REPLACE BATTERY" ;;
+        *) if [ "$UPSMON_ALIVE" = "no" ]; then
+               # upsc talks straight to the NAS, bypassing our local daemon entirely —
+               # a healthy reading here does NOT mean this box has shutdown protection.
+               UPS_BAD=1; UPS_REASON="local upsmon daemon not running"
+               UPS_TLDR="⚠️${UPS_TLDR} — LOCAL DAEMON DOWN"
+           else
+               UPS_TLDR="${UPS_TLDR} ✓"
+           fi ;;
+    esac
+    UPS_BLOCK="$UPS_OUT"
+else
+    UPS_BAD=1
+    UPS_REASON="UPS unreadable"
+    UPS_TLDR="⚠️  ups: unreadable (${UPSC} ${UPS_NAME}@${UPS_HOST} returned nothing)"
+fi
+BODY+="=== UPS (${UPS_NAME}@${UPS_HOST}) ===\n${UPS_BLOCK}\n\n"
+[ "$UPS_BAD" -eq 1 ] && { OK=0; REASON="$UPS_REASON"; }
+
 TLDR="============================= TLDR ===============================\n"
+TLDR+="${UPS_TLDR}\n"
 if [ -f "$PLEX_LOG" ]; then
     AGE_SECS=$(( $(date +%s) - $(stat -f %m "$PLEX_LOG") ))
     AGE=$(fmt_age "$AGE_SECS")
@@ -58,13 +106,13 @@ if [ -f "$PLEX_LOG" ]; then
     S2_EXIT=$(echo "$COMPLETE_LINE" | grep -oE 'source2 exit=[0-9]+' | sed 's/.*exit=//')
     VANISHED_COUNT=$(grep -c "file has vanished" "$PLEX_LOG" 2>/dev/null)
     VANISHED_COUNT=${VANISHED_COUNT:-0}
-    if [ -z "$COMPLETE_LINE" ]; then
+    if [ "$OK" -eq 1 ] && [ -z "$COMPLETE_LINE" ]; then
         OK=0; REASON="Plex sync to FleetNAS did not complete cleanly"
-    elif ! [[ "$S1_EXIT" =~ ^(0|24)$ ]] || ! [[ "$S2_EXIT" =~ ^(0|24)$ ]]; then
+    elif [ "$OK" -eq 1 ] && { ! [[ "$S1_EXIT" =~ ^(0|24)$ ]] || ! [[ "$S2_EXIT" =~ ^(0|24)$ ]]; }; then
         OK=0; REASON="Plex sync to FleetNAS did not complete cleanly (source1 exit=${S1_EXIT}, source2 exit=${S2_EXIT})"
-    elif [ "$AGE_SECS" -gt "$STALE_SECS" ]; then
+    elif [ "$OK" -eq 1 ] && [ "$AGE_SECS" -gt "$STALE_SECS" ]; then
         OK=0; REASON="Plex sync log stale (${AGE})"
-    elif [ "$VANISHED_COUNT" -gt 0 ]; then
+    elif [ "$OK" -eq 1 ] && [ "$VANISHED_COUNT" -gt 0 ]; then
         # Transfer succeeded (exit 0/24), but don't fold this into a bare "all
         # healthy" — files missing from the NAS copy is worth seeing even when
         # it's the benign case (Plex renamed/deleted them mid-scan). Not an
@@ -73,7 +121,7 @@ if [ -f "$PLEX_LOG" ]; then
     fi
 else
     TLDR+="  plex_*.log: (file not found)\n"
-    OK=0; REASON="Plex sync log missing — cron may not have run yet"
+    [ "$OK" -eq 1 ] && { OK=0; REASON="Plex sync log missing — cron may not have run yet"; }
 fi
 
 # --- Health monitor watchdog (freshness + active alerts) in TLDR ---

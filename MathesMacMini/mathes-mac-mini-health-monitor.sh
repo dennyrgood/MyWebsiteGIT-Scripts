@@ -13,6 +13,9 @@
 # healthy. Missing vs down distinction per service (mirrors WBU's docker
 # missing-vs-unhealthy split): missing = process not found (crashed/quit), down =
 # process running but the app's own HTTP API isn't answering (hung).
+#
+# 2026-08-08: added NUT/UPS checks (this box's own upsmon client) — see the dated
+# comment further down for what and why.
 
 HOST="mathes-mac-mini"
 TO="dennyrgood@yahoo.com"
@@ -40,8 +43,24 @@ SYNCTHING_API_KEY="rPDLKezk4ppcf6sYDwdmLwtv3jx3ZUvg"
 # threshold syncthing_checker.py already uses for the same reason.
 SYNCTHING_PULL_ERR_THRESHOLD=5
 
+# 2026-08-08: NUT/UPS client checks, added once the Mac Mini's NUT client (netclient
+# only, monitoring ups0 on the NAS) was verified end to end — see the UPS/NUT setup
+# guide, Section 7, and scripts repo launchdaemons/. Modeled on
+# WorkBenchUnix/wbu-health-monitor.sh's UPS check, but this box is a client, not a
+# server, so it needs one extra check WBU's doesn't: see the comment above the check
+# block below for why.
+UPSC="/opt/homebrew/bin/upsc"          # absolute path — launchd's environment has no /opt/homebrew on PATH
+UPS_NAME="ups0"
+UPS_HOST="192.168.178.123"             # FleetNAS; ignorelb + override.battery.charge.low=15 there IS this
+                                        # box's LOWBATT threshold — no local upssched timer exists here
+UPS_FAIL_THRESHOLD=2                   # consecutive 5-min samples before alerting (anti-flap)
+UPSMON_PROC_PATTERN="/opt/homebrew/sbin/upsmon"
+
 # --- Load state (defaults to zero/inactive if file absent) ---
 DISK_LAST_ALERT=0; DISK_ACTIVE=0
+UPS_UNREADABLE_LAST_ALERT=0;      UPS_UNREADABLE_ACTIVE=0; UPS_UNREADABLE_STREAK=0
+UPS_REPLACE_BATTERY_LAST_ALERT=0; UPS_REPLACE_BATTERY_ACTIVE=0
+UPSMON_MISSING_LAST_ALERT=0;      UPSMON_MISSING_ACTIVE=0; UPSMON_MISSING_STREAK=0
 for svc in PLEX SYNCTHING; do
     eval "MISSING_${svc}_LAST_ALERT=0; MISSING_${svc}_ACTIVE=0; MISSING_${svc}_STREAK=0"
     eval "DOWN_${svc}_LAST_ALERT=0;    DOWN_${svc}_ACTIVE=0;    DOWN_${svc}_STREAK=0"
@@ -57,6 +76,36 @@ for v in "${DISK_VOLUMES[@]}"; do
 done
 DISK_TRIGGERED=0
 [ -n "$DISK_OVER" ] && DISK_TRIGGERED=1
+
+# --- Check: NUT/UPS ---
+# Two independent things can go wrong here, and checking only one hides the other:
+#   1. `upsc ups0@192.168.178.123` fails outright — the NAS or the network path to it
+#      is broken. Same class of failure WBU's own monitor watches for.
+#   2. `upsc` succeeds, but the LOCAL com.dennis.mmm-nut-upsmon daemon isn't running.
+#      This is the client-only failure mode WBU's template doesn't need: `upsc` here
+#      opens its own fresh connection straight to the NAS's upsd, completely bypassing
+#      our local upsmon — so a dead local daemon and a healthy one look IDENTICAL to
+#      it. Only a direct process check catches this. If it's not running, this box has
+#      no shutdown protection at all even though the NAS/network look perfectly fine.
+UPS_OUT=$("$UPSC" "${UPS_NAME}@${UPS_HOST}" 2>/dev/null)
+UPS_STATUS=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="ups.status"{print $2}')
+UPS_CHARGE=$(printf '%s\n' "$UPS_OUT" | awk -F': ' '$1=="battery.charge"{print $2}')
+
+UPS_UNREADABLE_TRIGGERED=0
+[ -z "$UPS_STATUS" ] && UPS_UNREADABLE_TRIGGERED=1
+
+# RB = replace battery — the only UPS fault that warns in advance rather than after
+# the fact. No streak: it's a sticky fault, not a transient.
+UPS_REPLACE_BATTERY_TRIGGERED=0
+case " $UPS_STATUS " in *" RB "*) UPS_REPLACE_BATTERY_TRIGGERED=1 ;; esac
+
+UPSMON_MISSING_TRIGGERED=0
+pgrep -f "$UPSMON_PROC_PATTERN" >/dev/null 2>&1 || UPSMON_MISSING_TRIGGERED=1
+
+# Deliberately NOT alerting on OB (on battery) — same reasoning as WBU: a brief mains
+# flicker would page for nothing, and this box has no upssched timer to interact with
+# anyway (it relies directly on the NAS's LOWBATT). Worth a nightly mention, not a
+# real-time page — see nightly_summary.sh.
 
 # --- Check: Plex + Syncthing (process presence, then HTTP health if present) ---
 declare -A MISSING_TRIGGERED DOWN_TRIGGERED
@@ -164,6 +213,58 @@ case "$(check_condition $DISK_TRIGGERED $DISK_LAST_ALERT $DISK_ACTIVE)" in
     ok)       DISK_ACTIVE=0 ;;
 esac
 
+# UPS unreadable (streak-based: a daemon restart during install.sh/kickstart makes
+# upsc/the daemon blip briefly — same reasoning as WBU's identical threshold)
+read verdict new_streak <<< "$(check_condition_streak $UPS_UNREADABLE_TRIGGERED $UPS_UNREADABLE_LAST_ALERT $UPS_UNREADABLE_ACTIVE $UPS_UNREADABLE_STREAK $UPS_FAIL_THRESHOLD)"
+UPS_UNREADABLE_STREAK=$new_streak
+case "$verdict" in
+    alert)
+        UPS_UNREADABLE_LAST_ALERT=$NOW; UPS_UNREADABLE_ACTIVE=1
+        ALERT_BODY+="=== UPS UNREADABLE ===\n"
+        ALERT_BODY+="${UPSC} ${UPS_NAME}@${UPS_HOST} returned nothing for ${new_streak} consecutive checks (~$((new_streak * 5)) min).\n"
+        ALERT_BODY+="This Mac Mini has NO shutdown signal while this is broken.\n\n"
+        ALERT_BODY+="Check, in order:\n"
+        ALERT_BODY+="  1. Is the Mac Mini's network (Wi-Fi/Ethernet) actually up?\n"
+        ALERT_BODY+="  2. Is the NAS (192.168.178.123) reachable at all — ping it.\n"
+        ALERT_BODY+="  3. ssh dhm@192.168.178.123 and check upsd is running there.\n\n"
+        ;;
+    clear)   UPS_UNREADABLE_ACTIVE=0; CLEAR_BODY+="  - UPS readable again (${UPS_STATUS}, ${UPS_CHARGE}%)\n" ;;
+    suppress) UPS_UNREADABLE_ACTIVE=1 ;;
+    wait|ok) UPS_UNREADABLE_ACTIVE=0 ;;
+esac
+
+# UPS replace-battery
+case "$(check_condition $UPS_REPLACE_BATTERY_TRIGGERED $UPS_REPLACE_BATTERY_LAST_ALERT $UPS_REPLACE_BATTERY_ACTIVE)" in
+    alert)
+        UPS_REPLACE_BATTERY_LAST_ALERT=$NOW; UPS_REPLACE_BATTERY_ACTIVE=1
+        ALERT_BODY+="=== UPS REPLACE BATTERY ===\n"
+        ALERT_BODY+="${UPS_NAME} reports RB (status: ${UPS_STATUS}, charge: ${UPS_CHARGE}%).\n"
+        ALERT_BODY+="This is a fleet-wide fault (UPS #1, on the NAS) — it also affects the\n"
+        ALERT_BODY+="router, switch and NAS itself, not just this Mac Mini.\n\n"
+        ;;
+    clear)   UPS_REPLACE_BATTERY_ACTIVE=0; CLEAR_BODY+="  - UPS no longer reporting replace-battery\n" ;;
+    suppress) UPS_REPLACE_BATTERY_ACTIVE=1 ;;
+    ok)       UPS_REPLACE_BATTERY_ACTIVE=0 ;;
+esac
+
+# Local upsmon daemon missing (streak-based, same threshold — a `kickstart -k` restart
+# or an OS-update daemon reset shouldn't page on the first sample)
+read verdict new_streak <<< "$(check_condition_streak $UPSMON_MISSING_TRIGGERED $UPSMON_MISSING_LAST_ALERT $UPSMON_MISSING_ACTIVE $UPSMON_MISSING_STREAK $UPS_FAIL_THRESHOLD)"
+UPSMON_MISSING_STREAK=$new_streak
+case "$verdict" in
+    alert)
+        UPSMON_MISSING_LAST_ALERT=$NOW; UPSMON_MISSING_ACTIVE=1
+        ALERT_BODY+="=== LOCAL UPSMON DAEMON MISSING ===\n"
+        ALERT_BODY+="No process matching '${UPSMON_PROC_PATTERN}' for ${new_streak} consecutive checks (~$((new_streak * 5)) min).\n"
+        ALERT_BODY+="The NAS/UPS may look perfectly healthy above — this box still has NO\n"
+        ALERT_BODY+="shutdown protection while its own upsmon isn't running.\n\n"
+        ALERT_BODY+="Check: sudo launchctl print system/com.dennis.mmm-nut-upsmon\n\n"
+        ;;
+    clear)   UPSMON_MISSING_ACTIVE=0; CLEAR_BODY+="  - local upsmon daemon is back\n" ;;
+    suppress) UPSMON_MISSING_ACTIVE=1 ;;
+    wait|ok) UPSMON_MISSING_ACTIVE=0 ;;
+esac
+
 # Plex + Syncthing
 for svc in PLEX SYNCTHING; do
     # Missing (process not found)
@@ -238,12 +339,49 @@ The process is running but its own HTTP API isn't answering (Plex:
 What to do:
   1. curl http://127.0.0.1:32400/identity   /   curl http://127.0.0.1:8384/rest/noauth/health
   2. If hung: quit and relaunch the app (or reboot if it won't quit)
+
+UPS UNREADABLE:
+upsc could not reach ${UPS_NAME}@${UPS_HOST} (the NAS) for ${UPS_FAIL_THRESHOLD} consecutive
+checks. This box has no shutdown signal at all until it clears.
+
+What to do:
+  1. Confirm this Mac Mini's own network is up.
+  2. ping 192.168.178.123 — is the NAS reachable?
+  3. ssh dhm@192.168.178.123 and check upsd/the nutdrv_qx driver are alive.
+
+UPS REPLACE BATTERY:
+${UPS_NAME} (UPS #1, on the NAS) reports RB — it believes its battery can no
+longer hold a useful charge. Fleet-wide, not specific to this Mac Mini.
+
+What to do:
+  1. Check the physical UPS's own front-panel indicator.
+  2. Plan a battery replacement — runtime during a real outage may be far
+     shorter than expected.
+
+LOCAL UPSMON DAEMON MISSING:
+No process matching '${UPSMON_PROC_PATTERN}' for ${UPS_FAIL_THRESHOLD} consecutive checks.
+The NAS and network can be perfectly healthy and this alert still fires —
+it means THIS box's own shutdown-trigger process died, silently, which upsc
+alone can't detect (see the comment in the script's NUT/UPS check).
+
+What to do:
+  1. sudo launchctl print system/com.dennis.mmm-nut-upsmon
+  2. cat /Library/Logs/mmm_nut_upsmon.log — look for why it exited
+  3. cd ~/repos/scripts/launchdaemons && sudo ./install.sh   -- reinstall
 ------------------------------------------------------------------------"
 
 # --- Save state ---
 {
     echo "DISK_LAST_ALERT=$DISK_LAST_ALERT"
     echo "DISK_ACTIVE=$DISK_ACTIVE"
+    echo "UPS_UNREADABLE_LAST_ALERT=$UPS_UNREADABLE_LAST_ALERT"
+    echo "UPS_UNREADABLE_ACTIVE=$UPS_UNREADABLE_ACTIVE"
+    echo "UPS_UNREADABLE_STREAK=$UPS_UNREADABLE_STREAK"
+    echo "UPS_REPLACE_BATTERY_LAST_ALERT=$UPS_REPLACE_BATTERY_LAST_ALERT"
+    echo "UPS_REPLACE_BATTERY_ACTIVE=$UPS_REPLACE_BATTERY_ACTIVE"
+    echo "UPSMON_MISSING_LAST_ALERT=$UPSMON_MISSING_LAST_ALERT"
+    echo "UPSMON_MISSING_ACTIVE=$UPSMON_MISSING_ACTIVE"
+    echo "UPSMON_MISSING_STREAK=$UPSMON_MISSING_STREAK"
     for svc in PLEX SYNCTHING; do
         for k in MISSING_${svc}_LAST_ALERT MISSING_${svc}_ACTIVE MISSING_${svc}_STREAK \
                  DOWN_${svc}_LAST_ALERT DOWN_${svc}_ACTIVE DOWN_${svc}_STREAK; do
