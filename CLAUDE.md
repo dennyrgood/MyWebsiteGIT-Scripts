@@ -6,6 +6,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A flat grab-bag of standalone shell/PowerShell/Python scripts and a few multi-file tool subdirectories for managing a personal fleet of machines (Mac, Windows, Ubuntu) — fleet status monitoring, ComfyUI model/node management, Ollama helpers, git tooling, backups, and a Flask backend migration. There is no top-level build system, package manager, or test suite (no root `package.json`, `requirements.txt`, `pyproject.toml`, or `Makefile`). Most things are invoked as standalone executables (`./script-name`) or sourced shell functions.
 
+## Fleet machine aliases
+
+The user refers to fleet machines by short alias in conversation — recognize these (fuller table + snapshot scripts in `fleet-configs/README_GET_CONFIG.md`):
+
+| Alias | Host/Tailscale name | scripts subdir | OS |
+|---|---|---|---|
+| amsdt | amsterdamdesktop | `AmsterdamDesktop/` | Windows |
+| cwh | chatworkhorse | `ChatWorkHorse/` | Windows |
+| cwhu | chatworkhorseunix | `ChatWorkhorseUnix/` | Ubuntu |
+| ib | imagebeast | `ImageBeast/` | Windows |
+| mb | denniss-macbook-air | `DennissMacBookAir/` | macOS — main workstation |
+| mb2 | denniss-2nd-macbook-air | `Denniss2ndMacBookAir/` | macOS |
+| mmm | mathes-mac-mini | `MathesMacMini/` | macOS |
+| nas | fleetnas | `FleetNAS/` | Ubuntu |
+| rws | remotews | `RemoteWS/` | Windows |
+| s3g | surface3-gc | `Surface3GC/` | Windows |
+| tb | travelbeast | `TravelBeast/` | Windows |
+| wbu | workbenchunix | `WorkBenchUnix/` | Ubuntu |
+
 ## Flask backend migration (in progress)
 
 `Flask/` is the **new, canonical** location for backend code being consolidated out of several previously-separate app repos. The corresponding **older/diverged** copies live as sibling repos one level up, at `/Users/dennishmathes/repos/`:
