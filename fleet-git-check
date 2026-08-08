@@ -24,6 +24,7 @@ FLEET_HOSTS=(
   "remotews:win"
   "workbenchunix:ubuntu"
   "chatworkhorseunix:ubuntu"
+  "fleetnas:ubuntu"
 )
 
 # All fleet hosts now have local repo checkouts (as of 2026-07-27); nothing to skip.
@@ -174,7 +175,14 @@ for host in "${HOSTS[@]}"; do
     fi
   else
     script=$(remote_bash_script "$FETCH")
-    if ! output=$(run_with_timeout 20 ssh -o ConnectTimeout=5 -o BatchMode=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$host" "bash -s" <<< "$script" 2>/dev/null); then
+    # Base64-encode and pipe through the remote command rather than a heredoc
+    # into "bash -s": run_with_timeout backgrounds ssh (`"$@" &`), and in a
+    # non-interactive shell a backgrounded command has its stdin implicitly
+    # redirected from /dev/null, silently discarding any heredoc/here-string
+    # meant for it. Encoding the script into the command line itself sidesteps
+    # that entirely (mirrors the win branch's -EncodedCommand approach).
+    encoded=$(printf '%s' "$script" | base64 | tr -d '\n')
+    if ! output=$(run_with_timeout 20 ssh -o ConnectTimeout=5 -o BatchMode=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$host" "echo $encoded | base64 -d | bash" 2>/dev/null); then
       printf "%-24s %s\n" "$host" "UNREACHABLE or SSH error"
       continue
     fi

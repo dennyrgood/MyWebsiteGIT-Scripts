@@ -23,6 +23,7 @@ FLEET_HOSTS=(
   "remotews:win"
   "workbenchunix:ubuntu"
   "chatworkhorseunix:ubuntu"
+  "fleetnas:ubuntu"
 )
 
 host_os() {
