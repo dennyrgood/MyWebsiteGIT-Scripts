@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Fleet-wide git pull: for each fleet host, fast-forward-pulls `scripts` and
-# `fleet-configs` (or whatever --repos names) when they're behind their
+# Fleet-wide git pull: for each fleet host, fast-forward-pulls every repo
+# under its repo root (or just the ones named by --repos) when behind their
 # upstream. Skips any repo with uncommitted changes (dirty) rather than risk
 # a conflict, and skips any repo that isn't a clean fast-forward.
 #
 # Usage: ./fleet-git-pull.sh [--dry-run] [--repos repo1,repo2] [host ...]
 #   --dry-run          report what would be pulled, don't actually pull
-#   --repos r1,r2      comma-separated repo names to consider (default: scripts,fleet-configs)
+#   --repos r1,r2      comma-separated repo names to consider (default: all repos found, like fleet-git-check)
 #   host ...           restrict to specific tailscale names (default: whole fleet)
 
 set -uo pipefail
@@ -40,7 +40,7 @@ host_os() {
 }
 
 DRY_RUN=0
-REPOS="scripts,fleet-configs"
+REPOS=""
 HOSTS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -65,13 +65,21 @@ fi
 remote_bash_script() {
   local repos_csv="$1" dry="$2"
   cat <<EOF
-IFS=',' read -ra REPO_NAMES <<< "$repos_csv"
 for root in "\$HOME/repos" "/c/repos" "/d/repos"; do
   [ -d "\$root" ] && REPO_ROOT="\$root" && break
 done
 [ -z "\${REPO_ROOT:-}" ] && exit 0
-for name in "\${REPO_NAMES[@]}"; do
-  repo="\$REPO_ROOT/\$name"
+REPO_DIRS=()
+if [ -z "$repos_csv" ]; then
+  while IFS= read -r gitdir; do
+    REPO_DIRS+=("\$(dirname "\$gitdir")")
+  done < <(find "\$REPO_ROOT" -maxdepth 3 -name .git -type d 2>/dev/null)
+else
+  IFS=',' read -ra REPO_NAMES <<< "$repos_csv"
+  for n in "\${REPO_NAMES[@]}"; do REPO_DIRS+=("\$REPO_ROOT/\$n"); done
+fi
+for repo in "\${REPO_DIRS[@]}"; do
+  name=\$(basename "\$repo")
   [ -d "\$repo/.git" ] || continue
   cd "\$repo" || continue
   git fetch --quiet 2>/dev/null
@@ -103,12 +111,17 @@ remote_ps_script() {
   local repos_csv="$1" dry="$2"
   cat <<EOF
 \$ProgressPreference = 'SilentlyContinue'
-\$repoNames = "$repos_csv" -split ","
 \$roots = @("C:\repos","D:\repos")
 \$repoRoot = \$roots | Where-Object { Test-Path \$_ } | Select-Object -First 1
 if (-not \$repoRoot) { exit 0 }
-foreach (\$name in \$repoNames) {
-  \$repo = Join-Path \$repoRoot \$name
+if ("$repos_csv" -eq "") {
+  \$repoDirs = Get-ChildItem -Path \$repoRoot -Directory -Recurse -Depth 2 -Filter ".git" -Force -ErrorAction SilentlyContinue | ForEach-Object { \$_.Parent.FullName }
+} else {
+  \$repoNames = "$repos_csv" -split ","
+  \$repoDirs = \$repoNames | ForEach-Object { Join-Path \$repoRoot \$_ }
+}
+foreach (\$repo in \$repoDirs) {
+  \$name = Split-Path \$repo -Leaf
   if (-not (Test-Path (Join-Path \$repo ".git"))) { continue }
   Push-Location \$repo
   git fetch --quiet 2>\$null
