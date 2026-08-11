@@ -12,7 +12,7 @@ at every login, restart automatically if they crash, and log to files.
 | `com.dennis.search-adv-web` | search_adv web GUI (`search_adv/.venv` python, `search_adv_web.py`) | 5025 | `~/Library/Logs/search_adv_web.log` |
 | `com.dennis.search-shows-web` | search_shows web GUI — cast/actor/show-info via TVmaze/TMDB/OMDb (`search_shows/.venv` python, `search_shows_web.py`) | 5020 | `~/Library/Logs/search_shows_web.log` |
 | `com.dennis.travel-http` | `python3 -m http.server` in `~/repos/dennyrgood.github.io/travel` | 5030 | `~/Library/Logs/travel_http.log` |
-| `com.dennis.tmdb-explorer` | TMDB explorer web GUI — raw TMDB lookup/browse (`tmdb_explorer/.venv` python, `tmdb_explorer.py`) | 5035 | `~/Library/Logs/tmdb_explorer.log` |
+| `com.dennis.tmdb-explorer` | TMDB explorer web GUI — raw TMDB lookup/browse (`tmdb_explorer/.venv` python, `tmdb_explorer.py`). Runs on both mb (the canonical/live instance at `mb.ldmathes.cc:5035`) and mmm (independent second instance, added 2026-08-11) — different hosts, same plist and port, no conflict. | 5035 | `~/Library/Logs/tmdb_explorer.log` |
 | `com.dennis.heartbeat-writer` | `Status/onedrive_heartbeat_writer_all_macs.py` (fleet heartbeat → local `~/fleet_monitor`) | — | `~/Library/Logs/heartbeat_writer.log` |
 | `com.dennis.fleet-metrics-server` | `Status/fleet_metrics_server.py` (serves `~/fleet_monitor` to the checker over Tailscale) | 9100 | `~/Library/Logs/fleet_metrics_server.log` |
 | `com.dennis.mmm-plex-backup` | `MathesMacMini/backup_plex_to_fleetnas.sh` — daily 4am rsync mirror, Mac Mini Plex library → FleetNAS | — | `~/Library/Logs/mmm_plex_backup.log` (script's own detailed log: `~/.cache/fleetnas-sync/plex_*.log`) |
@@ -34,9 +34,10 @@ primary) gets everything; mb2 (`denniss-2nd-macbook-air`) is fleet-only
 (`heartbeat-writer` + `fleet-metrics-server` — no Ollama, no
 search_adv/search_shows/travel/tmdb GUIs); mmm (`mathes-mac-mini`) gets
 those two plus its own three Plex/Syncthing agents (`mmm-plex-backup`,
-`mmm-nightly-summary`, `mmm-health-monitor`). An unrecognized host aborts with an
-error rather than silently installing everything; add it to the `case` statement in
-`install.sh` first.
+`mmm-nightly-summary`, `mmm-health-monitor`) plus `tmdb-explorer` (added
+2026-08-11 — a second, independent instance for browsing directly on that
+box). An unrecognized host aborts with an error rather than silently
+installing everything; add it to the `case` statement in `install.sh` first.
 
 `mmm-plex-backup` briefly lived as a crontab entry instead (2026-08-05) while a
 launchd-specific rsync timeout was being chased down — see the script's own header

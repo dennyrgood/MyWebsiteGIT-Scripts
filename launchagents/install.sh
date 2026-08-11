@@ -6,9 +6,12 @@
 # Host-aware: which agents get installed depends on the Mac's ComputerName
 # (must match its Tailscale name — see launchagents/README.md's Ollama
 # section for why). Unrecognized hosts abort rather than silently
-# installing everything, since the GUI/travel agents are mb (primary)
-# only — mb2 and mmm are fleet-only (heartbeat + metrics server, no
-# Ollama, no search_adv/search_shows/travel/tmdb GUIs).
+# installing everything, since the GUI/travel agents are mostly mb
+# (primary) only — mb2 is fully fleet-only (heartbeat + metrics server,
+# no Ollama, no search_adv/search_shows/travel/tmdb GUIs); mmm is
+# fleet-only plus its own Plex/Syncthing agents and (since 2026-08-11) a
+# second, independent tmdb-explorer instance for browsing directly on
+# that box.
 #
 #   ./install.sh              install/reload this host's agents
 #   ./install.sh --uninstall  stop and remove this host's agents
@@ -37,8 +40,12 @@ FLEET_ONLY="com.dennis.heartbeat-writer com.dennis.fleet-metrics-server"
 # regardless of launchd vs cron — moved back to launchd for consistency with the other
 # two agents. See MathesMacMini/backup_plex_to_fleetnas.sh's header for the full
 # investigation.
-MMM_ONLY="$FLEET_ONLY com.dennis.mmm-plex-backup com.dennis.mmm-nightly-summary com.dennis.mmm-health-monitor"
-ALL_AGENTS="com.dennis.search-adv-web com.dennis.search-shows-web com.dennis.travel-http com.dennis.tmdb-explorer $MMM_ONLY"
+#
+# tmdb-explorer added 2026-08-11: a second, independent instance for browsing
+# directly on mmm, separate from the live one on mb (different host, same port,
+# no conflict). Same plist as mb's — see launchagents/README.md.
+MMM_ONLY="$FLEET_ONLY com.dennis.mmm-plex-backup com.dennis.mmm-nightly-summary com.dennis.mmm-health-monitor com.dennis.tmdb-explorer"
+ALL_AGENTS="com.dennis.search-adv-web com.dennis.search-shows-web com.dennis.travel-http $MMM_ONLY"
 
 RAW_HOST="$(scutil --get ComputerName 2>/dev/null || hostname -s)"
 # Normalize: lowercase, spaces -> hyphens. Not every Mac has been renamed to
