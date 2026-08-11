@@ -98,6 +98,27 @@ def _tcp_connect_once(host: str, port: int, timeout_s: float) -> dict:
         return {"status": "down", "response_time_ms": 0, "detail": f"TCP connect failed: {e}", "timestamp_utc": _now()}
 
 
+def check_port_only(host: str, port: int, timeout_ms: int) -> dict:
+    """
+    Pure TCP-connect check — no ICMP ping. For services where a specific port being
+    open is the actual signal to test, not general host reachability: a daemon can
+    crash independently of the host it runs on staying pingable (e.g. upsd), and
+    check()'s ping-first logic would report "up" without ever touching the port in
+    that case. Retries once before declaring down, matching check()'s behavior.
+    """
+    timeout_s = timeout_ms / 1000
+    result = {"status": "down", "response_time_ms": 0, "detail": "not attempted", "timestamp_utc": _now()}
+    for attempt in range(2):
+        result = _tcp_connect_once(host, port, timeout_s)
+        if result["status"] == "up":
+            # _tcp_connect_once's detail assumes it's being used as check()'s ping
+            # fallback ("ICMP unavailable") — inaccurate here, since no ping was
+            # ever attempted in this path.
+            result["detail"] = f"TCP connect ok (port {port})"
+            return result
+    return result
+
+
 def check(host: str, timeout_ms: int, port: int = 0) -> dict:
     """
     Check if a machine is alive. Primary probe is ICMP ping to its Tailscale

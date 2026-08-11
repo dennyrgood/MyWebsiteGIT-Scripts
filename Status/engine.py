@@ -175,10 +175,13 @@ def _check_service(tailscale_name: str, svc_cfg: dict) -> dict:
 
     # --- Layer 2: Tailscale service check ---
     if check_type == "tcp":
-        # TCP only — no HTTP. Was previously not forwarding `port`, which made this
-        # silently re-run the Layer 1 host ping instead of testing the service's own
-        # port — fixed 2026-08-12 when wiring up the NUT/upsd port-3493 checks.
-        raw = tcp_checker.check(tailscale_name, TIMEOUT_TCP_MS, port=port)
+        # Pure TCP connect to the service's own port — deliberately NOT tcp_checker.check(),
+        # which is ping-first and reports "up" whenever the host answers ICMP at all, even
+        # if this specific port/daemon is down. That distinction is the whole point here:
+        # e.g. upsd can crash while the host it runs on stays perfectly pingable. Previously
+        # this branch called check() without even forwarding `port`, so it was silently
+        # re-running the Layer 1 host ping — fixed 2026-08-12 wiring up the NUT/upsd checks.
+        raw = tcp_checker.check_port_only(tailscale_name, port, TIMEOUT_TCP_MS)
         tailscale_check = {
             "status": raw["status"],
             "response_time_ms": raw["response_time_ms"],

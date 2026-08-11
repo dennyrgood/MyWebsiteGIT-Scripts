@@ -385,6 +385,17 @@ FLEET = [
                 "check_type": "immich",
                 "public_url": None,
             },
+            {
+                # upsd for UPS #2 (ups2). Closes the monitoring gap noted in "UPS and NUT
+                # Setup Guide - Amsterdam v7" Section 8: if upsd dies, ImageBeast/ChatWorkhorse
+                # get no signal and just silently lose shutdown coverage. Port-only, not the
+                # host ping — WBU itself staying up doesn't mean upsd is still running.
+                "name": "NUT (ups2)",
+                "port": 3493,
+                "priority": "S",
+                "check_type": "tcp",
+                "public_url": None,
+            },
         ],
     },
     {
@@ -427,6 +438,15 @@ FLEET = [
                 "check_type": "http_heartbeat",
                 "public_url": None,
                 "check_params": {"target_host": "192.168.178.123"},
+            },
+            {
+                # upsd for UPS #1 (ups0). Same rationale as WorkBenchUnix's NUT check —
+                # the NAS staying reachable doesn't guarantee upsd on it is still running.
+                "name": "NUT (ups0)",
+                "port": 3493,
+                "priority": "S",
+                "check_type": "tcp",
+                "public_url": None,
             },
         ],
     },
