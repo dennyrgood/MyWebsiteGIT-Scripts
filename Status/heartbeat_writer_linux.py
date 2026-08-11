@@ -11,6 +11,12 @@
 # Updated: 2026-08-11 UTC — get_disks() skips zero-size mounts (e.g. UGREEN's /mnt/factory)
 # Updated: 2026-08-11 UTC — the above check was wrong (total_kb==0 exact match); /mnt/factory
 #                           is actually 8.7MB, not 0 — switched to a <1GB size floor
+# Updated: 2026-08-11 UTC — get_disks() replaced its mount-prefix allowlist with the
+#                           real_filesystems() rule from nas-nightly-summary.sh (any
+#                           /dev/* source except loop devices) so real growable system
+#                           partitions (e.g. FleetNAS's /ugreen, /rootfs, /boot) show up
+#                           too, not just /, /media/*, /mnt/*, /data*, /volume1; also
+#                           dedupes same device mounted twice (FleetNAS's /volume1+/home)
 
 import argparse
 import json
@@ -43,22 +49,38 @@ def get_cpu_percent() -> float:
 
 
 def get_disks() -> list[dict]:
+    # Any real backing device (skips pseudo-filesystems like tmpfs/udev/overlay/
+    # efivarfs, which report as their own fake "source" rather than /dev/*) except
+    # loop devices, which back UGREEN's read-only squashfs OS images and are
+    # permanently 100% full by design. Same "real_filesystems()" rule
+    # FleetNAS/nas-nightly-summary.sh already uses for its (separately-alerting)
+    # disk-usage check — reused here instead of an earlier mount-prefix allowlist,
+    # which silently hid real growable partitions (e.g. UGREEN's /ugreen, /rootfs,
+    # /boot system partitions weren't /media, /mnt, /data, or /, so never showed
+    # on the tile even though they can genuinely fill up).
     out = subprocess.check_output(["df", "-k"]).decode()
     disks = []
+    seen_sources = set()
     for line in out.splitlines()[1:]:
         parts = line.split()
-        if len(parts) < 6 or not parts[0].startswith("/dev/"):
+        if len(parts) < 6 or not parts[0].startswith("/dev/") or parts[0].startswith("/dev/loop"):
+            continue
+        source = parts[0]
+        if source in seen_sources:
+            # Same device mounted twice (e.g. FleetNAS's /volume1 and /home are
+            # the same btrfs LVM volume) — keep only the first mountpoint seen.
             continue
         mount = parts[5]
-        if mount != "/" and not any(mount.startswith(p) for p in ("/media/", "/mnt/", "/data", "/volume1")):
-            continue
         total_kb, used_kb, free_kb = int(parts[1]), int(parts[2]), int(parts[3])
-        if total_kb < 1024 ** 2:
-            # Sub-1GB mounts are internal appliance partitions, not disks worth
-            # showing (e.g. UGREEN's /mnt/factory is an 8.7MB firmware
-            # partition — total_kb=8729, not 0, so an exact-zero check missed
-            # it and it rounded to a useless "0.0/0.0GB" row instead).
+        if total_kb < 100 * 1024:
+            # Only meant to kill genuinely tiny firmware/utility partitions (e.g.
+            # UGREEN's /mnt/factory is 8.7MB — total_kb=8729, not 0, so an
+            # exact-zero check missed it and it rounded to a useless "0.0/0.0GB"
+            # row instead). Kept low (100MB) on purpose: real small-but-growable
+            # partitions like /boot (~255MB here) are exactly the ones worth
+            # watching, not filtering out.
             continue
+        seen_sources.add(source)
         disks.append({
             "drive":    mount,
             "total_gb": round(total_kb / 1024 ** 2, 1),
