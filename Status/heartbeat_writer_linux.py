@@ -8,6 +8,7 @@
 # Updated: 2026-06-28 UTC — get_immich_stats() accepts api_key; passes x-api-key header (stats endpoint requires auth)
 # Updated: 2026-06-29 UTC — get_immich_stats() uses host param instead of localhost (Docker not bound to localhost on some machines)
 # Updated: 2026-08-11 UTC — get_disks() also accepts /volume1 (FleetNAS's btrfs data volume mount)
+# Updated: 2026-08-11 UTC — get_disks() skips zero-size mounts (e.g. UGREEN's /mnt/factory)
 
 import argparse
 import json
@@ -50,6 +51,8 @@ def get_disks() -> list[dict]:
         if mount != "/" and not any(mount.startswith(p) for p in ("/media/", "/mnt/", "/data", "/volume1")):
             continue
         total_kb, used_kb, free_kb = int(parts[1]), int(parts[2]), int(parts[3])
+        if total_kb == 0:
+            continue  # zero-size mounts (e.g. UGREEN's /mnt/factory) are noise, not disks
         disks.append({
             "drive":    mount,
             "total_gb": round(total_kb / 1024 ** 2, 1),
