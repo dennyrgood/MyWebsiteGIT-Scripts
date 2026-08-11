@@ -9,6 +9,8 @@
 # Updated: 2026-06-29 UTC — get_immich_stats() uses host param instead of localhost (Docker not bound to localhost on some machines)
 # Updated: 2026-08-11 UTC — get_disks() also accepts /volume1 (FleetNAS's btrfs data volume mount)
 # Updated: 2026-08-11 UTC — get_disks() skips zero-size mounts (e.g. UGREEN's /mnt/factory)
+# Updated: 2026-08-11 UTC — the above check was wrong (total_kb==0 exact match); /mnt/factory
+#                           is actually 8.7MB, not 0 — switched to a <1GB size floor
 
 import argparse
 import json
@@ -51,8 +53,12 @@ def get_disks() -> list[dict]:
         if mount != "/" and not any(mount.startswith(p) for p in ("/media/", "/mnt/", "/data", "/volume1")):
             continue
         total_kb, used_kb, free_kb = int(parts[1]), int(parts[2]), int(parts[3])
-        if total_kb == 0:
-            continue  # zero-size mounts (e.g. UGREEN's /mnt/factory) are noise, not disks
+        if total_kb < 1024 ** 2:
+            # Sub-1GB mounts are internal appliance partitions, not disks worth
+            # showing (e.g. UGREEN's /mnt/factory is an 8.7MB firmware
+            # partition — total_kb=8729, not 0, so an exact-zero check missed
+            # it and it rounded to a useless "0.0/0.0GB" row instead).
+            continue
         disks.append({
             "drive":    mount,
             "total_gb": round(total_kb / 1024 ** 2, 1),
