@@ -5,6 +5,7 @@ No code changes needed to add/remove machines or services — edit this file onl
 """
 # Last updated: 2026-06-16 19:59 UTC
 # Updated: 2026-06-28 UTC — add IMMICH_CONFIG; add WorkBenchUnix and ChatWorkhorseUnix to FLEET
+# Updated: 2026-08-11 UTC — add FleetNAS (LAN-only, not Tailscale — see its FLEET entry's comment)
 
 import os
 from pathlib import Path
@@ -399,6 +400,33 @@ FLEET = [
                 "priority": "P",
                 "check_type": "immich",
                 "public_url": None,
+            },
+        ],
+    },
+    {
+        # FleetNAS is NOT on Tailscale — it's a UGREEN NAS reachable only on
+        # the home LAN. There's no separate "host" field in this schema, so
+        # its LAN IP is used directly as tailscale_name (a misnomer here;
+        # engine.py just uses this field as the literal string it connects
+        # with). This works as long as the checker (AmsterdamDesktop) is on
+        # the same LAN/subnet as 192.168.178.123 — true today, revisit if
+        # the checker ever moves off that network.
+        # The Heartbeat service's target_host below MUST match FleetNAS/
+        # run_heartbeat_nas.sh's HOST exactly (both filename and URL host
+        # for http_heartbeat_checker) — see that script's header comment.
+        "display_name": "FleetNAS",
+        "tailscale_name": "192.168.178.123",
+        "tailscale_ip": "192.168.178.123",
+        "primary_role": "NAS / Storage",
+        "probe_port": 22,
+        "services": [
+            {
+                "name": "Heartbeat",
+                "port": 0,  # Not applicable for heartbeat check
+                "priority": "P",
+                "check_type": "http_heartbeat",
+                "public_url": None,
+                "check_params": {"target_host": "192.168.178.123"},
             },
         ],
     },

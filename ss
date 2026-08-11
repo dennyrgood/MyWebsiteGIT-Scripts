@@ -1,4 +1,5 @@
 #!/bin/bash
+echo "I am changing to the scripts repo directory"
 
 # Change to the root web development directory using the HOME variable
 cd "$HOME/repos/scripts"

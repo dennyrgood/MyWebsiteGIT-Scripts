@@ -7,6 +7,7 @@
 # Updated: 2026-06-28 UTC — add get_immich_stats(); writes immich_photos/immich_videos to machine_info
 # Updated: 2026-06-28 UTC — get_immich_stats() accepts api_key; passes x-api-key header (stats endpoint requires auth)
 # Updated: 2026-06-29 UTC — get_immich_stats() uses host param instead of localhost (Docker not bound to localhost on some machines)
+# Updated: 2026-08-11 UTC — get_disks() also accepts /volume1 (FleetNAS's btrfs data volume mount)
 
 import argparse
 import json
@@ -46,7 +47,7 @@ def get_disks() -> list[dict]:
         if len(parts) < 6 or not parts[0].startswith("/dev/"):
             continue
         mount = parts[5]
-        if mount != "/" and not any(mount.startswith(p) for p in ("/media/", "/mnt/", "/data")):
+        if mount != "/" and not any(mount.startswith(p) for p in ("/media/", "/mnt/", "/data", "/volume1")):
             continue
         total_kb, used_kb, free_kb = int(parts[1]), int(parts[2]), int(parts[3])
         disks.append({

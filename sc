@@ -1,5 +1,6 @@
 #!/bin/bash
 
+echo "Changing directory to /Users/dennishmathes/OneDrive/DropBoxReplacement/MathesDropBox/0ComfyUI"
 cd "/Users/dennishmathes/OneDrive/DropBoxReplacement/MathesDropBox/0ComfyUI"
 
 # Replace the current shell process with a new instance of the interactive shell.

@@ -21,3 +21,10 @@
 
 */5 * * * * /home/dhm/repos/scripts/FleetNAS/nas-health-monitor.sh 2>&1 | logger -t nas-health-monitor
 0 5 * * * /home/dhm/repos/scripts/FleetNAS/nas-nightly-summary.sh 2>&1 | logger -t nas-nightly-summary
+
+# Fleet dashboard integration (2026-08-11): heartbeat/machine_info/metrics_history
+# writer + the local HTTP server the checker pulls them from. See
+# README.md#fleet-dashboard-integration for the full writeup.
+*/2 * * * * /home/dhm/repos/scripts/FleetNAS/run_heartbeat_nas.sh >> /home/dhm/fleet_monitor/heartbeat.log 2>&1
+*/5 * * * * /home/dhm/repos/scripts/FleetNAS/ensure_metrics_server.sh
+@reboot sleep 30 && /home/dhm/repos/scripts/FleetNAS/ensure_metrics_server.sh

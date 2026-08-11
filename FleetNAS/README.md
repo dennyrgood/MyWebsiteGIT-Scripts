@@ -14,6 +14,8 @@ works there. See [Editing and deploying](#editing-and-deploying).
 | `logrotate-nas-health-monitor` | logrotate config for the monitor's alert log. Must be **installed** into `/etc/logrotate.d/`; syncing the repo is not enough. |
 | `install-git-nas.sh` | Installs native git on FleetNAS into `$HOME`. Idempotent; no root, no apt, no Docker. |
 | `root-crontab` | Backup of root's crontab, on the volume that survives a firmware wipe. |
+| `run_heartbeat_nas.sh` | Every 2 min. Writes heartbeat/machine_info/metrics_history for the fleet dashboard. See [Fleet dashboard integration](#fleet-dashboard-integration). |
+| `ensure_metrics_server.sh` | Every 5 min + `@reboot`. Keeps `Status/fleet_metrics_server.py` running so the dashboard checker can pull FleetNAS's files. |
 
 Root's crontab on FleetNAS:
 
@@ -243,6 +245,50 @@ Reinstall or upgrade any time by re-running `install-git-nas.sh`; it's idempoten
 
 **Note:** `fetch`/`pull` work against the public GitHub repo with no credentials.
 **Pushing from the NAS is not set up** and would need a token or SSH key.
+
+## Fleet dashboard integration
+
+Added 2026-08-11 so FleetNAS shows up as a tile on `Status/Web/tiles/index.html`
+(fleet.ldmathes.cc), same as the rest of the fleet. This is separate from the
+health-monitor/nightly-summary email system above — it's the generic
+heartbeat/metrics-history mechanism every other fleet box runs, modeled on
+WorkBenchUnix (`Status/README_MOVE_AWAY_ONEDRIVE.md`,
+`Status/IMPLEMENTATION_NOTES_WBU_CWHU.md`).
+
+**FleetNAS is the one fleet machine not on Tailscale** — it's LAN-only at
+`192.168.178.123`. AmsterdamDesktop (which runs the checker, `Status/engine.py`)
+is confirmed to be on the same LAN, so a plain LAN IP works as the connect
+target. `Status/config.py`'s schema has no separate "LAN vs Tailscale" field,
+so FleetNAS's entry there reuses `tailscale_name` for the literal IP — a
+misnomer, but `engine.py` just uses that field as the string it connects with.
+
+Two new pieces, both root cron (see `root-crontab`):
+
+| Script | Cadence | What it does |
+|---|---|---|
+| `run_heartbeat_nas.sh` | `*/2 * * * *` | Calls `Status/heartbeat_writer_linux.py --host 192.168.178.123` (no `--immich-api-key`; FleetNAS runs no Immich). Writes `heartbeat_192.168.178.123.txt`, `machine_info_192.168.178.123.json`, `metrics_history_192.168.178.123.json` to `~/fleet_monitor`. |
+| `ensure_metrics_server.sh` | `*/5 * * * *` + `@reboot` | Starts `Status/fleet_metrics_server.py` (stdlib `http.server`, port 9100) if it's not already running. |
+
+**Why cron instead of a systemd unit** (unlike WBU/CWHU's
+`fleet_metrics_server.service`): unconfirmed whether UGOS exposes systemd unit
+management to `dhm`, and even if it does, a firmware update resetting it is
+exactly the failure mode `root-crontab`'s own header warns about for the
+crontab itself. `ensure_metrics_server.sh` self-heals every 5 minutes instead —
+same philosophy as the rest of this NAS's monitoring: state that must survive a
+firmware wipe lives on the RAID volume (`~/repos`), and whatever's supposed to
+be running gets checked and restarted regularly rather than trusted to start
+once and stay up.
+
+`heartbeat_writer_linux.py` (shared with WBU/CWHU, lives in `Status/`, not
+`FleetNAS/`) was extended to also collect the `/volume1` mount — its disk
+filter previously only picked up `/`, `/mnt/*`, `/media/*`, `/data*`, which
+would have silently excluded FleetNAS's actual RAID/btrfs data volume.
+
+**Deploying this requires a LAN session on FleetNAS** (`git pull`, verify
+`python3 --version` and `pgrep -f fleet_metrics_server.py`, install the two new
+lines from `root-crontab` with `sudo crontab root-crontab` — review first,
+see that file's header) — not done yet as of 2026-08-11; the box is only
+reachable on the home LAN and this was written while traveling.
 
 ## Testing without sending mail
 
