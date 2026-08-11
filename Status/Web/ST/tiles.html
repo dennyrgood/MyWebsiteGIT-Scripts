@@ -5,6 +5,7 @@
 <!-- Updated: 2026-07-14 16:45 UTC — replace U+00B7 middle dot with U+2022 bullet throughout (rendering as 250 in tile font) -->
 <!-- Updated: 2026-07-14 16:55 UTC — replace bullet separators in template literals with ASCII dash; restore data-parsing regexes to use unicode escapes -->
 <!-- Updated: 2026-07-14 17:40 UTC — Plex tile: show stream titles (username stripped) when streams active -->
+<!-- Updated: 2026-08-11 UTC — renderSysInfo: add SMART/RAID/UPS block, shown when machine_info.nas is present (FleetNAS only, from nas_status_snapshot.py); ASCII dash separators per the 2026-07-14 template-literal unicode fix above -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -1396,6 +1397,44 @@
               <span class="si-extra">${pct}%</span>
             </div>`;
           }
+        }
+
+        // NAS health block (FleetNAS only — SMART/RAID/UPS, from nas_status_snapshot.py)
+        if (mi.nas) {
+          html += '<div class="si-sep"></div>';
+
+          const smart = mi.nas.smart || {};
+          const smartCls = smart.status === 'healthy' ? 'ok' : smart.status === 'failing' ? 'crit' : 'warn';
+          const smartLbl = (smart.status || 'unknown').toUpperCase() +
+            (smart.max_temp_c != null ? ` - ${smart.max_temp_c}C` : '');
+          html += `<div class="si-row">
+            <span class="si-lbl">SMART</span>
+            <span class="si-val ${smartCls}">${smartLbl}</span>
+          </div>`;
+
+          const raid = mi.nas.raid || {};
+          const raidState = raid.state || 'unreadable';
+          // Mirrors nas-health-monitor.sh: degraded/failed/unreadable = crit; a
+          // plain "clean"/"active" = ok; anything else (e.g. "clean, resyncing",
+          // "active, recovering") is an expected-but-worth-watching in-between = warn.
+          const raidCls = /degraded|fail|unreadable/i.test(raidState) ? 'crit'
+            : /^(clean|active)$/i.test(raidState.trim()) ? 'ok'
+            : 'warn';
+          const raidLbl = raidState.toUpperCase() + (raid.rebuild_pct != null ? ` - ${raid.rebuild_pct}%` : '');
+          html += `<div class="si-row">
+            <span class="si-lbl">RAID</span>
+            <span class="si-val ${raidCls}">${raidLbl}</span>
+          </div>`;
+
+          const ups = mi.nas.ups || {};
+          const upsCls = !ups.status ? 'warn' : ups.status.includes('RB') ? 'crit' : ups.status.includes('OL') ? 'ok' : 'warn';
+          const upsLbl = ups.status
+            ? ups.status + (ups.charge_pct != null ? ` - ${ups.charge_pct}%` : '')
+            : 'UNREADABLE';
+          html += `<div class="si-row">
+            <span class="si-lbl">UPS</span>
+            <span class="si-val ${upsCls}">${upsLbl}</span>
+          </div>`;
         }
 
         // Separator

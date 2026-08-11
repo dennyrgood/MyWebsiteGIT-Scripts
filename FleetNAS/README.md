@@ -16,6 +16,7 @@ works there. See [Editing and deploying](#editing-and-deploying).
 | `root-crontab` | Backup of root's crontab, on the volume that survives a firmware wipe. |
 | `run_heartbeat_nas.sh` | Every 2 min. Writes heartbeat/machine_info/metrics_history for the fleet dashboard. See [Fleet dashboard integration](#fleet-dashboard-integration). |
 | `ensure_metrics_server.sh` | Every 5 min + `@reboot`. Keeps `Status/fleet_metrics_server.py` running so the dashboard checker can pull FleetNAS's files. |
+| `nas_status_snapshot.py` | Called by `run_heartbeat_nas.sh`. Merges a SMART/RAID/UPS summary into `machine_info`, for the dashboard tile — separate from `nas-health-monitor.sh`'s alerting, which stays the source of truth for actual alerts/emails. |
 
 Root's crontab on FleetNAS:
 
@@ -284,11 +285,32 @@ once and stay up.
 filter previously only picked up `/`, `/mnt/*`, `/media/*`, `/data*`, which
 would have silently excluded FleetNAS's actual RAID/btrfs data volume.
 
-**Deploying this requires a LAN session on FleetNAS** (`git pull`, verify
-`python3 --version` and `pgrep -f fleet_metrics_server.py`, install the two new
-lines from `root-crontab` with `sudo crontab root-crontab` — review first,
-see that file's header) — not done yet as of 2026-08-11; the box is only
-reachable on the home LAN and this was written while traveling.
+**Deploying this requires a LAN session on FleetNAS.** Done 2026-08-11: `git
+pull`, confirmed `python3` (3.11, already present — no install needed),
+`sudo crontab root-crontab`, verified `fleet_monitor/` populating and
+`fleet_metrics_server.py` running (self-started by `ensure_metrics_server.sh`
+on its first `*/5` tick). Confirmed end-to-end on the live tile after
+restarting the "Fleet Checker" Task Scheduler task on AmsterdamDesktop
+(`schtasks /End` + `/Run`, or the Task Scheduler GUI — it runs `checker.py` as
+a long-lived process holding `config.py` in memory, so a new FLEET entry needs
+that restart to take effect).
+
+### SMART / RAID / UPS on the tile
+
+`nas_status_snapshot.py` adds a `"nas"` key to `machine_info` — `smart`
+(worst-case status across `sda`/`sdb`/`sdc`, plus max temp), `raid` (`mdadm`
+state string, rebuild % if resyncing), and `ups` (`upsc ups0@localhost`
+status + battery charge). It reuses the same read logic as
+`nas-health-monitor.sh` (the WD80EFPX nonzero-smartctl-exit-code quirk, the
+"unreadable is its own state, never coerced to healthy" rule) but carries
+**no alert/streak/email logic of its own** — that stays exclusively in
+`nas-health-monitor.sh`/`nas-nightly-summary.sh`. This script only ever
+reports current state for the tile; it is not a second alerting path.
+
+`Status/Web/ST/tiles.html`'s `renderSysInfo()` renders this as three extra
+rows (SMART/RAID/UPS) whenever `machine_info.nas` is present — no other
+machine sets that key, so the block is invisible everywhere except the
+FleetNAS tile.
 
 ## Testing without sending mail
 

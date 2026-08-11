@@ -92,7 +92,10 @@ def get_smart_summary() -> dict:
 
 def get_raid_state() -> dict:
     try:
-        proc = subprocess.run(["sudo", MDADM, "--detail", RAID_DEV],
+        # No sudo prefix: this script is already run as root by root's cron
+        # (same as nas-health-monitor.sh, which does use sudo — but that one
+        # is designed to also be runnable un-sudo'd for manual testing).
+        proc = subprocess.run([MDADM, "--detail", RAID_DEV],
                                capture_output=True, text=True, timeout=15)
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return {"state": "unreadable"}
