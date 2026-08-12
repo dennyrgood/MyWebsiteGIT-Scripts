@@ -1,6 +1,7 @@
 build/
 dist/
 dms_util/*.swp
+*.un~
 __pycache__/
 *.pyc
 *.pyo

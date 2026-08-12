@@ -42,6 +42,21 @@
     Optional VirtualBox VM to stop before shutting down. Used on ChatWorkhorse for
     ChatWorkhorseUnix. Leave empty elsewhere.
 
+    Stopping tries a clean shutdown first: a dedicated SSH key (SSHKeyPath),
+    restricted via a forced `command=` in the VM's authorized_keys to run ONLY
+    clean.ubuntu.shutdown, triggers the same docker-compose-aware stop CWHU's own
+    upsmon uses (respects depends_on order, gives Postgres real headroom instead
+    of Compose's bare 10s default). Falls back to a plain ACPI power button only
+    if that's unreachable or doesn't complete in time - which matters most
+    exactly when it's least likely to help, i.e. if CWHU's guest networking is
+    itself what's down. See ups-watch.functions.ps1 for the implementation and
+    ChatWorkHorse/ for the sudoers/authorized_keys setup this depends on.
+
+.PARAMETER SSHUser
+.PARAMETER SSHKeyPath
+.PARAMETER SSHConnectTimeoutSeconds
+    Only used when VMName is set. See VMName above.
+
 .EXAMPLE
     # ImageBeast
     .\ups-watch.ps1 -MinutesOnBattery 8
@@ -66,6 +81,9 @@ param(
     [int]   $MinutesOnBattery = 8,
     [string]$VMName           = "",
     [int]   $VMWaitSeconds    = 180,
+    [string]$SSHUser          = "dhm",
+    [string]$SSHKeyPath       = (Join-Path $env:USERPROFILE ".ssh\cwh_ups_watch_ed25519"),
+    [int]   $SSHConnectTimeoutSeconds = 10,
     [switch]$WhatIf
 )
 
@@ -78,12 +96,10 @@ $LogFile     = Join-Path $StateDir "ups-watch.log"
 
 if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Path $StateDir -Force | Out-Null }
 
-function Write-Log([string]$Message) {
-    $stamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss") + "Z"
-    $line  = "$stamp  $Message"
-    Add-Content -Path $LogFile -Value $line
-    Write-Output $line
-}
+# Write-Log, Invoke-CleanShutdownViaSSH, and Stop-VMAndWait live in
+# ups-watch.functions.ps1, shared with ChatWorkHorse/TakeDown_VM.ps1. Must be
+# dot-sourced AFTER $StateDir/$LogFile are set above - both functions use them.
+. (Join-Path $PSScriptRoot "ups-watch.functions.ps1")
 
 <#
     Reads one variable from upsd. Returns $null on any failure — caller must treat
@@ -122,58 +138,6 @@ function Get-UpsVar([string]$VarName) {
     }
 }
 
-<#
-    Stops the VirtualBox VM and waits for it to actually reach poweroff.
-
-    Waiting matters more than sending. CWHU runs a warm-standby Immich stack with
-    Postgres in Docker, so its own shutdown takes real time; shutting Windows down
-    while that is mid-checkpoint is precisely what this whole system exists to avoid.
-    Returns $true if the VM is confirmed down.
-#>
-function Stop-VMAndWait([string]$Name, [int]$TimeoutSeconds) {
-    $vbox = Join-Path $env:ProgramFiles "Oracle\VirtualBox\VBoxManage.exe"
-    if (-not (Test-Path $vbox)) {
-        Write-Log "ERROR: VBoxManage not found at $vbox - cannot stop VM '$Name'."
-        return $false
-    }
-
-    $info = & $vbox showvminfo $Name --machinereadable 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        # Most likely cause is the task running as the wrong user. See .NOTES.
-        Write-Log "ERROR: cannot query VM '$Name' (exit $LASTEXITCODE). Is this task running as the VM's owner, not SYSTEM?"
-        return $false
-    }
-
-    $state = ($info | Select-String '^VMState=') -replace 'VMState=', '' -replace '"', ''
-    if ($state -match 'poweroff|aborted|saved') {
-        Write-Log "VM '$Name' already down (state: $state)."
-        return $true
-    }
-
-    # CWHU's own upsmon should already have shut it down five minutes ago. This is
-    # the backstop for when that did not happen.
-    Write-Log "VM '$Name' still running (state: $state) - sending ACPI power button."
-    & $vbox controlvm $Name acpipowerbutton 2>&1 | Out-Null
-
-    $waited = 0
-    while ($waited -lt $TimeoutSeconds) {
-        Start-Sleep -Seconds 5
-        $waited += 5
-        $info  = & $vbox showvminfo $Name --machinereadable 2>&1
-        $state = ($info | Select-String '^VMState=') -replace 'VMState=', '' -replace '"', ''
-        if ($state -match 'poweroff|aborted') {
-            Write-Log "VM '$Name' reached '$state' after ${waited}s."
-            return $true
-        }
-    }
-
-    # Deliberately does NOT `controlvm poweroff`. That is equivalent to yanking the
-    # VM's power cord and would corrupt exactly what the wait was protecting. Better
-    # to shut Windows down and let the hypervisor's own stop handling take over.
-    Write-Log "WARNING: VM '$Name' still '$state' after ${TimeoutSeconds}s - proceeding anyway."
-    return $false
-}
-
 function Invoke-FleetShutdown([string]$Reason) {
     Write-Log "TRIGGER: $Reason"
 
@@ -184,7 +148,10 @@ function Invoke-FleetShutdown([string]$Reason) {
 
     Set-Content -Path $TriggerFile -Value ((Get-Date).ToUniversalTime().ToString("o"))
 
-    if ($VMName) { [void](Stop-VMAndWait -Name $VMName -TimeoutSeconds $VMWaitSeconds) }
+    if ($VMName) {
+        [void](Stop-VMAndWait -Name $VMName -TimeoutSeconds $VMWaitSeconds `
+            -SSHUser $SSHUser -SSHKeyPath $SSHKeyPath -SSHConnectTimeoutSeconds $SSHConnectTimeoutSeconds)
+    }
 
     Write-Log "Shutting down Windows."
     & shutdown /s /t 30 /c "UPS on battery ${MinutesOnBattery}min - shutting down"
