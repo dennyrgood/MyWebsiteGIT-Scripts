@@ -14,7 +14,7 @@ R="/home/dhm/repos/scripts"
 CWHU="$R/ChatWorkhorseUnix"
 STAMP="$(date -u +%Y-%m-%d)"
 
-if [ "$(hostname)" != "chatworkhorseunix" ]; then
+if [ "$(hostname | tr '[:upper:]' '[:lower:]')" != "chatworkhorseunix" ]; then
     echo "REFUSING: this is $(hostname), not chatworkhorseunix." >&2
     echo "This config points at ups2 on WBU and assumes CWHU's 5-minute timer." >&2
     exit 1
@@ -70,8 +70,13 @@ printf '# CWHU is a NUT client of ups2 on WorkBenchUnix. No local UPS.\nMODE=net
 chown root:nut /etc/nut/nut.conf
 chmod 640 /etc/nut/nut.conf
 
-echo "==> Enabling and starting nut-monitor..."
-systemctl enable --now nut-monitor
+echo "==> Enabling and (re)starting nut-monitor..."
+# `enable --now` is a no-op on an already-active service, so on a second/third run
+# of this script it would leave upsmon running against the OLD upsmon.conf (and
+# therefore the old password) even though a new one was just written. Always
+# `restart` explicitly so a rerun actually picks up the new config.
+systemctl enable nut-monitor
+systemctl restart nut-monitor
 sleep 4
 
 echo
