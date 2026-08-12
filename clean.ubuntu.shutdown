@@ -129,13 +129,30 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Cache sudo credentials NOW.
+# 2. Confirm sudo access to `systemctl $ACTION` NOW.
 #    Otherwise the stack is already down when sudo prompts for a password, and an
 #    unattended run stalls there indefinitely with Immich offline.
+#
+#    `sudo -n -l systemctl $ACTION` checks the SPECIFIC permission this script
+#    actually needs at the end, without prompting. A plain `sudo -v` would check
+#    for blanket sudo authorization instead, which fails for an account that only
+#    has a narrow `NOPASSWD: systemctl poweroff, systemctl reboot` rule (as used
+#    by the CWH ups-watch SSH trigger) even though the command that matters is
+#    already permitted. Root (upsmon's SHUTDOWNCMD) always passes this check
+#    trivially. A human with full sudo but no NOPASSWD falls through to the
+#    original interactive prompt, unchanged - but only if a TTY is actually
+#    available to answer it; a non-interactive run with no matching NOPASSWD
+#    rule fails fast here instead of hanging or stalling mid-teardown.
 # ---------------------------------------------------------------------------
 if [ "$DRY_RUN" -eq 0 ]; then
-    log "Caching sudo credentials up front (needed for $ACTION)..."
-    sudo -v || die "sudo authentication failed — nothing was stopped."
+    if sudo -n -l systemctl "$ACTION" >/dev/null 2>&1; then
+        log "sudo already permits 'systemctl $ACTION' without a password."
+    elif [ -t 0 ]; then
+        log "Caching sudo credentials up front (needed for $ACTION)..."
+        sudo -v || die "sudo authentication failed — nothing was stopped."
+    else
+        die "sudo requires a password for 'systemctl $ACTION' and no TTY is available to provide one — nothing was stopped."
+    fi
 fi
 
 # ---------------------------------------------------------------------------
