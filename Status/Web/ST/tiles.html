@@ -1705,12 +1705,30 @@
       </div>`;
     }
 
+    // scope 'host'/'service' are ordinary up/down flips (from/to populated). Newer
+    // scopes — 'monitor' (checker restart), 'chatter' (flap collapse), 'scheduled_blip'
+    // (missing expected blip) — carry no from/to and sometimes no host/service, so they
+    // fall back to labeling by scope/event instead of showing "null → null".
+    // Added 2026-08-13 UTC alongside the transitions_reporter.py Phase 1 project.
+    function transitionLabelAndBadge(t, includeHost) {
+      if (t.scope === 'service') {
+        return { name: includeHost ? `${t.host} — ${t.service}` : t.service, badge: `${t.from}→${t.to}` };
+      }
+      if (t.scope === 'host') {
+        return { name: includeHost ? `${t.host} — HOST` : 'HOST', badge: `${t.from}→${t.to}` };
+      }
+      const who = t.service || (t.host ? 'HOST' : null);
+      const name = who ? (includeHost && t.host ? `${t.host} — ${who}` : who) : t.scope.toUpperCase();
+      const badge = (t.event || t.scope || '').toUpperCase();
+      return { name, badge };
+    }
+
     function renderModalTransition(t) {
-      const label = t.scope === 'service' ? t.service : 'HOST';
+      const { name, badge } = transitionLabelAndBadge(t, false);
       const toCls = t.to === 'up' ? 'up' : t.to === 'down' ? 'down' : 'unknown';
       const when  = t.ts ? new Date(t.ts).toLocaleString() : '–';
       return `<div class="m-svc-card ${toCls}">
-        <div class="m-svc-head"><span class="m-svc-name">${label}</span><span class="m-svc-badge">${t.from}→${t.to}</span></div>
+        <div class="m-svc-head"><span class="m-svc-name">${name}</span><span class="m-svc-badge">${badge}</span></div>
         <div class="m-svc-row"><span class="lbl">WHEN</span><span class="val" style="font-size:10px">${when}</span></div>
         ${t.detail ? `<div class="m-svc-row" style="flex-direction:column;gap:2px"><span class="lbl">DETAIL</span><span class="val" style="font-size:9px">${t.detail}</span></div>` : ''}
       </div>`;
@@ -1758,11 +1776,11 @@
     document.getElementById('fleet-watchdog-link').addEventListener('click', openFleetWatchdogModal);
 
     function renderModalTransitionFleet(t) {
-      const label = t.scope === 'service' ? t.service : 'HOST';
+      const { name, badge } = transitionLabelAndBadge(t, true);
       const toCls = t.to === 'up' ? 'up' : t.to === 'down' ? 'down' : 'unknown';
       const when  = t.ts ? new Date(t.ts).toLocaleString() : '–';
       return `<div class="m-svc-card ${toCls}">
-        <div class="m-svc-head"><span class="m-svc-name">${t.host} — ${label}</span><span class="m-svc-badge">${t.from}→${t.to}</span></div>
+        <div class="m-svc-head"><span class="m-svc-name">${name}</span><span class="m-svc-badge">${badge}</span></div>
         <div class="m-svc-row"><span class="lbl">WHEN</span><span class="val" style="font-size:10px">${when}</span></div>
         ${t.detail ? `<div class="m-svc-row" style="flex-direction:column;gap:2px"><span class="lbl">DETAIL</span><span class="val" style="font-size:9px">${t.detail}</span></div>` : ''}
       </div>`;
