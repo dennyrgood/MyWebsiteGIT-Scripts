@@ -1202,7 +1202,9 @@
 
     // Parses a watchdog log's text into: lastTs (timestamp of the most recent
     // line, any line, or null if empty/unparseable) and issues (lines in the
-    // last 24h that aren't just the routine daily alive-ping).
+    // last 24h that aren't just the routine daily alive-ping or a successful
+    // self-heal — FleetMetricsWatchdog.ps1 logs those as "... succeeded", so
+    // a restart/writer-restart that worked is informational, not a problem).
     function parseWatchdogLog(text) {
       const lines = text.split('\n').filter(l => l.trim());
       const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
@@ -1214,7 +1216,7 @@
         const ts = new Date(m[1]).getTime();
         if (isNaN(ts)) continue;
         if (lastTs === null || ts > lastTs) lastTs = ts;
-        if (ts >= oneDayAgo && !l.includes('watchdog alive, checking')) issues.push(l);
+        if (ts >= oneDayAgo && !l.includes('watchdog alive, checking') && !l.includes('succeeded')) issues.push(l);
       }
       return { lastTs, issues };
     }
