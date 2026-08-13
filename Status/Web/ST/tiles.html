@@ -1544,7 +1544,10 @@
     // 2026-08-13 UTC: a checker that's stopped polling entirely just freezes every tile
     // at its last-known status (probably all green) rather than turning anything red,
     // so the small corner indicator alone was easy to miss.
-    const STALE_THRESHOLD_S = 180;
+    // 360s (6min): observed stalls self-heal within ~5min a few times a day on
+    // both writer hosts; 180s fired mid-blip on normal recovery, not just on
+    // genuinely stuck checkers. Bumped 2026-08-13 UTC per user confirmation.
+    const STALE_THRESHOLD_S = 360;
 
     // Alert items link straight into the host's modal, which already has a
     // RECENT TRANSITIONS section — a single raw poll miss here is "live" and
