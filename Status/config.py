@@ -6,6 +6,9 @@ No code changes needed to add/remove machines or services — edit this file onl
 # Last updated: 2026-06-16 19:59 UTC
 # Updated: 2026-06-28 UTC — add IMMICH_CONFIG; add WorkBenchUnix and ChatWorkhorseUnix to FLEET
 # Updated: 2026-08-11 UTC — add FleetNAS (LAN-only, not Tailscale — see its FLEET entry's comment)
+# Updated: 2026-08-13 UTC — Phase 1 (alert-log noise-reduction project): add TIMEOUT_SYNCTHING_MS,
+#   FAIL_STREAK_THRESHOLD, PORTABLE_GRACE_SECONDS/PORTABLE_HOSTS, FLAP_* thresholds,
+#   SCHEDULED_BLIP_WINDOWS. Consumed by reporters/transitions_reporter.py and engine.py.
 
 import os
 from pathlib import Path
@@ -33,8 +36,43 @@ MASTER_STATUS_FILE = STATUS_DIR / "server_status_all.json"
 
 POLL_INTERVAL_SECONDS = 30
 TIMEOUT_TCP_MS = 5000         # Layer 1 host reachability
-TIMEOUT_HTTP_MS = 7000        # Layer 2 Tailscale service checks
+TIMEOUT_HTTP_MS = 7000        # Layer 2 Tailscale service checks (default, all check_types)
 TIMEOUT_PUBLIC_MS = 5000      # Layer 3 public endpoint checks
+
+# Per-check_type override of TIMEOUT_HTTP_MS. Syncthing runs 4 sequential HTTP
+# calls (ping/version/connections/per-folder db status) and 7s was firing on
+# legitimate load (large transfers), not failure — see surface3-gc 2026-08-09,
+# 68GB in flight. Split out rather than raising TIMEOUT_HTTP_MS globally, since
+# other check_types haven't shown this problem.
+TIMEOUT_SYNCTHING_MS = 20000
+
+# ---------------------------------------------------------------------------
+# Transitions-log tuning (alert-log noise-reduction project, 2026-08-13)
+# ---------------------------------------------------------------------------
+FAIL_STREAK_THRESHOLD = 2          # consecutive raw "down" observations required before declaring down; 1 "up" clears immediately (asymmetric)
+PORTABLE_GRACE_SECONDS = 30 * 60   # portables (laptops that sleep) don't get a host down/up transition unless the outage outlasts this
+FLAP_THRESHOLD = 6                 # transitions within FLAP_WINDOW_MINUTES that collapse into one "chatter" line
+FLAP_WINDOW_MINUTES = 60
+FLAP_STABLE_MINUTES = 30           # must hold steady this long before flap suppression lifts
+
+# Portables are expected to sleep/roam — see PORTABLE_GRACE_SECONDS above.
+# Servers (everything else in FLEET) stay strict: any down/up transition emits immediately.
+PORTABLE_HOSTS = {
+    "denniss-macbook-air", "denniss-2nd-macbook-air", "travelbeast", "surface3-gc",
+}
+
+# Scheduled, expected blips: the down/up transition inside the window is suppressed,
+# but if the expected blip does NOT happen at all that day, that silence is the anomaly
+# and gets its own alert line. chatworkhorseunix Immich goes "connection refused" for
+# ~2 min around 02:00 UTC nightly (4am CEST warm-sync) — confirmed expected; absent on
+# 2026-08-08 and 2026-08-10 with no way to notice under the old logging.
+SCHEDULED_BLIP_WINDOWS = [
+    {
+        "host": "chatworkhorseunix", "service": "Immich",
+        "start_utc": "01:55", "end_utc": "02:10",
+        "label": "nightly warm-sync (4am CEST)",
+    },
+]
 
 # ------ Plex Configuration ------
 PLEX_CONFIG = {

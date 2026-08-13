@@ -7,6 +7,8 @@ passes to all reporters. Three-layer architecture:
   Layer 2 — Tailscale service health (per check_type)
   Layer 3 — Public endpoint check (if public_url defined)
 Last updated: 2026-06-16 00:00 UTC — _read_machine_info subdirectory lookup for Mac writers
+Updated: 2026-08-13 UTC — Phase 1 (alert-log noise-reduction project): per-check_type
+  Layer 2 timeout override (CHECK_TYPE_TIMEOUTS_MS, currently just syncthing -> 20s).
 """
 
 import json
@@ -23,6 +25,7 @@ from config import (
     POLL_INTERVAL_SECONDS,
     TIMEOUT_TCP_MS,
     TIMEOUT_HTTP_MS,
+    TIMEOUT_SYNCTHING_MS,
     TIMEOUT_PUBLIC_MS,
     METRICS_PORT,
 )
@@ -42,6 +45,13 @@ CHECKER_MAP = {
     "http_heartbeat": http_heartbeat_checker,
     "syncthing": syncthing_checker,
     "immich": immich_checker,
+}
+
+# Per-check_type Layer 2 timeout override — falls back to TIMEOUT_HTTP_MS. Only
+# Syncthing has needed its own value so far (see config.py's TIMEOUT_SYNCTHING_MS
+# comment); add entries here, not by raising TIMEOUT_HTTP_MS globally.
+CHECK_TYPE_TIMEOUTS_MS = {
+    "syncthing": TIMEOUT_SYNCTHING_MS,
 }
 
 
@@ -197,11 +207,12 @@ def _check_service(tailscale_name: str, svc_cfg: dict) -> dict:
                 "detail": f"Unknown check_type: {check_type}",
             }
         else:
+            timeout_ms = CHECK_TYPE_TIMEOUTS_MS.get(check_type, TIMEOUT_HTTP_MS)
             # Pass check_params as additional kwargs to checker modules
             if check_params:
-                raw = checker_module.check(tailscale_name, port, TIMEOUT_HTTP_MS, **check_params)
+                raw = checker_module.check(tailscale_name, port, timeout_ms, **check_params)
             else:
-                raw = checker_module.check(tailscale_name, port, TIMEOUT_HTTP_MS)
+                raw = checker_module.check(tailscale_name, port, timeout_ms)
 
             tailscale_check = {
                 "status": raw["status"],

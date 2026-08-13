@@ -1,0 +1,25 @@
+#!/bin/bash
+# 2026-08-11 17:45 UTC
+# Launch Claude Code against the local Ollama endpoint on ImageBeast (ib).
+# Kept out of ~/.zshrc so plain `claude` still uses claude.ai with connectors.
+
+MODEL=nemotron-3.5-lightning:latest
+OLLAMA=http://imagebeast:11434
+
+export ANTHROPIC_AUTH_TOKEN=ollama
+export ANTHROPIC_API_KEY=""
+export ANTHROPIC_BASE_URL="$OLLAMA"
+
+# Must match OLLAMA_CONTEXT_LENGTH on ib (98304 = largest window that
+# stays 100% on GPU for this model on the 5090).
+export CLAUDE_CODE_MAX_CONTEXT_TOKENS=98304
+
+# Preload and hold for 20m. /v1/messages ignores keep_alive, so this must
+# go via the native API. Empty prompt loads without generating, which also
+# avoids the ~28GB reload stall on the first real prompt.
+echo "Warming $MODEL on imagebeast..."
+curl -sf "$OLLAMA/api/generate" \
+  -d "{\"model\":\"$MODEL\",\"prompt\":\"\",\"keep_alive\":\"20m\"}" \
+  >/dev/null || echo "Warning: preload failed, continuing anyway"
+
+exec claude --model "$MODEL" "$@"
