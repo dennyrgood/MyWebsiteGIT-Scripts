@@ -82,11 +82,20 @@ for repo in "\${REPO_DIRS[@]}"; do
   name=\$(basename "\$repo")
   [ -d "\$repo/.git" ] || continue
   cd "\$repo" || continue
-  git fetch --quiet 2>/dev/null
+  fetch_err=\$(git fetch --quiet 2>&1)
+  fetch_rc=\$?
   branch=\$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
   dirty=\$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+  if [ "\$fetch_rc" -ne 0 ]; then
+    echo "\$name|\$branch|error|fetch-failed:\$(echo "\$fetch_err" | head -1 | tr '|' '/')"
+    continue
+  fi
   behind=\$(git rev-list --count HEAD..@{u} 2>/dev/null)
-  if [ "\$behind" = "0" ] || [ -z "\$behind" ]; then
+  if [ -z "\$behind" ]; then
+    echo "\$name|\$branch|error|no-upstream-or-rev-list-failed"
+    continue
+  fi
+  if [ "\$behind" = "0" ]; then
     echo "\$name|\$branch|skip|up-to-date"
     continue
   fi
@@ -124,11 +133,20 @@ foreach (\$repo in \$repoDirs) {
   \$name = Split-Path \$repo -Leaf
   if (-not (Test-Path (Join-Path \$repo ".git"))) { continue }
   Push-Location \$repo
-  git fetch --quiet 2>\$null
+  \$fetchErr = (git fetch --quiet 2>&1)
+  \$fetchOk = (\$LASTEXITCODE -eq 0)
   \$branch = git rev-parse --abbrev-ref HEAD 2>\$null
   \$dirty = (git status --porcelain 2>\$null | Measure-Object -Line).Lines
+  if (-not \$fetchOk) {
+    \$firstLine = (\$fetchErr | Select-Object -First 1) -replace '\|','/'
+    Write-Output "\$name|\$branch|error|fetch-failed:\$firstLine"
+    Pop-Location
+    continue
+  }
   \$behind = (git rev-list --count 'HEAD..@{u}' 2>\$null)
-  if ([string]::IsNullOrEmpty(\$behind) -or \$behind -eq "0") {
+  if ([string]::IsNullOrEmpty(\$behind)) {
+    Write-Output "\$name|\$branch|error|no-upstream-or-rev-list-failed"
+  } elseif (\$behind -eq "0") {
     Write-Output "\$name|\$branch|skip|up-to-date"
   } elseif (\$dirty -ne 0) {
     Write-Output "\$name|\$branch|skip|dirty(\$dirty)-manual-review-needed"
