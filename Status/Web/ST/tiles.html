@@ -1524,10 +1524,24 @@
     }
 
     // ── ALERT STRIP ──────────────────────────────────
+    // Staleness threshold matches #sync-age's own 'stale' class (see startAgeTimer) —
+    // one source of truth for "the checker itself has stopped updating," surfaced both
+    // as the small pulsing corner readout and, now, as a top-banner alert. Added
+    // 2026-08-13 UTC: a checker that's stopped polling entirely just freezes every tile
+    // at its last-known status (probably all green) rather than turning anything red,
+    // so the small corner indicator alone was easy to miss.
+    const STALE_THRESHOLD_S = 180;
+
     function updateAlertStrip(machines) {
       const content = document.getElementById('alert-content');
       content.querySelectorAll('.alert-item').forEach(el => el.remove());
       const alerts = [];
+      if (lastTimestamp) {
+        const ageS = Math.floor((Date.now() - lastTimestamp) / 1000);
+        if (ageS >= STALE_THRESHOLD_S) {
+          alerts.push(`⚠ CHECKER DATA STALE — ${ageS}s SINCE LAST POLL`);
+        }
+      }
       for (const machine of machines) {
         if (machine.host?.status !== 'up') {
           alerts.push(machine.machine.display_name + ' HOST DOWN');
@@ -1861,7 +1875,7 @@
         const age = Math.floor((Date.now() - lastTimestamp) / 1000);
         const el  = document.getElementById('sync-age');
         el.textContent = age + 's AGO';
-        if (age >= 180)    el.className = 'stale';
+        if (age >= STALE_THRESHOLD_S) el.className = 'stale';
         else if (age < 60) el.className = 'fresh';
         else               el.className = '';
       }, 1000);
