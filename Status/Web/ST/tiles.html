@@ -1201,27 +1201,34 @@
     }
 
     // Parses a watchdog log's text into: lastTs (timestamp of the most recent
-    // line, any line, or null if empty/unparseable) and issues (lines in the
-    // last 24h that indicate an actual failure). FleetMetricsWatchdog.ps1
-    // logs a lot of routine self-heal chatter — alive-pings, "restarting X",
-    // "killing duplicate PID", "restart attempt N/M", "... succeeded" — none
-    // of that is a problem on its own; only lines containing "fail" (e.g.
-    // "restart attempt N failed", "SERVER RESTART FAILED") mean the watchdog
-    // couldn't fix something and it's worth surfacing as an issue.
+    // line, any line, or null if empty/unparseable), issues (lines in the
+    // last 24h that indicate an actual failure — used for badge/severity),
+    // and activity (all non-ping lines in the last 24h, successes included —
+    // used for display, so e.g. "restart attempt 1 succeeded" still shows up
+    // as reassurance that a self-heal worked, without counting as an issue).
+    // FleetMetricsWatchdog.ps1 logs a lot of routine self-heal chatter —
+    // "restarting X", "killing duplicate PID", "restart attempt N/M",
+    // "... succeeded" — none of that is a problem on its own; only lines
+    // containing "fail" (e.g. "restart attempt N failed", "SERVER RESTART
+    // FAILED") mean the watchdog couldn't fix something.
     function parseWatchdogLog(text) {
       const lines = text.split('\n').filter(l => l.trim());
       const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
       let lastTs = null;
       const issues = [];
+      const activity = [];
       for (const l of lines) {
         const m = l.match(/^(\S+)\s/);
         if (!m) continue;
         const ts = new Date(m[1]).getTime();
         if (isNaN(ts)) continue;
         if (lastTs === null || ts > lastTs) lastTs = ts;
-        if (ts >= oneDayAgo && /fail/i.test(l)) issues.push(l);
+        if (ts >= oneDayAgo && !l.includes('watchdog alive, checking')) {
+          activity.push(l);
+          if (/fail/i.test(l)) issues.push(l);
+        }
       }
-      return { lastTs, issues };
+      return { lastTs, issues, activity };
     }
 
     // Shows a small "⚠" badge in the tile head when the watchdog log has a
@@ -1306,7 +1313,7 @@
           html += `<div class="m-svc-card unknown"><div class="m-svc-head"><span class="m-svc-name">${host}</span><span class="m-svc-badge">NOT LOADED</span></div></div>`;
           continue;
         }
-        const { lastTs, issues } = parseWatchdogLog(text);
+        const { lastTs, issues, activity } = parseWatchdogLog(text);
         const stale = lastTs === null || (Date.now() - lastTs) > staleThresholdMs;
         const statusLabel = stale ? 'STALE' : issues.length ? `${issues.length} ISSUE${issues.length > 1 ? 'S' : ''}` : 'OK';
         const cls = stale ? 'down' : issues.length ? 'warn' : 'up';
@@ -1314,7 +1321,7 @@
         html += `<div class="m-svc-card ${cls}">
           <div class="m-svc-head"><span class="m-svc-name">${host}</span><span class="m-svc-badge">${statusLabel}</span></div>
           <div class="m-svc-row"><span class="lbl">LAST LOG</span><span class="val" style="font-size:10px">${lastSeen}</span></div>
-          ${issues.length ? `<div class="m-svc-row" style="flex-direction:column;gap:2px"><span class="lbl">MOST RECENT</span><span class="val" style="font-size:9px">${escapeHtml(issues[issues.length - 1])}</span></div>` : ''}
+          ${activity.length ? `<div class="m-svc-row" style="flex-direction:column;gap:2px"><span class="lbl">MOST RECENT</span><span class="val" style="font-size:9px">${escapeHtml(activity[activity.length - 1])}</span></div>` : ''}
         </div>`;
       }
       html += `</div>`;
