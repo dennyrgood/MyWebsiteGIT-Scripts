@@ -646,6 +646,19 @@
       grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
       gap: 8px;
     }
+    /* Date divider between calendar days in a transitions grid — added 2026-08-13 UTC
+       so a long RECENT TRANSITIONS list has a visual break for "how old is this". */
+    .m-day-divider {
+      grid-column: 1 / -1;
+      display: flex; align-items: center; gap: 10px;
+      font-size: 9px; color: var(--lcars-tan);
+      letter-spacing: 3px; text-transform: uppercase;
+      margin: 10px 0 2px;
+    }
+    .m-day-divider:first-child { margin-top: 0; }
+    .m-day-divider::after {
+      content: ''; flex: 1; height: 1px; background: rgba(255,184,77,0.25);
+    }
     .m-svc-card {
       background: rgba(255,255,255,0.02);
       border: 1px solid rgba(255,255,255,0.05);
@@ -1610,7 +1623,7 @@
       const host = machine.machine.tailscale_name;
       const transitions = transitionsCache[host] || [];
       html += `<div><div class="m-section-title">RECENT TRANSITIONS</div>
-        ${transitions.length ? `<div class="m-svc-grid">${transitions.slice().reverse().map(renderModalTransition).join('')}</div>`
+        ${transitions.length ? `<div class="m-svc-grid">${renderTransitionsGrid(transitions.slice().reverse(), renderModalTransition)}</div>`
                               : `<div class="m-info-val" style="color:var(--text-dim)">No transitions recorded yet</div>`}
       </div>`;
 
@@ -1723,6 +1736,38 @@
       return { name, badge };
     }
 
+    // TODAY / YESTERDAY / "WEDNESDAY — AUG 13" — same local timezone as the WHEN
+    // fields already use (toLocaleString()), so a divider's date always matches the
+    // entries under it. Added 2026-08-13 UTC per user request — long transitions
+    // lists were hard to eyeball for "how old is this."
+    function transitionDayLabel(ts) {
+      const d = new Date(ts);
+      const startOfDay = x => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+      const diffDays = Math.round((startOfDay(new Date()) - startOfDay(d)) / 86400000);
+      const dateStr = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      if (diffDays === 0) return `TODAY — ${dateStr}`;
+      if (diffDays === 1) return `YESTERDAY — ${dateStr}`;
+      return `${d.toLocaleDateString(undefined, { weekday: 'long' }).toUpperCase()} — ${dateStr}`;
+    }
+
+    // Renders a list of transition entries (already newest-first) into the m-svc-grid
+    // markup, inserting a full-width .m-day-divider whenever the calendar day changes.
+    function renderTransitionsGrid(entries, renderFn) {
+      let html = '';
+      let lastDayKey = null;
+      for (const t of entries) {
+        if (t.ts) {
+          const dayKey = new Date(t.ts).toDateString();
+          if (dayKey !== lastDayKey) {
+            html += `<div class="m-day-divider">${transitionDayLabel(t.ts)}</div>`;
+            lastDayKey = dayKey;
+          }
+        }
+        html += renderFn(t);
+      }
+      return html;
+    }
+
     function renderModalTransition(t) {
       const { name, badge } = transitionLabelAndBadge(t, false);
       const toCls = t.to === 'up' ? 'up' : t.to === 'down' ? 'down' : 'unknown';
@@ -1763,7 +1808,7 @@
         const res = await fetch(`${API_BASE}/api/transitions?limit=150`);
         const entries = res.ok ? await res.json() : [];
         const html = entries.length
-          ? `<div class="m-svc-grid">${entries.slice().reverse().map(renderModalTransitionFleet).join('')}</div>`
+          ? `<div class="m-svc-grid">${renderTransitionsGrid(entries.slice().reverse(), renderModalTransitionFleet)}</div>`
           : `<div class="m-info-val" style="color:var(--text-dim)">No transitions recorded yet</div>`;
         document.getElementById('modal-body').innerHTML =
           `<div class="m-section-title">RECENT TRANSITIONS</div>${html}`;
