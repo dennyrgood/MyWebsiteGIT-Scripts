@@ -1202,9 +1202,12 @@
 
     // Parses a watchdog log's text into: lastTs (timestamp of the most recent
     // line, any line, or null if empty/unparseable) and issues (lines in the
-    // last 24h that aren't just the routine daily alive-ping or a successful
-    // self-heal — FleetMetricsWatchdog.ps1 logs those as "... succeeded", so
-    // a restart/writer-restart that worked is informational, not a problem).
+    // last 24h that indicate an actual failure). FleetMetricsWatchdog.ps1
+    // logs a lot of routine self-heal chatter — alive-pings, "restarting X",
+    // "killing duplicate PID", "restart attempt N/M", "... succeeded" — none
+    // of that is a problem on its own; only lines containing "fail" (e.g.
+    // "restart attempt N failed", "SERVER RESTART FAILED") mean the watchdog
+    // couldn't fix something and it's worth surfacing as an issue.
     function parseWatchdogLog(text) {
       const lines = text.split('\n').filter(l => l.trim());
       const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
@@ -1216,7 +1219,7 @@
         const ts = new Date(m[1]).getTime();
         if (isNaN(ts)) continue;
         if (lastTs === null || ts > lastTs) lastTs = ts;
-        if (ts >= oneDayAgo && !l.includes('watchdog alive, checking') && !l.includes('succeeded')) issues.push(l);
+        if (ts >= oneDayAgo && /fail/i.test(l)) issues.push(l);
       }
       return { lastTs, issues };
     }
