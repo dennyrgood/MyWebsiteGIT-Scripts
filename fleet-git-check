@@ -150,6 +150,26 @@ run_with_timeout() {
   wait "$pid"
 }
 
+# Retries a run_with_timeout call a few times before giving up. A single flaky
+# SSH handshake (busy Tailscale relay, sleeping box waking up, etc.) shouldn't
+# read as UNREACHABLE when a moment later the same host answers fine — as seen
+# 2026-08-13 when denniss-2nd-macbook-air failed once mid-fleet-run then
+# succeeded immediately on a lone retry.
+RETRY_ATTEMPTS=3
+RETRY_DELAY=3
+run_with_retry() {
+  local timeout_secs="$1"; shift
+  local attempt out
+  for ((attempt=1; attempt<=RETRY_ATTEMPTS; attempt++)); do
+    if out=$(run_with_timeout "$timeout_secs" "$@" 2>/dev/null); then
+      printf '%s' "$out"
+      return 0
+    fi
+    [ "$attempt" -lt "$RETRY_ATTEMPTS" ] && sleep "$RETRY_DELAY"
+  done
+  return 1
+}
+
 printf "%-24s %-28s %-10s %6s %6s %6s\n" "HOST" "REPO" "BRANCH" "AHEAD" "BEHIND" "DIRTY"
 printf "%-24s %-28s %-10s %6s %6s %6s\n" "----" "----" "------" "-----" "------" "-----"
 
@@ -169,8 +189,8 @@ for host in "${HOSTS[@]}"; do
     script=$(remote_ps_script "$FETCH")
     # PowerShell -EncodedCommand wants UTF-16LE base64; avoids quoting/BOM issues over SSH.
     encoded=$(printf '%s' "$script" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')
-    if ! output=$(run_with_timeout 20 ssh -o ConnectTimeout=5 -o BatchMode=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$host" "powershell -NoProfile -EncodedCommand $encoded" 2>/dev/null); then
-      printf "%-24s %s\n" "$host" "UNREACHABLE or SSH error"
+    if ! output=$(run_with_retry 20 ssh -o ConnectTimeout=5 -o BatchMode=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$host" "powershell -NoProfile -EncodedCommand $encoded" 2>/dev/null); then
+      printf "%-24s %s\n" "$host" "UNREACHABLE or SSH error (after $RETRY_ATTEMPTS attempts)"
       continue
     fi
   else
@@ -182,8 +202,8 @@ for host in "${HOSTS[@]}"; do
     # meant for it. Encoding the script into the command line itself sidesteps
     # that entirely (mirrors the win branch's -EncodedCommand approach).
     encoded=$(printf '%s' "$script" | base64 | tr -d '\n')
-    if ! output=$(run_with_timeout 20 ssh -o ConnectTimeout=5 -o BatchMode=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$host" "echo $encoded | base64 -d | bash" 2>/dev/null); then
-      printf "%-24s %s\n" "$host" "UNREACHABLE or SSH error"
+    if ! output=$(run_with_retry 20 ssh -o ConnectTimeout=5 -o BatchMode=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$host" "echo $encoded | base64 -d | bash" 2>/dev/null); then
+      printf "%-24s %s\n" "$host" "UNREACHABLE or SSH error (after $RETRY_ATTEMPTS attempts)"
       continue
     fi
   fi

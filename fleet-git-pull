@@ -170,6 +170,44 @@ foreach (\$repo in \$repoDirs) {
 EOF
 }
 
+# Portable per-call deadline + retry, matching fleet-git-check: ConnectTimeout
+# only bounds the TCP handshake, so a host that accepts the connection but
+# then hangs (auth stall, stuck login script, half-dead network) can block
+# forever with no other guard, and a single flaky SSH handshake (busy
+# Tailscale relay, sleeping box waking up) shouldn't read as UNREACHABLE when
+# a moment later the same host answers fine.
+run_with_timeout() {
+  local secs="$1"; shift
+  "$@" &
+  local pid=$!
+  local waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+    if [ "$waited" -ge "$secs" ]; then
+      kill -9 "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      return 124
+    fi
+  done
+  wait "$pid"
+}
+
+RETRY_ATTEMPTS=3
+RETRY_DELAY=3
+run_with_retry() {
+  local timeout_secs="$1"; shift
+  local attempt out
+  for ((attempt=1; attempt<=RETRY_ATTEMPTS; attempt++)); do
+    if out=$(run_with_timeout "$timeout_secs" "$@" 2>/dev/null); then
+      printf '%s' "$out"
+      return 0
+    fi
+    [ "$attempt" -lt "$RETRY_ATTEMPTS" ] && sleep "$RETRY_DELAY"
+  done
+  return 1
+}
+
 printf "%-24s %-16s %-10s %-10s %s\n" "HOST" "REPO" "BRANCH" "RESULT" "DETAIL"
 printf "%-24s %-16s %-10s %-10s %s\n" "----" "----" "------" "------" "------"
 
@@ -185,14 +223,21 @@ for host in "${HOSTS[@]}"; do
   elif [ "$os" = "win" ]; then
     script=$(remote_ps_script "$REPOS" "$DRY_RUN")
     encoded=$(printf '%s' "$script" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')
-    if ! output=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" "powershell -NoProfile -EncodedCommand $encoded" 2>/dev/null); then
-      printf "%-24s %s\n" "$host" "UNREACHABLE or SSH error"
+    if ! output=$(run_with_retry 20 ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" "powershell -NoProfile -EncodedCommand $encoded" 2>/dev/null); then
+      printf "%-24s %s\n" "$host" "UNREACHABLE or SSH error (after $RETRY_ATTEMPTS attempts)"
       continue
     fi
   else
     script=$(remote_bash_script "$REPOS" "$DRY_RUN")
-    if ! output=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" "bash -s" <<< "$script" 2>/dev/null); then
-      printf "%-24s %s\n" "$host" "UNREACHABLE or SSH error"
+    # Base64-encode and pipe through the remote command rather than a heredoc
+    # into "bash -s": run_with_timeout backgrounds ssh (`"$@" &`), and in a
+    # non-interactive shell a backgrounded command has its stdin implicitly
+    # redirected from /dev/null, silently discarding any heredoc/here-string
+    # meant for it. Encoding the script into the command line itself sidesteps
+    # that entirely (mirrors the win branch's -EncodedCommand approach).
+    encoded=$(printf '%s' "$script" | base64 | tr -d '\n')
+    if ! output=$(run_with_retry 20 ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" "echo $encoded | base64 -d | bash" 2>/dev/null); then
+      printf "%-24s %s\n" "$host" "UNREACHABLE or SSH error (after $RETRY_ATTEMPTS attempts)"
       continue
     fi
   fi
