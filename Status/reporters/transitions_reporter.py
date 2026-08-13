@@ -40,6 +40,12 @@ Edit log:
     REMOTE_LINK_HOSTS with a shorter REMOTE_LINK_GRACE_SECONDS (5 min vs 30 min).
     _resolve_effective_status() now takes grace_seconds (int|None) instead of an
     is_portable_host bool, via the new _grace_seconds_for_host() lookup.
+  2026-08-13 UTC — services on a portable/remote-link host now inherit that host's
+    own grace_seconds (not just the host entity itself). Rejected a per-(host,service)
+    allowlist and a flat 5-min-for-services rule as extra config shape for little
+    gain — reusing the existing per-host value is a one-line change. Accepted
+    trade-off, confirmed with user: a real service crash on a portable can now take
+    up to that host's grace period (30 min) to surface, same as the host itself.
 """
 
 import json
@@ -116,12 +122,14 @@ def _resolve_effective_status(raw_status: str, prev_entity: dict | None, grace_s
       - "up"/other -> clears immediately: effective = raw, streak resets to 0 (item 4's
                        asymmetry — one good observation is enough).
       - "down"     -> requires FAIL_STREAK_THRESHOLD consecutive raw downs before the
-                       effective status flips (item 4). If grace_seconds is set (host is
-                       in PORTABLE_HOSTS or REMOTE_LINK_HOSTS — item 6), additionally
-                       hold at the prior status until grace_seconds has elapsed since the
-                       raw down first started, even once the streak threshold is met.
-                       grace_seconds is None (services, and non-portable/non-remote
-                       hosts) means strict — no hold beyond the streak.
+                       effective status flips (item 4). If grace_seconds is set —
+                       PORTABLE_HOSTS/REMOTE_LINK_HOSTS membership for a host entity,
+                       or its host's own grace_seconds for a service entity on that
+                       same host (item 6, extended 2026-08-13) — additionally hold at
+                       the prior status until grace_seconds has elapsed since the raw
+                       down first started, even once the streak threshold is met.
+                       grace_seconds is None (any entity on a plain server-class host)
+                       means strict — no hold beyond the streak.
     """
     prev_status = prev_entity.get("status") if prev_entity else None
     prev_streak = prev_entity.get("fail_streak", 0) if prev_entity else 0
@@ -255,8 +263,14 @@ def report(state: dict, status_dir: Path, checker_host: str) -> None:
             entity_key = f"{tailscale_name}/{svc_name}"
             prev_svc_entity = prev_entities.get(entity_key)
 
+            # Services on a portable/remote-link host inherit that host's own grace
+            # period (not a separate constant) — a real service crash on travelbeast
+            # can now take up to grace_seconds (currently up to 30 min on portables) to
+            # surface, same trade-off already accepted for the host itself. Confirmed
+            # with the user 2026-08-13: acceptable, in exchange for not reintroducing
+            # per-pair config just for denniss-2nd-macbook-air/Syncthing-style blips.
             eff_svc_status, svc_streak, svc_down_since = _resolve_effective_status(
-                raw_svc_status, prev_svc_entity, None, now)
+                raw_svc_status, prev_svc_entity, grace_seconds, now)
             prev_svc_status = prev_svc_entity.get("status") if prev_svc_entity else None
 
             svc_entity = dict(prev_svc_entity) if prev_svc_entity else {}
