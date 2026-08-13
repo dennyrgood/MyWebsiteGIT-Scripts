@@ -35,6 +35,11 @@ Edit log:
       FLAP_WINDOW_MINUTES collapses into a single "scope":"chatter" line and suppresses
       further lines for that entity until it holds stable for FLAP_STABLE_MINUTES.
     All tuning constants live in config.py, not here.
+  2026-08-13 UTC — surface3-gc corrected: it's a stationary Plex server at a remote
+    site, not a sleeping laptop (was mis-lumped into PORTABLE_HOSTS). Moved to its own
+    REMOTE_LINK_HOSTS with a shorter REMOTE_LINK_GRACE_SECONDS (5 min vs 30 min).
+    _resolve_effective_status() now takes grace_seconds (int|None) instead of an
+    is_portable_host bool, via the new _grace_seconds_for_host() lookup.
 """
 
 import json
@@ -92,7 +97,16 @@ def _save_state(path: Path, entities: dict) -> None:
             pass
 
 
-def _resolve_effective_status(raw_status: str, prev_entity: dict | None, is_portable_host: bool, now: datetime) -> tuple[str, int, str | None]:
+def _grace_seconds_for_host(tailscale_name: str) -> int | None:
+    """Held-down grace period for a host entity, or None for strict (servers)."""
+    if tailscale_name in config.PORTABLE_HOSTS:
+        return config.PORTABLE_GRACE_SECONDS
+    if tailscale_name in config.REMOTE_LINK_HOSTS:
+        return config.REMOTE_LINK_GRACE_SECONDS
+    return None
+
+
+def _resolve_effective_status(raw_status: str, prev_entity: dict | None, grace_seconds: int | None, now: datetime) -> tuple[str, int, str | None]:
     """
     Turn a raw observed status into the effective status to store/diff.
     Returns (effective_status, new_fail_streak, new_down_since).
@@ -102,10 +116,12 @@ def _resolve_effective_status(raw_status: str, prev_entity: dict | None, is_port
       - "up"/other -> clears immediately: effective = raw, streak resets to 0 (item 4's
                        asymmetry — one good observation is enough).
       - "down"     -> requires FAIL_STREAK_THRESHOLD consecutive raw downs before the
-                       effective status flips (item 4). Portable hosts additionally hold
-                       at the prior status until PORTABLE_GRACE_SECONDS has elapsed since
-                       the raw down first started (item 6), even once the streak
-                       threshold is met.
+                       effective status flips (item 4). If grace_seconds is set (host is
+                       in PORTABLE_HOSTS or REMOTE_LINK_HOSTS — item 6), additionally
+                       hold at the prior status until grace_seconds has elapsed since the
+                       raw down first started, even once the streak threshold is met.
+                       grace_seconds is None (services, and non-portable/non-remote
+                       hosts) means strict — no hold beyond the streak.
     """
     prev_status = prev_entity.get("status") if prev_entity else None
     prev_streak = prev_entity.get("fail_streak", 0) if prev_entity else 0
@@ -120,9 +136,9 @@ def _resolve_effective_status(raw_status: str, prev_entity: dict | None, is_port
     new_streak = prev_streak + 1
     down_since = prev_down_since or now.isoformat().replace("+00:00", "Z")
 
-    if is_portable_host:
+    if grace_seconds is not None:
         elapsed_s = (now - _parse_ts(down_since)).total_seconds()
-        if elapsed_s >= config.PORTABLE_GRACE_SECONDS:
+        if elapsed_s >= grace_seconds:
             return "down", new_streak, down_since
         return (prev_status if prev_status is not None else "up"), new_streak, down_since
 
@@ -219,11 +235,11 @@ def report(state: dict, status_dir: Path, checker_host: str) -> None:
         tailscale_name = machine["machine"]["tailscale_name"]
         raw_host_status = machine["host"]["status"]
         host_detail = machine["host"].get("detail")
-        is_portable = tailscale_name in config.PORTABLE_HOSTS
+        grace_seconds = _grace_seconds_for_host(tailscale_name)
 
         prev_host_entity = prev_entities.get(tailscale_name)
         eff_host_status, host_streak, host_down_since = _resolve_effective_status(
-            raw_host_status, prev_host_entity, is_portable, now)
+            raw_host_status, prev_host_entity, grace_seconds, now)
         prev_host_status = prev_host_entity.get("status") if prev_host_entity else None
 
         host_entity = dict(prev_host_entity) if prev_host_entity else {}
@@ -240,7 +256,7 @@ def report(state: dict, status_dir: Path, checker_host: str) -> None:
             prev_svc_entity = prev_entities.get(entity_key)
 
             eff_svc_status, svc_streak, svc_down_since = _resolve_effective_status(
-                raw_svc_status, prev_svc_entity, False, now)
+                raw_svc_status, prev_svc_entity, None, now)
             prev_svc_status = prev_svc_entity.get("status") if prev_svc_entity else None
 
             svc_entity = dict(prev_svc_entity) if prev_svc_entity else {}

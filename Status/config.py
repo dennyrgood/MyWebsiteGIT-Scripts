@@ -9,6 +9,9 @@ No code changes needed to add/remove machines or services — edit this file onl
 # Updated: 2026-08-13 UTC — Phase 1 (alert-log noise-reduction project): add TIMEOUT_SYNCTHING_MS,
 #   FAIL_STREAK_THRESHOLD, PORTABLE_GRACE_SECONDS/PORTABLE_HOSTS, FLAP_* thresholds,
 #   SCHEDULED_BLIP_WINDOWS. Consumed by reporters/transitions_reporter.py and engine.py.
+# Updated: 2026-08-13 UTC — moved surface3-gc into REMOTE_LINK_HOSTS (stationary Plex
+#   server at a remote site, not a sleeping laptop) and added remotews to the same set
+#   for the same reason.
 
 import os
 from pathlib import Path
@@ -51,15 +54,27 @@ TIMEOUT_SYNCTHING_MS = 20000
 # ---------------------------------------------------------------------------
 FAIL_STREAK_THRESHOLD = 2          # consecutive raw "down" observations required before declaring down; 1 "up" clears immediately (asymmetric)
 PORTABLE_GRACE_SECONDS = 30 * 60   # portables (laptops that sleep) don't get a host down/up transition unless the outage outlasts this
+REMOTE_LINK_GRACE_SECONDS = 5 * 60 # stationary but remote-sited hosts on a flaky/relayed link — shorter grace than a sleeping laptop
 FLAP_THRESHOLD = 6                 # transitions within FLAP_WINDOW_MINUTES that collapse into one "chatter" line
 FLAP_WINDOW_MINUTES = 60
 FLAP_STABLE_MINUTES = 30           # must hold steady this long before flap suppression lifts
 
 # Portables are expected to sleep/roam — see PORTABLE_GRACE_SECONDS above.
-# Servers (everything else in FLEET) stay strict: any down/up transition emits immediately.
 PORTABLE_HOSTS = {
-    "denniss-macbook-air", "denniss-2nd-macbook-air", "travelbeast", "surface3-gc",
+    "denniss-macbook-air", "denniss-2nd-macbook-air", "travelbeast",
 }
+
+# Stationary but at a remote site on a Tailscale-relayed link, not a sleeping device —
+# both are Plex servers, confirmed 2026-08-13 (surface3-gc was mis-lumped in with the
+# portables initially; remotews added same day for the same reason). Gets a shorter
+# grace period than PORTABLE_HOSTS, not the sleep rationale. Adjust
+# REMOTE_LINK_GRACE_SECONDS above if 5 min proves wrong either way.
+REMOTE_LINK_HOSTS = {
+    "surface3-gc", "remotews",
+}
+
+# Servers (everything else in FLEET, incl. the two sets above by exception) stay
+# strict: any down/up transition emits immediately, no held grace period.
 
 # Scheduled, expected blips: the down/up transition inside the window is suppressed,
 # but if the expected blip does NOT happen at all that day, that silence is the anomaly
