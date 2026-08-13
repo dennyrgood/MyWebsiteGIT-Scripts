@@ -262,6 +262,8 @@
       font-size: 10px;
       letter-spacing: 1px;
     }
+    .alert-item.clickable { cursor: pointer; }
+    .alert-item.clickable:hover { background: rgba(255,59,92,0.22); }
 
     /* ── GRID ───────────────────────────────────────── */
     #grid {
@@ -1544,30 +1546,43 @@
     // so the small corner indicator alone was easy to miss.
     const STALE_THRESHOLD_S = 180;
 
+    // Alert items link straight into the host's modal, which already has a
+    // RECENT TRANSITIONS section — a single raw poll miss here is "live" and
+    // often clears before the debounced transitions log ever records it as a
+    // real event (tiles are the live/raw view, transitions are the confirmed
+    // record — deliberate split, decided 2026-08-13). Rather than relying on
+    // remembering to go check FLEET TRANSITIONS separately, each alert is
+    // clickable and jumps directly to that host's own transitions, so "is
+    // this real" is one click away instead of a thing to remember.
     function updateAlertStrip(machines) {
       const content = document.getElementById('alert-content');
       content.querySelectorAll('.alert-item').forEach(el => el.remove());
-      const alerts = [];
+      const alerts = []; // { text, machine } — machine is null for non-host-specific alerts
       if (lastTimestamp) {
         const ageS = Math.floor((Date.now() - lastTimestamp) / 1000);
         if (ageS >= STALE_THRESHOLD_S) {
-          alerts.push(`⚠ CHECKER DATA STALE — ${ageS}s SINCE LAST POLL`);
+          alerts.push({ text: `⚠ CHECKER DATA STALE — ${ageS}s SINCE LAST POLL`, machine: null });
         }
       }
       for (const machine of machines) {
         if (machine.host?.status !== 'up') {
-          alerts.push(machine.machine.display_name + ' HOST DOWN');
+          alerts.push({ text: machine.machine.display_name + ' HOST DOWN', machine });
           continue;
         }
         (machine.services || [])
           .filter(s => s.priority === 'P' && s.tailscale_check?.status !== 'up')
-          .forEach(s => alerts.push(`${machine.machine.display_name}  -  ${s.name}`));
+          .forEach(s => alerts.push({ text: `${machine.machine.display_name}  -  ${s.name}`, machine }));
       }
       if (alerts.length) {
         alerts.forEach(a => {
           const el = document.createElement('span');
           el.className = 'alert-item';
-          el.textContent = a;
+          el.textContent = a.text;
+          if (a.machine) {
+            el.classList.add('clickable');
+            el.title = 'Click to check RECENT TRANSITIONS for this host';
+            el.addEventListener('click', () => openModal(a.machine));
+          }
           content.appendChild(el);
         });
         content.classList.add('visible');
