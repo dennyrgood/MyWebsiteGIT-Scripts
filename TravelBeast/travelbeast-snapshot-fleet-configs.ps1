@@ -8,6 +8,11 @@
 # like "Fleet Metrics Server" is found fine). wifi_watchdog.ps1 already lives in the
 # scripts repo, so it is not copied.
 #
+# 2026-08-19: added 'power[-_ ]?heartbeat' to the match regex so the "Power Heartbeat
+# Logger" task (runs power-heartbeat.ps1, see that file's header for why it exists) is
+# picked up automatically rather than relying on an XML already sitting in TaskSched\
+# from a prior manual export.
+#
 # Hardened: one stale or protected task never aborts the run. Do NOT set
 # $ErrorActionPreference='Stop' (it turns schtasks' stderr into a terminating error);
 # each export checks $LASTEXITCODE and is wrapped.
@@ -24,7 +29,7 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 $wanted = [System.Collections.Generic.List[string]]::new()
 Get-ChildItem $dest -Filter *.xml -ErrorAction SilentlyContinue | ForEach-Object { $wanted.Add($_.BaseName) }
 Get-ScheduledTask | Where-Object {
-    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat[-_ ]?writer|run[-_ ]?hidden|watchdog'
+    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat[-_ ]?writer|power[-_ ]?heartbeat|run[-_ ]?hidden|watchdog'
 } | ForEach-Object { $wanted.Add($_.TaskName) }
 $wanted = @($wanted | Select-Object -Unique)
 
