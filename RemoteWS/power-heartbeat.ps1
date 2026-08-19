@@ -28,6 +28,15 @@
      occurrence has a local trend line to correlate against the checker's
      transitions log, instead of requiring another manual event-log dig.
 
+     2026-08-18 (later): wifi_state/signal alone are association-layer only -
+     the adapter can say "connected" with fine signal while traffic still
+     isn't passing (this fits the 8/18 12:52-17:11 outage the checker saw,
+     which had no matching WLAN reconnect events - i.e. it stayed
+     "associated" throughout while apparently not passing traffic). Added
+     actual reachability checks: a ping to the current default gateway (LAN/
+     AP-side reachability) and a ping to a fixed public IP (WAN-side), so a
+     future outage can be told apart as AP/local-network vs. upstream/ISP.
+
   This script appends one line every 15s to a local, append-only, per-day log
   file, synchronously flushed on every tick so a hard freeze can't lose a
   buffered-but-unwritten line. It is intentionally independent of the existing
@@ -43,10 +52,11 @@
   Logs to C:\fleet_monitor\power_heartbeat_remotews\ alongside the existing
   fleet_monitor heartbeat/metrics files for that host.
 
-  Schema note: 2026-08-18 added the wifi_* columns (v2). Older day-files from
-  before that date only have the original 5 columns - don't concatenate them
-  with v2 files without accounting for the header change, hence the separate
-  "power_heartbeat_v2_*" filename prefix going forward.
+  Schema note: 2026-08-18 added the wifi_* columns (v2), then later the same
+  day added gateway_*/wan_* reachability columns (v3). Older day-files only
+  have the earlier column sets - don't concatenate across versions without
+  accounting for the header change, hence the versioned
+  "power_heartbeat_v{2,3}_*" filename prefixes.
 #>
 
 $ErrorActionPreference = 'Continue'
@@ -54,6 +64,7 @@ $ErrorActionPreference = 'Continue'
 $LogDir = 'C:\fleet_monitor\power_heartbeat_remotews'
 $RetentionDays = 30
 $IntervalSeconds = 15
+$WanPingTarget = '1.1.1.1'   # fixed public IP, not DNS-dependent - WAN-side reachability check
 
 if (-not (Test-Path $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
@@ -97,6 +108,32 @@ function Get-WifiInfo {
     return $result
 }
 
+function Get-DefaultGateway {
+    # Re-resolved every tick rather than cached, since the gateway/lease has
+    # been observed to change (a fresh DHCP lease landed mid-day on 2026-08-18
+    # alongside a "New Internet Connection Profile" event) - caching it could
+    # silently start pinging a stale address after that kind of reset.
+    try {
+        $cfg = Get-NetIPConfiguration -InterfaceAlias 'Wi-Fi' -ErrorAction Stop
+        return $cfg.IPv4DefaultGateway.NextHop
+    } catch { return $null }
+}
+
+function Test-PingTarget {
+    # -Count 1 keeps each check to a single echo request. On a timeout this
+    # can still take a few seconds (legacy Test-Connection's default timeout),
+    # which is fine here: it just stretches that tick's interval slightly,
+    # and a timeout IS the interesting case we want captured, not skipped.
+    param([string]$TargetIp)
+    if (-not $TargetIp) { return [pscustomobject]@{ Ok = 'NA'; Ms = 'NA' } }
+    try {
+        $r = Test-Connection -ComputerName $TargetIp -Count 1 -ErrorAction Stop
+        return [pscustomobject]@{ Ok = $true; Ms = $r.ResponseTime }
+    } catch {
+        return [pscustomobject]@{ Ok = $false; Ms = 'timeout' }
+    }
+}
+
 function Get-NewReconnectCount {
     # Counts Microsoft-Windows-WLAN-AutoConfig Event 11010 ("Wireless security
     # started", fired on every reconnect/re-auth) since $sinceLocal. Windows
@@ -117,7 +154,7 @@ function Get-NewReconnectCount {
 # Write header once per new day-file
 function Ensure-Header($path) {
     if (-not (Test-Path $path)) {
-        [System.IO.File]::AppendAllText($path, "timestamp_utc,uptime_sec,cpu_pct,free_mem_mb,thermal_c,wifi_signal_pct,wifi_rssi_dbm,wifi_state,wifi_reconnects_new,wifi_reconnects_total`r`n")
+        [System.IO.File]::AppendAllText($path, "timestamp_utc,uptime_sec,cpu_pct,free_mem_mb,thermal_c,wifi_signal_pct,wifi_rssi_dbm,wifi_state,wifi_reconnects_new,wifi_reconnects_total,gateway_ip,gateway_ping_ok,gateway_ping_ms,wan_ping_ok,wan_ping_ms`r`n")
     }
 }
 
@@ -131,7 +168,7 @@ while ($true) {
     try {
         $now = (Get-Date).ToUniversalTime()
         $nowLocal = Get-Date
-        $dayFile = Join-Path $LogDir ("power_heartbeat_v2_{0:yyyy-MM-dd}.csv" -f $now)
+        $dayFile = Join-Path $LogDir ("power_heartbeat_v3_{0:yyyy-MM-dd}.csv" -f $now)
         Ensure-Header $dayFile
 
         $uptimeSec = [math]::Round(((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalSeconds)
@@ -144,9 +181,14 @@ while ($true) {
         $script:ReconnectTotal += $newReconnects
         $script:LastReconnectCheck = $nowLocal
 
-        $line = "{0:yyyy-MM-ddTHH:mm:ss.fffZ},{1},{2},{3},{4},{5},{6},{7},{8},{9}" -f `
+        $gateway = Get-DefaultGateway
+        $gwPing = Test-PingTarget -TargetIp $gateway
+        $wanPing = Test-PingTarget -TargetIp $WanPingTarget
+
+        $line = "{0:yyyy-MM-ddTHH:mm:ss.fffZ},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13},{14}" -f `
             $now, $uptimeSec, $cpuPct, $freeMemMb, $thermal, `
-            $wifi.SignalPct, $wifi.RssiDbm, $wifi.State, $newReconnects, $script:ReconnectTotal
+            $wifi.SignalPct, $wifi.RssiDbm, $wifi.State, $newReconnects, $script:ReconnectTotal, `
+            $(if ($gateway) { $gateway } else { 'NA' }), $gwPing.Ok, $gwPing.Ms, $wanPing.Ok, $wanPing.Ms
 
         # AppendAllText opens, writes, flushes, and closes the handle on every
         # call - deliberately not keeping a stream open, so a hard freeze
