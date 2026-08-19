@@ -7,8 +7,12 @@
 # Manual-run; review `git diff` and commit.
 #
 # Task list = existing TaskSched\*.xml + any task DISCOVERED by its action running the
-# fleet writer/metrics/heartbeat/watchdog (matched on the action, so a display name with
-# spaces like "Fleet Metrics Server" is found fine).
+# fleet writer/metrics/heartbeat/watchdog/power-heartbeat (matched on the action, so a
+# display name with spaces like "Fleet Metrics Server" is found fine).
+#
+# 2026-08-18: added power[-_ ]?heartbeat to the match, to also pick up "Power Heartbeat
+# Logger" (runs power-heartbeat.ps1 as SYSTEM at startup - see Status/readme.md-adjacent
+# RemoteWS/power-heartbeat.ps1 for what it's for: power-loss and WiFi-flap diagnostics).
 #
 # Hardened: one stale or protected task never aborts the run. Do NOT set
 # $ErrorActionPreference='Stop' (it turns schtasks' stderr into a terminating error);
@@ -26,7 +30,7 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 $wanted = [System.Collections.Generic.List[string]]::new()
 Get-ChildItem $dest -Filter *.xml -ErrorAction SilentlyContinue | ForEach-Object { $wanted.Add($_.BaseName) }
 Get-ScheduledTask | Where-Object {
-    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat[-_ ]?writer|run[-_ ]?hidden|watchdog'
+    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat[-_ ]?writer|run[-_ ]?hidden|watchdog|power[-_ ]?heartbeat'
 } | ForEach-Object { $wanted.Add($_.TaskName) }
 $wanted = @($wanted | Select-Object -Unique)
 
