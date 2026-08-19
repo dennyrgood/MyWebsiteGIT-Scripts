@@ -55,6 +55,21 @@
   events) to correlate against the fleet checker's own outage log,
   instead of requiring another manual multi-hour diagnostic session.
 
+  2026-08-19 blind spot found and closed (v2 schema): oLiFaNt_5G died
+  sometime that afternoon while this log showed nothing wrong at all -
+  uninterrupted "connected" state, stable BSSID/signal/RSSI, zero
+  reconnect events, right up until the user's own manual
+  disconnect/reconnect attempts started showing up in the WLAN-AutoConfig
+  event log. The v1 schema only records what Windows *reports* about the
+  link (signal/state/reconnect-count), which looks identical whether the
+  link is healthy or "connected but not actually passing traffic" - the
+  same silent-death signature as the original problem this script was
+  built to catch. v2 adds an actual reachability probe (ping to the
+  current default gateway, re-detected every tick since this is a travel
+  laptop and the gateway changes across networks) so a repeat of this
+  exact failure mode leaves a real trace instead of a healthy-looking
+  gap.
+
   This script appends one line every 15s to a local, append-only, per-day
   log file, synchronously flushed on every tick so a crash/reboot can't
   lose a buffered-but-unwritten line. It is intentionally independent of
@@ -68,6 +83,16 @@
   in).
   Logs to C:\fleet_monitor\power_heartbeat_travelbeast\ alongside the
   existing fleet_monitor heartbeat/metrics files for this host.
+
+  Schema note: 2026-08-19 added the gw_ping_ms/gw_ping_status columns
+  (v2). The v1 day-file from before that date only has the original 12
+  columns - don't concatenate it with v2 files without accounting for the
+  header change, hence the separate "power_heartbeat_v2_*" filename
+  prefix going forward (same convention as RemoteWS's copy of this
+  script). Editing this file does NOT affect an already-running instance
+  - PowerShell loads the whole script into memory at start, so the
+  running "Power Heartbeat Logger" task must be stopped and restarted
+  (Task Scheduler -> right-click -> End, then Run) to pick up changes.
 #>
 
 $ErrorActionPreference = 'Continue'
@@ -122,6 +147,29 @@ function Get-WifiInfo {
     return $result
 }
 
+function Get-GatewayPing {
+    # Re-detects the default gateway every call rather than hardcoding one,
+    # since this is a travel laptop and the gateway changes across
+    # networks (home oLiFaNt, hotel WiFi, phone hotspot, etc.). This is
+    # the actual reachability probe v1 was missing - see the 2026-08-19
+    # note above for why it exists.
+    $result = [pscustomobject]@{ Ms = ''; Status = 'NA' }
+    try {
+        $gw = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
+            Sort-Object RouteMetric | Select-Object -First 1 -ExpandProperty NextHop
+        if ($gw) {
+            $p = Test-Connection -ComputerName $gw -Count 1 -ErrorAction SilentlyContinue
+            if ($p) {
+                $result.Ms = $p.ResponseTime
+                $result.Status = 'OK'
+            } else {
+                $result.Status = 'TIMEOUT'
+            }
+        }
+    } catch {}
+    return $result
+}
+
 function Get-NewReconnectCount {
     # Counts Microsoft-Windows-WLAN-AutoConfig Event 11010 ("Wireless
     # security started", fired on every reconnect/re-auth) since
@@ -143,7 +191,7 @@ function Get-NewReconnectCount {
 # Write header once per new day-file
 function Ensure-Header($path) {
     if (-not (Test-Path $path)) {
-        [System.IO.File]::AppendAllText($path, "timestamp_utc,uptime_sec,cpu_pct,free_mem_mb,thermal_c,wifi_signal_pct,wifi_rssi_dbm,wifi_state,wifi_bssid,wifi_channel,wifi_reconnects_new,wifi_reconnects_total`r`n")
+        [System.IO.File]::AppendAllText($path, "timestamp_utc,uptime_sec,cpu_pct,free_mem_mb,thermal_c,wifi_signal_pct,wifi_rssi_dbm,wifi_state,wifi_bssid,wifi_channel,wifi_reconnects_new,wifi_reconnects_total,gw_ping_ms,gw_ping_status`r`n")
     }
 }
 
@@ -157,7 +205,7 @@ while ($true) {
     try {
         $now = (Get-Date).ToUniversalTime()
         $nowLocal = Get-Date
-        $dayFile = Join-Path $LogDir ("power_heartbeat_travelbeast_{0:yyyy-MM-dd}.csv" -f $now)
+        $dayFile = Join-Path $LogDir ("power_heartbeat_v2_travelbeast_{0:yyyy-MM-dd}.csv" -f $now)
         Ensure-Header $dayFile
 
         $uptimeSec = [math]::Round(((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalSeconds)
@@ -165,14 +213,16 @@ while ($true) {
         $freeMemMb = [math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024)
         $thermal = Get-ThermalCelsius
         $wifi = Get-WifiInfo
+        $gwPing = Get-GatewayPing
 
         $newReconnects = Get-NewReconnectCount -sinceLocal $script:LastReconnectCheck
         $script:ReconnectTotal += $newReconnects
         $script:LastReconnectCheck = $nowLocal
 
-        $line = "{0:yyyy-MM-ddTHH:mm:ss.fffZ},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11}" -f `
+        $line = "{0:yyyy-MM-ddTHH:mm:ss.fffZ},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13}" -f `
             $now, $uptimeSec, $cpuPct, $freeMemMb, $thermal, `
-            $wifi.SignalPct, $wifi.RssiDbm, $wifi.State, $wifi.Bssid, $wifi.Channel, $newReconnects, $script:ReconnectTotal
+            $wifi.SignalPct, $wifi.RssiDbm, $wifi.State, $wifi.Bssid, $wifi.Channel, $newReconnects, $script:ReconnectTotal, `
+            $gwPing.Ms, $gwPing.Status
 
         # AppendAllText opens, writes, flushes, and closes the handle on
         # every call - deliberately not keeping a stream open, so a crash
