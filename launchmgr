@@ -77,6 +77,9 @@ case $cmd in
   *) LABEL=$cmd; cmd=status ;;
 esac
 
+# strip leading com.dennis. so both "tmdb" and "com.dennis.tmdb-explorer" work
+LABEL=${LABEL#com.dennis.}
+
 if [[ $cmd == status ]]; then
   disabled_txt=$(launchctl print-disabled "$DOMAIN" 2>/dev/null)
   list_txt=$(launchctl list)
