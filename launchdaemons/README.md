@@ -11,7 +11,18 @@ just at launch.
 
 | Label | What it runs | Log |
 |---|---|---|
-| `com.dennis.mmm-nut-upsmon` | `upsmon` (NUT), netclient monitoring `ups0@192.168.178.123` on the NAS, root the whole time so its `SHUTDOWNCMD` (`/sbin/shutdown -h now`) can actually fire | `/Library/Logs/mmm_nut_upsmon.log` |
+| `com.dennis.mmm-nut-upsmon` | `mmm-nut-upsmon-start.sh` (this dir), which wraps `upsmon` (NUT) — netclient monitoring `ups0@192.168.178.123` on the NAS, root the whole time so its `SHUTDOWNCMD` (`/sbin/shutdown -h now`) can actually fire | `/Library/Logs/mmm_nut_upsmon.log` |
+
+`mmm-nut-upsmon-start.sh` exists because of a real 2026-08-24 incident: after a
+reboot, `upsmon` failed to start for ~10 minutes (60 consecutive "already
+running" errors in the log) even though no other instance existed — a PID
+file survived from before the reboot, and `upsmon`'s own check only tests
+whether that PID *number* is alive, not whether it's actually `upsmon`. Early
+in a fresh boot, low PIDs get reused fast, so the stale number collided with
+an unrelated process. The wrapper checks whether the recorded PID is a real
+`upsmon` before removing the file — a genuine second instance is left alone,
+never blindly deleted out from under it. See the script's own header for the
+full incident writeup.
 
 Config lives outside this repo, at `/opt/homebrew/etc/nut/upsmon.conf`
 (root:wheel, mode 600 — it holds the NAS monitoring password). See the

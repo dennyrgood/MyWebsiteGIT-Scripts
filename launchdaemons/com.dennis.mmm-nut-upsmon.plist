@@ -8,11 +8,15 @@
     <!-- Absolute path deliberately, not "upsmon" -- a system LaunchDaemon's
          environment does not include /opt/homebrew on PATH, and a plist that
          relies on PATH fails silently: launchd reports nothing wrong, upsmon
-         just never starts. See NUT_CLIENT_SETUP.md / UPS-NUT-Guide Section 7. -->
+         just never starts. See NUT_CLIENT_SETUP.md / UPS-NUT-Guide Section 7.
+
+         2026-08-24: invokes the wrapper script, not upsmon directly, so a PID
+         file stale from before a reboot can't block startup for several
+         minutes with no shutdown protection -- see mmm-nut-upsmon-start.sh's
+         header for the real incident that found this. -->
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/sbin/upsmon</string>
-        <string>-F</string>
+        <string>/Users/dennishmathes/repos/scripts/launchdaemons/mmm-nut-upsmon-start.sh</string>
     </array>
 
     <!-- Explicit rather than relying on the system domain's default, for the
