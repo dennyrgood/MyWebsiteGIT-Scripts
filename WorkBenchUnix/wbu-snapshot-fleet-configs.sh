@@ -39,4 +39,91 @@ systemctl is-enabled nut-monitor > "$DEST/nut-monitor.enabled.txt" 2>&1 || true
 #   sudo systemctl enable --now fleet_metrics_server
 systemctl is-enabled fleet_metrics_server > "$DEST/fleet_metrics_server.enabled.txt" 2>&1 || true
 
+
+# Syncthing (added 2026-08-25). Replicates the restic repo off-site to s3g --
+# see WorkBenchUnix/OFFSITE_BACKUP.md.
+#
+# config.xml is captured with <apikey> and <password> REDACTED, unlike
+# nut-upsmon.conf above. The reasoning differs: upsmon's password is required to
+# rebuild the box, whereas Syncthing's API key and GUI password are generated
+# fresh on a rebuild and are needed by nothing here. syncthing_offsite_status.sh
+# reads the API key from the LIVE config, never from this snapshot.
+#
+# Redaction is done with an XML parser and then VERIFIED -- if either secret
+# survives into the output the file is deleted and the snapshot aborts. A regex
+# would fail open, which for a credential is the wrong direction to fail.
+#
+# NOT captured: cert.pem / key.pem, which together are this box's device
+# identity (VUU2OPZ...). Copying them would let a rebuilt WBU keep its device ID
+# so remotes reconnect without re-pairing -- a real convenience -- but key.pem is
+# a private key, and anyone holding it could impersonate this box to s3g and push
+# arbitrary content into its Receive Only copy of the repo. That is a wider blast
+# radius than the upsmon password, so it stays out even though fleet-configs is
+# private. Consequence: a rebuilt WBU gets a NEW device ID and must be re-added
+# on every remote (currently just s3g). https-cert/key are GUI-only and
+# regenerate themselves.
+ST_STATE="$HOME/.local/state/syncthing"
+if [ -f "$ST_STATE/config.xml" ]; then
+    python3 - "$ST_STATE/config.xml" "$DEST/syncthing-config.xml" <<'PYEOF'
+import sys, os, xml.etree.ElementTree as ET
+src, dst = sys.argv[1], sys.argv[2]
+tree = ET.parse(src)
+root = tree.getroot()
+secrets = []
+gui = root.find('gui')
+if gui is not None:
+    for tag in ('apikey', 'password'):
+        el = gui.find(tag)
+        if el is not None and el.text:
+            secrets.append(el.text)
+            el.text = 'REDACTED'
+tree.write(dst, encoding='utf-8', xml_declaration=True)
+out = open(dst, encoding='utf-8').read()
+if [x for x in secrets if x and x in out]:
+    os.unlink(dst)
+    sys.exit("REDACTION FAILED - secret survived into output; file removed")
+PYEOF
+    chmod 644 "$DEST/syncthing-config.xml"
+
+    # Human-readable topology. The XML is the record of record, but the thing you
+    # actually want at 2am is "what talks to what, in which direction".
+    python3 - "$DEST/syncthing-config.xml" > "$DEST/syncthing-topology.txt" <<'PYEOF'
+import sys, xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+names = {d.get('id'): d.get('name') for d in root.findall('device')}
+print("Remote devices")
+for d in root.findall('device'):
+    addrs = ", ".join(a.text or "" for a in d.findall('address'))
+    print("  %-22s %s..  addresses: %s%s" % (
+        d.get('name'), (d.get('id') or "")[:7], addrs,
+        "  [introducer]" if d.get('introducer') == 'true' else ""))
+print()
+print("Folders")
+for f in root.findall('folder'):
+    if not f.get('id'):
+        continue
+    shared = [names.get(x.get('id'), (x.get('id') or "")[:7]) for x in f.findall('device')]
+    print("  %s  (%s)" % (f.get('label') or f.get('id'), f.get('id')))
+    print("      path        : %s" % f.get('path'))
+    print("      type        : %s" % f.get('type'))
+    print("      ignorePerms : %s" % f.get('ignorePerms'))
+    print("      shared with : %s" % ", ".join(shared))
+    ver = f.find('versioning')
+    vt = ver.get('type') if ver is not None else ''
+    print("      versioning  : %s" % (vt or 'none'))
+print()
+g = root.find('gui')
+if g is not None:
+    a = g.find('address')
+    print("GUI: %s  tls=%s  (apikey/password redacted)" % (
+        a.text if a is not None else '?', g.get('tls')))
+PYEOF
+
+    syncthing --version 2>/dev/null | head -1 > "$DEST/syncthing-version.txt" || true
+    systemctl is-enabled "syncthing@$(id -un)" > "$DEST/syncthing.enabled.txt" 2>&1 || true
+
+    # .stignore lives inside the restic repo, which is not otherwise snapshotted.
+    cp -p /mnt/immich-backup/restic/.stignore "$DEST/syncthing-restic-stignore.txt" 2>/dev/null || true
+fi
+
 echo "Snapshot complete. Review with: cd $DEST && git status"
