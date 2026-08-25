@@ -14,6 +14,9 @@
 # Logger" (runs power-heartbeat.ps1 as SYSTEM at startup - see Status/readme.md-adjacent
 # RemoteWS/power-heartbeat.ps1 for what it's for: power-loss and WiFi-flap diagnostics).
 #
+# 2026-08-25: added jump[-_ ]?connect to also pick up "JumpConnect Watchdog" (runs
+# jumpconnect-watchdog.ps1 as SYSTEM every 5 min - see RemoteWS/jumpconnect-watchdog.ps1).
+#
 # Hardened: one stale or protected task never aborts the run. Do NOT set
 # $ErrorActionPreference='Stop' (it turns schtasks' stderr into a terminating error);
 # each export checks $LASTEXITCODE and is wrapped.
