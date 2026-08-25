@@ -374,25 +374,135 @@ Linux/macOS only.
 
 ## Open items
 
-1. **Passphrase off-site copy — CRITICAL, unresolved.** `/root/.restic-passphrase`
-   lives on the same machine as the source data. If Amsterdam is lost, the s3g copy
-   is undecryptable without a passphrase record that is **not in Amsterdam**.
-   Password manager that syncs off-site, and/or paper at the GC location. No script
-   can fix this one. The chosen passphrase is under 12 characters — accepted
-   deliberately, per the original decision that encryption here is mandatory rather
-   than desired.
-2. **Verify the s3g copy once seeded.** `restic -r D:\immich-restic check` from
-   Windows. This is what turns "the copy finished" into "the copy is openable".
-   Until it is done, the off-site copy is unproven.
-3. **Additional nodes.** rws (Philly) is the strongest candidate — different
-   continent, already in the mmm Syncthing mesh, needs ~100 GB. mb2 skipped: same
-   city, and 85 GB on a MacBook Air duplicates what s3g holds. **Do not seed two
-   remotes at once** — they share one uplink, halving both and extending the window
-   with no completed off-site copy.
-4. **`fleet-configs` snapshot.** fstab and root crontab both changed 2026-08-25.
-5. **FleetNAS checksum audit** — see the RAM section.
-6. **Memtest the two removed DIMMs.**
-7. **Syncthing version skew** — wbu 1.30.0, s3g 2.1.3. Working; align eventually.
+### 1. Passphrase copy outside Amsterdam — CRITICAL, unresolved
+
+`/root/.restic-passphrase` sits on the same machine, in the same building, as the
+data it protects. The Gran Canaria copy is mathematically undecryptable without it.
+restic has no recovery key, no reset, no support channel.
+
+**Never `cat` that file inside a Claude Code session** — it lands in the transcript
+and the local `.jsonl`.
+
+Verify memory matches the file, interactively, without printing anything:
+
+```
+sudo restic -r /mnt/immich-backup/restic snapshots
+```
+
+Bare `restic`, not `restic-wbu` — the wrapper sets `RESTIC_PASSWORD_FILE` and would
+skip the prompt.
+
+**Consider a second key.** restic allows multiple passphrases on one repo, any of
+which opens it:
+
+```
+sudo restic-wbu key add        # then: restic-wbu key list
+```
+
+That allows a short memorable phrase for typing at the GC end *and* a long random
+one in a password manager, so the weak one is not the only thing protecting the
+repo. The current passphrase is under 12 characters, accepted deliberately per the
+original decision that encryption here is mandatory rather than desired — but that
+decision assumed the repo stayed on one machine, which is no longer true.
+
+Record the repo path, the fact that it is restic, and where to get the binary — not
+just the passphrase. A bare secret with no context is far less useful in two years.
+
+Store it in a password manager that syncs off-device **and** on paper at the GC
+location. Both: the manager covers convenience, the paper covers "I cannot log into
+anything because the laptop was in the house too."
+
+### 2. Verify the s3g copy once seeded
+
+Only once the folder shows **Up to Date** — checking a partial repo reports missing
+packs and tells you nothing.
+
+Install `restic_0.19.1_windows_amd64.zip` from the same GitHub release, then:
+
+```
+restic.exe -r D:\immich-restic snapshots       # passphrase works, repo opens
+restic.exe -r D:\immich-restic check           # every referenced pack present
+restic.exe -r D:\immich-restic restore latest --include <one photo> --target C:\tmp\proof
+```
+
+The first is the moment the off-site copy stops being theoretical. The third is the
+one that matters emotionally: structure checks are abstractions, a photo on screen
+is not.
+
+**Expected gotcha:** restic takes a lock, creating a file under `locks/`. That
+folder is Receive Only, so Syncthing flags a *"Locally Changed Item"*. Harmless —
+`/locks` is in `.stignore` and never syncs back. Let Syncthing revert it or delete
+it. Worth knowing in advance so it does not read as corruption.
+
+A full `check --read-data` re-hashes all 85 GiB; worth doing once, overnight, after
+the cheap checks pass.
+
+### 3. Syncthing snapshots for the other boxes
+
+**s3g first.** wbu's config records that it *sends* to s3g. Nothing anywhere records
+what s3g *does with it* — the `D:\immich-restic` path, the Receive Only type, or
+that the drive migrates to sgc around January 2027. If s3g died, the receiving half
+would be rebuilt from memory.
+
+For `Surface3GC/surface3-gc-snapshot-fleet-configs.ps1`: read
+`%LOCALAPPDATA%\Syncthing\config.xml`, cast to `[xml]`, null out `gui.apikey` and
+`gui.password`, verify the originals are absent from the output, save, and write the
+same topology summary as the WBU version.
+
+mmm and mb2 are macOS (config under `~/Library/Application Support/Syncthing/`,
+snapshot scripts are `.sh`, so the Python approach ports if python3 is present).
+rws is Windows like s3g.
+
+### 4. FleetNAS checksum audit
+
+Bad memory was in play while `--delete` mirrors ran nightly (see the RAM section).
+rsync compares size and mtime, so a corrupted byte would have propagated silently.
+Force content comparison, dry run — write it to a script rather than pasting:
+
+```
+rsync -ain --no-perms --delete -c -e "ssh -i ~/.ssh/id_ed25519_fleetnas" \
+    /mnt/immich-data/immich/images/ dhm@192.168.178.123:immich/images/
+```
+
+`-c` is the only addition to the verification pass
+`backup_immich_images_to_fleetnas.sh` already runs. Reads 85 GiB at both ends;
+budget hours. Empty output means FleetNAS matches wbu byte-for-byte — and since the
+restic repo verified clean against that same source, the chain holds.
+
+**What it cannot tell you:** whether a photo was already corrupt before it ever
+reached wbu.
+
+### 5. Memtest the two removed DIMMs
+
+Test them **individually**, not as a pair — the fault may have been the combination
+rather than any single module. Boot memtest86+ with only the Crucial in A2, then
+only the G.Skill. If both pass alone, the four-DIMM configuration was the problem,
+and a matched 32 GB kit can be bought with confidence rather than replacing sticks
+blind. Current usage is ~2 GB of 16 GB, so there is no hurry.
+
+### 6. Additional replica: rws (Philly)
+
+Only after s3g reads 100%. **Do not seed two remotes at once** — they share one
+Amsterdam uplink, halving each and extending the window with no completed off-site
+copy.
+
+Then: pair wbu with rws, share the same `immich-restic` folder, Receive Only at that
+end, ~90 GB free required. Different continent, so it covers the case where
+Amsterdam and Gran Canaria are hit by the same event. Already in mmm's Syncthing
+mesh, so no new software to install.
+
+mb2 skipped: same city as wbu, so it buys no regional separation, and 85 GiB on a
+MacBook Air duplicates what s3g already holds.
+
+### 7. Smaller items
+
+- **`fleet-configs` snapshot** — fstab, root crontab, Syncthing and `/usr/local/bin`
+  all changed 2026-08-25. Run `wbu-snapshot-fleet-configs.sh` locally (needs `sudo`
+  for the root crontab) and review before committing.
+- **Syncthing version skew** — wbu 1.30.0, s3g 2.1.3. Interoperating fine; align
+  eventually.
+- **Tighten `BACKLOG_MAX_DAYS`** if a genuine large import repeatedly trips the
+  3-day limit — or leave it, and treat a trip as worth investigating.
 
 ---
 
