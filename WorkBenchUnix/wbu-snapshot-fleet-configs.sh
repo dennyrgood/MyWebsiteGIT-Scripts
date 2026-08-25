@@ -126,4 +126,31 @@ PYEOF
     cp -p /mnt/immich-backup/restic/.stignore "$DEST/syncthing-restic-stignore.txt" 2>/dev/null || true
 fi
 
+
+# /usr/local/bin (added 2026-08-25). Small local admin scripts accumulate here
+# over time and exist NOWHERE else -- not in the scripts repo, not here until
+# now. A rebuild would silently lose them, and you would not notice until you
+# reached for one. Found while removing the dead grub-*-windows pair after p3
+# was reformatted.
+#
+# Only text/scripts are copied. /usr/local/bin also holds installed BINARIES
+# (restic, immich-go) which are megabytes and reinstallable from upstream --
+# those do not belong in a config repo. Symlinks are skipped for the same
+# reason: restic-wbu points into the scripts repo, which is already versioned.
+#
+# The directory is cleared first so a script deleted locally shows up as a git
+# deletion here rather than lingering forever. The ls -la inventory records
+# EVERYTHING including the binaries and symlinks, so a rebuild knows what used
+# to be here even for what was not copied.
+ULB_DEST="$DEST/usr-local-bin"
+ls -la /usr/local/bin > "$DEST/usr-local-bin-inventory.txt"
+rm -rf "$ULB_DEST"
+mkdir -p "$ULB_DEST"
+find /usr/local/bin -maxdepth 1 -type f -size -100k -print0 2>/dev/null |
+    while IFS= read -r -d '' f; do
+        if file -b "$f" | grep -qiE 'text|script'; then
+            cp -p "$f" "$ULB_DEST/"
+        fi
+    done
+
 echo "Snapshot complete. Review with: cd $DEST && git status"
