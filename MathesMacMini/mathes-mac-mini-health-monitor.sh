@@ -101,7 +101,22 @@ DISK_TRIGGERED=0
 # the MOST RECENT such line (i.e. not yet followed by a COMMOK) means real trouble.
 # Message text matches NUT's own default NOTIFYMSG templates (upsmon.conf.sample),
 # confirmed against this box's actual log output, not guessed.
-LAST_COMMS_LINE=$(grep -E "Communications with UPS ${UPS_NAME}@${UPS_HOST}|UPS ${UPS_NAME}@${UPS_HOST} is unavailable" "$UPSMON_LOG" 2>/dev/null | tail -1)
+#
+# 2026-08-25 real incident: scoped to lines since the CURRENT daemon instance's own
+# startup banner, not the whole cumulative log (which is never rotated). Without this,
+# a single historical COMMBAD with no matching COMMOK poisons the check forever --
+# and that's *expected* to happen routinely, not a rare edge case: a clean, successful
+# FRESH connect never logs an "established" line at all (NUT only notifies on a
+# recovery from a state it was already tracking within that same process's lifetime,
+# not on an ordinary first connect) -- so any daemon restart after a real comms drop
+# permanently strands that unresolved "lost" line as "most recent" for every later
+# read, even though the new instance connected cleanly. Confirmed live: this alerted
+# continuously for ~9.7 hours pointing at a "lost" line from 2026-08-08, while upsc,
+# ping, and raw TCP to the NAS all succeeded the entire time and the daemon (same PID
+# throughout) never dropped.
+LAST_START_LINE=$(grep -n "^Network UPS Tools upsmon" "$UPSMON_LOG" 2>/dev/null | tail -1 | cut -d: -f1)
+LAST_START_LINE=${LAST_START_LINE:-0}
+LAST_COMMS_LINE=$(tail -n +"$((LAST_START_LINE + 1))" "$UPSMON_LOG" 2>/dev/null | grep -E "Communications with UPS ${UPS_NAME}@${UPS_HOST}|UPS ${UPS_NAME}@${UPS_HOST} is unavailable" | tail -1)
 UPS_UNREADABLE_TRIGGERED=0
 if [ -n "$LAST_COMMS_LINE" ] && ! echo "$LAST_COMMS_LINE" | grep -q "established"; then
     UPS_UNREADABLE_TRIGGERED=1

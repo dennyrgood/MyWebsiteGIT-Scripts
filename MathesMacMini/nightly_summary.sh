@@ -76,11 +76,23 @@ pgrep -f "$UPSMON_PROC_PATTERN" >/dev/null 2>&1 && UPSMON_ALIVE="yes"
 # reads as healthy-by-default below, not unknown. Same for power state: no ONBATT/
 # ONLINE line ever means it's been on line power the whole time (matches what's
 # actually been observed — the daemon didn't even log an explicit ONLINE at boot).
-LAST_COMMS_LINE=$(grep -E "Communications with UPS ${UPS_NAME}@${UPS_HOST}|UPS ${UPS_NAME}@${UPS_HOST} is unavailable" "$UPSMON_LOG" 2>/dev/null | tail -1)
+#
+# 2026-08-25: both scoped to lines since the CURRENT daemon instance's own startup
+# banner, not the whole cumulative log (never rotated) — see the matching, more
+# detailed 2026-08-25 comment in mathes-mac-mini-health-monitor.sh for the real
+# incident this fixes: a fresh successful connect never logs "established"/"on line
+# power" at all, so a historical drop with no later recovery notification (routine,
+# not rare — it happens on ANY restart after a real drop) would otherwise strand
+# this check as permanently bad, pointing at a line that could be weeks old.
+LAST_START_LINE=$(grep -n "^Network UPS Tools upsmon" "$UPSMON_LOG" 2>/dev/null | tail -1 | cut -d: -f1)
+LAST_START_LINE=${LAST_START_LINE:-0}
+LOG_SINCE_START=$(tail -n +"$((LAST_START_LINE + 1))" "$UPSMON_LOG" 2>/dev/null)
+
+LAST_COMMS_LINE=$(echo "$LOG_SINCE_START" | grep -E "Communications with UPS ${UPS_NAME}@${UPS_HOST}|UPS ${UPS_NAME}@${UPS_HOST} is unavailable" | tail -1)
 COMMS_OK="yes"
 [ -n "$LAST_COMMS_LINE" ] && ! echo "$LAST_COMMS_LINE" | grep -q "established" && COMMS_OK="no"
 
-LAST_POWER_LINE=$(grep -E "UPS ${UPS_NAME}@${UPS_HOST} on (line power|battery)" "$UPSMON_LOG" 2>/dev/null | tail -1)
+LAST_POWER_LINE=$(echo "$LOG_SINCE_START" | grep -E "UPS ${UPS_NAME}@${UPS_HOST} on (line power|battery)" | tail -1)
 ON_BATTERY="no"
 echo "$LAST_POWER_LINE" | grep -q "on battery" && ON_BATTERY="yes"
 
