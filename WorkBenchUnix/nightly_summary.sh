@@ -52,6 +52,8 @@ EXPORT_ARCHIVE=$(cat /home/dhm/.cache/immich-export/export_archive.log 2>/dev/nu
 LOGS=(
     # "/var/log/immich-backup-c.log"  # 2026-07-22: backup-c drive retired (repeat failures), cron disabled — see WorkBenchUnix/backup_immich.sh comment
     "/var/log/immich-dump-for-cwhu.log"
+    "/var/log/immich-restic.log"
+    "/var/log/syncthing-offsite.log"
     "$MACMINI_DB"
     "$MACMINI_IMG"
     "$CWHU_SYNC"
@@ -267,13 +269,83 @@ fmt_age() {
     fi
 }
 
+# --- Purpose-built TLDR lines for the two backup layers (2026-08-25) --------
+# The generic loop below prints "<filename>: [age] <last line>", which is fine
+# for a dozen mirror jobs but buries the two facts that now matter most: is the
+# local repo verified, and is the off-site copy keeping up. These get named
+# lines with a pass/fail glyph like the hardware checks above, and are skipped
+# in the generic loop so they are not printed twice.
+#
+# On failure the line carries the REASON, not just a cross: both scripts log it
+# as "PROBLEM:" or "FAILED:" on their way out, so the email says what broke
+# without needing the full body below.
+RESTIC_LOG="/var/log/immich-restic.log"
+OFFSITE_LOG="/var/log/syncthing-offsite.log"
+
+build_backup_tldr() {
+    local log="$1" label="$2" marker="$3" detail_re="$4"
+    local age detail reason
+    if [ ! -f "$log" ]; then
+        echo "  ${label}: never run (no $log)"
+        return
+    fi
+    age=$(fmt_age $(( $(date +%s) - $(stat -c %Y "$log") )))
+    if tail -5 "$log" | grep -q "$marker"; then
+        detail=$(tail -5 "$log" | grep -oP "$detail_re" | tail -1)
+        echo "  ${label}: [${age} ago] ${detail:-verified} ✓"
+    else
+        reason=$(tail -8 "$log" | grep -oP '(?<=PROBLEM: ).*|(?<=FAILED: ).*' | tail -1)
+        echo "  ${label}: ⚠️ [${age} ago] ${reason:-did not complete}"
+    fi
+}
+
+# The off-site line needs three states, not two. A tick means "a complete
+# off-site copy exists"; an hourglass means "healthy, but not there yet". They
+# are different facts and collapsing them into one tick overstates the
+# protection actually in place -- at 4% seeded there is no off-site backup at
+# all. The hourglass deliberately does NOT set OK=0: nothing is broken, so the
+# subject line stays reserved for things that need acting on.
+build_offsite_tldr() {
+    local log="$OFFSITE_LOG" label="off-site (s3g)"
+    local age line state detail reason
+    if [ ! -f "$log" ]; then
+        echo "  ${label}: never run (no $log)"
+        return
+    fi
+    age=$(fmt_age $(( $(date +%s) - $(stat -c %Y "$log") )))
+    line=$(tail -5 "$log" | grep -F "SYNCTHING OFFSITE OK" | tail -1)
+    if [ -z "$line" ]; then
+        reason=$(tail -8 "$log" | grep -oP '(?<=PROBLEM: ).*|(?<=FAILED: ).*' | tail -1)
+        echo "  ${label}: ⚠️ [${age} ago] ${reason:-did not complete}"
+        return
+    fi
+    state=$(printf '%s' "$line" | grep -oP '(?<=OK \[)[a-z]+(?=\])')
+    detail=$(printf '%s' "$line" | grep -oP '(?<=\().*(?=\))')
+    case "$state" in
+        current)  echo "  ${label}: [${age} ago] ${detail} ✓" ;;
+        seeding)  echo "  ${label}: ⏳ [${age} ago] ${detail}" ;;
+        catchup)  echo "  ${label}: ⏳ [${age} ago] ${detail}" ;;
+        # Older log lines predate the [state] token; report plainly rather
+        # than guessing at a glyph.
+        *)        echo "  ${label}: [${age} ago] ${detail:-ok}" ;;
+    esac
+}
+
+RESTIC_TLDR=$(build_backup_tldr "$RESTIC_LOG" "restic backup" \
+    "RESTIC BACKUP VERIFIED OK" 'snapshots retained.*')
+OFFSITE_TLDR=$(build_offsite_tldr)
+
 TLDR="============================= TLDR ===============================\n"
 TLDR+="${REBOOT_TLDR}\n"
 TLDR+="${PSTORE_TLDR}\n"
 TLDR+="${SMART_TLDR}\n"
 TLDR+="${UPS_TLDR}\n"
+TLDR+="${RESTIC_TLDR}\n"
+TLDR+="${OFFSITE_TLDR}\n"
 NOW_TLDR=$(date +%s)
 for LOG in "${LOGS[@]}"; do
+    # Already reported above with a purpose-built line.
+    case "$LOG" in "$RESTIC_LOG"|"$OFFSITE_LOG") continue ;; esac
     if [ -f "$LOG" ]; then
         AGE=$(fmt_age $(( NOW_TLDR - $(stat -c %Y "$LOG") )))
         TLDR+="  $(basename "$LOG"): [${AGE} ago] $(tail -1 "$LOG")\n"
@@ -320,6 +392,16 @@ fi
 declare -A EXPECTED=(
     # ["/var/log/immich-backup-c.log"]="Backup to /mnt/backup-c finished."  # 2026-07-22: backup-c drive retired (repeat failures), cron disabled
     ["/var/log/immich-dump-for-cwhu.log"]="Dump for CWHU complete."
+    # Emitted only after backup AND forget AND check all succeed -- see
+    # backup_immich_to_restic.sh. A finished-the-script banner would not do:
+    # a corrupted blob or a failed integrity check must not read as success.
+    ["/var/log/immich-restic.log"]="RESTIC BACKUP VERIFIED OK"
+    # The restic marker above proves the LOCAL repo is good and says nothing
+    # about the off-site copy. This one covers replication to s3g: daemon up,
+    # s3g seen within 24h, no folder errors, and -- if data is still
+    # outstanding -- actually moving. Deliberately NOT "100% synced": that
+    # would fail nightly for days during a seed and train you to ignore it.
+    ["/var/log/syncthing-offsite.log"]="SYNCTHING OFFSITE OK"
     ["$CWHU_SYNC"]="Warm-sync complete."
     ["$FLEETNAS_DB"]="Postgres dump sync to FleetNAS complete"
     # Deliberately NOT the trailing "=== Live image sync ... complete ===" banner:
@@ -331,6 +413,8 @@ declare -A EXPECTED=(
 )
 declare -A LABEL=(
     ["/var/log/immich-dump-for-cwhu.log"]="CWHU DB dump"
+    ["/var/log/immich-restic.log"]="restic repo backup"
+    ["/var/log/syncthing-offsite.log"]="off-site replication"
     ["$CWHU_SYNC"]="CWHU warm-sync"
     ["$FLEETNAS_DB"]="FleetNAS DB backup"
     ["$FLEETNAS_IMG"]="FleetNAS image backup"
@@ -364,7 +448,7 @@ fi
 # this email goes at 06:30, so a healthy log is ~1-1.5h old, and one missed night
 # puts it at ~25h — caught on the very next email with margin to spare.
 if [ "$OK" -eq 1 ]; then
-    for LOG in "$FLEETNAS_DB" "$FLEETNAS_IMG"; do
+    for LOG in "$FLEETNAS_DB" "$FLEETNAS_IMG" "/var/log/immich-restic.log" "/var/log/syncthing-offsite.log"; do
         [ -f "$LOG" ] || continue   # missing case already handled by the EXPECTED loop
         FILE_AGE=$(( $(date +%s) - $(stat -c %Y "$LOG") ))
         if [ "$FILE_AGE" -gt 86400 ]; then

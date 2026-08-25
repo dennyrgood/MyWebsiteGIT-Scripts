@@ -1,0 +1,20 @@
+#!/bin/bash
+# restic-wbu — thin wrapper that points restic at the Immich repo.
+# Created: 2026-08-25.
+#
+# Saves repeating -r and --password-file on every invocation, and keeps the
+# passphrase out of command lines and shell history.
+#
+#   sudo restic-wbu snapshots
+#   sudo restic-wbu prune
+#   sudo restic-wbu ls latest
+#   sudo restic-wbu stats latest
+#   sudo restic-wbu restore latest --include <path> --target /tmp/out
+#
+export RESTIC_REPOSITORY="/mnt/immich-backup/restic"
+export RESTIC_PASSWORD_FILE="/root/.restic-passphrase"
+
+[ "$(id -u)" -eq 0 ] || { echo "run with sudo (the passphrase file is root-only)"; exit 1; }
+mountpoint -q /mnt/immich-backup || { echo "/mnt/immich-backup is not mounted"; exit 1; }
+
+exec restic "$@"
