@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# wall.kill — tear down the fleet status wall (kills tmux session + all SSH connections)
+# 2026-08-26 ~19:20 UTC — initial version
+tmux kill-session -t fleet 2>/dev/null && echo "wall: fleet session killed" || echo "wall: no fleet session running"

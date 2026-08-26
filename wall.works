@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# wall — launch the fleet status wall in a screen-filling Fleet-profile Terminal window
+# 2026-08-26 ~18:15 UTC — initial version: load tmuxp wall, then bias row heights
+# 2026-08-26 ~18:45 UTC — removed row-bias resize; added even re-tile so all panes render
+# 2026-08-26 ~19:05 UTC — open in Fleet profile + maximize via AppleScript
+# 2026-08-26 ~19:20 UTC — more robust profile selection: set current settings on the new window explicitly
+# 2026-08-26 ~19:45 UTC — fill screen via explicit window bounds (normal window, accepts overlays)
+# 2026-08-26 ~20:05 UTC — support a saved LAYOUT string (paste captured 5-col layout below); falls back to tiled
+# 2026-08-26 ~21:35 UTC — add per-pane hostname border labels (single-line do script; avoids multi-line parse error)
+# Paste your captured 5-column layout string between the quotes to lock it.
+# Leave empty to use tmux's default tiled grid.
+LAYOUT=""
+osascript <<EOF
+tell application "Terminal"
+    set fleetWin to do script "tmuxp load -d -y ~/repos/fleet-configs/fleet.yaml; tmux set -t fleet pane-border-status top; tmux set -t fleet pane-border-format ' #{pane_title} '; if [ -n '$LAYOUT' ]; then tmux select-layout -t fleet:wall '$LAYOUT'; else tmux select-layout -t fleet:wall tiled; fi; tmux select-pane -t fleet:wall.0 -T AMSTDT; tmux select-pane -t fleet:wall.1 -T CWH; tmux select-pane -t fleet:wall.2 -T IB; tmux select-pane -t fleet:wall.3 -T TB; tmux select-pane -t fleet:wall.4 -T RWS; tmux select-pane -t fleet:wall.5 -T S3G; tmux select-pane -t fleet:wall.6 -T SGC; tmux select-pane -t fleet:wall.7 -T WBU; tmux select-pane -t fleet:wall.8 -T CWHU; tmux select-pane -t fleet:wall.9 -T NAS; tmux select-pane -t fleet:wall.10 -T MMM; tmux select-pane -t fleet:wall.11 -T MB2; tmux select-pane -t fleet:wall.12 -T MB; tmux attach -t fleet"
+    set current settings of fleetWin to settings set "Fleet"
+    activate
+    delay 1.5
+end tell
+tell application "Finder" to set screenBounds to bounds of window of desktop
+set {sx, sy, sw, sh} to screenBounds
+tell application "Terminal" to set bounds of front window to {0, 25, sw, sh}
+EOF
