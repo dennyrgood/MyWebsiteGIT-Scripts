@@ -221,6 +221,39 @@ The repo was initially created root-only (`init-restic-repo.sh` ran under
 `chmod -R a+rX`; `backup_immich_to_restic.sh` now sets `umask 022` explicitly so
 cron cannot recreate the problem.
 
+### Gotcha: restic's file modes cannot be relied on
+
+On 2026-08-26, the first unattended cron run created four files -- an index, a
+snapshot and two data packs -- as `0440 root:root`. Syncthing runs as `dhm`,
+which is not in group `root`, so it could not open them.
+
+**Syncthing then reported the folder 100% complete.** Files it fails to read are
+excluded from the completion figure entirely -- they are in neither the numerator
+nor the denominator -- so the only place the truth appeared was the folder's
+`errors` count. A repo missing an index, a snapshot and two packs is not a stale
+backup, it is an unrestorable one.
+
+The cause is not umask: `umask 022` is set explicitly in the backup script, there
+are no ACLs on the volume, and every repo directory is 0755. restic simply chose
+0440. Rather than reverse-engineer its mode derivation, the script now normalises
+after every run and **verifies**:
+
+```
+chmod -R a+rX "$REPO"
+UNREADABLE=$(find "$REPO" -type f ! -perm -o+r | wc -l)
+[ "$UNREADABLE" -eq 0 ] || die "... syncthing cannot replicate them"
+```
+
+The `find` is the important half. A bare `chmod` would silently do nothing if
+restic ever produced something `a+rX` cannot reach; counting afterwards turns
+that into a failed backup and a red subject line instead of another quiet gap.
+
+After a manual fix, Syncthing needs a rescan to notice -- `ignorePerms=true`
+means a permission change does not trip the file watcher. `systemctl restart
+syncthing@dhm` forces one. The API takes a few seconds to come back up after
+that restart, so an immediately following status check will report the API as
+unreachable; wait and re-run.
+
 ### Connectivity
 
 Discovery found nothing for s3g — the address was empty and nothing connected until

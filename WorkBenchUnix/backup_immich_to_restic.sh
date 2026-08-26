@@ -153,6 +153,25 @@ else
     log "prune skipped (runs on day $PRUNE_DAY of the month; today is $TODAY)"
 fi
 
+# ------------------------------------------------------- readable for sync ---
+# restic's file mode cannot be relied on. `umask 022` above is set and there are
+# no ACLs on the repo, yet the 2026-08-26 cron run produced 0440 root:root files
+# that the syncthing daemon (running as dhm, not in group root) could not read.
+# Syncthing then reported the folder 100% complete while silently omitting them
+# -- errored files are excluded from its completion figure -- and the four it
+# skipped were an index, a snapshot and two data packs, which is the difference
+# between a stale backup and an unrestorable one.
+#
+# So normalise explicitly rather than depending on what restic chose. a+rX adds
+# read for all and traverse on directories only, never +x on a data file. It is
+# a stat+chmod over ~5k entries, well under a second, and safe to repeat.
+# ignorePerms=true on the Syncthing folder means this generates no re-sync.
+log "--- normalising repo permissions for the syncthing daemon ---"
+chmod -R a+rX "$REPO" || die "could not normalise permissions on $REPO"
+UNREADABLE=$(find "$REPO" -type f ! -perm -o+r 2>/dev/null | wc -l)
+[ "$UNREADABLE" -eq 0 ] || die "$UNREADABLE repo file(s) still not world-readable — syncthing cannot replicate them"
+log "all repo files readable"
+
 # ------------------------------------------------------------------ check ---
 # Structure check every night, plus a rotating slice of actual pack data
 # re-hashed so the whole repo is byte-verified over a month. Reads only, so
