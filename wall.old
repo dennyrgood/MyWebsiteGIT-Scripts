@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# wall — launch the fleet status wall
-# 2026-08-26 ~18:15 UTC — initial version: load tmuxp wall, then bias row heights
-tmuxp load -d -y ~/repos/fleet-configs/fleet.yaml
-# give the bottom (top/status) row more rows than the Mole row
-tmux resize-pane -t fleet:wall.8 -y 40 2>/dev/null
-tmux attach -t fleet
