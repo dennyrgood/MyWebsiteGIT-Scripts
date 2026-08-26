@@ -193,7 +193,7 @@ all**. It was already running on s3g, paired with mmm.
 | s3g | Syncthing 2.1.3 — different major, interoperating fine |
 | Folder ID | `immich-restic` |
 | wbu path | `/mnt/immich-backup/restic` — **Send Only** |
-| s3g path | `D:\immich-restic` — **Receive Only** |
+| s3g path | `D:\Immich` — **Receive Only** |
 | Versioning | off on both — restic already versions |
 | Ignore permissions | on — the far end is Windows |
 | wbu device ID | `VUU2OPZ-YSV3GJW-USASOK4-V5AEZUR-EKHZ22Q-OVPUUF6-54NVRPI-2EJWFQA` |
@@ -400,7 +400,7 @@ sudo restic-wbu dump latest <path> > out                   # stream one file
 sudo restic-wbu mount /mnt/restic-browse                   # FUSE, read-only
 ```
 
-At the s3g end, `restic -r D:\immich-restic …` with the passphrase. FUSE mount is
+At the s3g end, `restic -r D:\Immich …` with the passphrase. FUSE mount is
 Linux/macOS only.
 
 ---
@@ -453,9 +453,9 @@ packs and tells you nothing.
 Install `restic_0.19.1_windows_amd64.zip` from the same GitHub release, then:
 
 ```
-restic.exe -r D:\immich-restic snapshots       # passphrase works, repo opens
-restic.exe -r D:\immich-restic check           # every referenced pack present
-restic.exe -r D:\immich-restic restore latest --include <one photo> --target C:\tmp\proof
+restic.exe -r D:\Immich snapshots       # passphrase works, repo opens
+restic.exe -r D:\Immich check           # every referenced pack present
+restic.exe -r D:\Immich restore latest --include <one photo> --target C:\tmp\proof
 ```
 
 The first is the moment the off-site copy stops being theoretical. The third is the
@@ -473,7 +473,7 @@ the cheap checks pass.
 ### 3. Syncthing snapshots for the other boxes
 
 **s3g first.** wbu's config records that it *sends* to s3g. Nothing anywhere records
-what s3g *does with it* — the `D:\immich-restic` path, the Receive Only type, or
+what s3g *does with it* — the `D:\Immich` path, the Receive Only type, or
 that the drive migrates to sgc around January 2027. If s3g died, the receiving half
 would be rebuilt from memory.
 
