@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# wall.check.win — check for orphaned status.exe on all Windows fleet hosts
+# 2026-08-27 ~09:20 UTC — initial version: tasklist findstr per host with readable output
+
+WINDOWS_HOSTS=(
+  amsterdamdesktop
+  chatworkhorse
+  imagebeast
+  travelbeast
+  remotews
+  surface3-gc
+  surfacegolaptopgc
+)
+
+for host in "${WINDOWS_HOSTS[@]}"; do
+  echo "--- $host ---"
+  result=$(ssh -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
+    -o LogLevel=ERROR "$host" "tasklist | findstr /i status" 2>/dev/null)
+  if [ -z "$result" ]; then
+    echo "  nothing running"
+  else
+    echo "$result" | sed 's/^/  /'
+  fi
+done
+
+echo "--- done ---"

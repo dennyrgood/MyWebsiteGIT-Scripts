@@ -1,0 +1,1 @@
+tmux display -p -t fleet:wall '#{window_layout}'

@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# wall-stop — kill the fleet wall tmux session and clean up orphaned status.exe on Windows hosts
+# 2026-08-27 ~08:30 UTC — initial version: kill fleet session, then taskkill status.exe on all
+#                          Windows mo-status hosts. Orphans accumulate because Windows OpenSSH
+#                          does not reliably propagate channel-close signals to child processes.
+# 2026-08-27 ~09:00 UTC — fix result parsing: Windows SSH shell is PowerShell; reordered checks
+# 2026-08-27 ~09:10 UTC — fix result capture: taskkill output comes through stderr (PowerShell
+#                          NativeCommandError); capture ssh stderr too (2>&1 on outer ssh call);
+#                          use exit code alone for unreachable check since post-quantum warning
+#                          pollutes result even on failed connections
+# 2026-08-27 ~09:15 UTC — add LogLevel=ERROR to suppress post-quantum warnings in output
+
+WINDOWS_HOSTS=(
+  amsterdamdesktop
+  chatworkhorse
+  imagebeast
+  travelbeast
+  remotews
+  surface3-gc
+  surfacegolaptopgc
+)
+
+echo "Stopping fleet wall..."
+tmux kill-session -t fleet 2>/dev/null && echo "  fleet session killed" || echo "  fleet session not running"
+
+echo "Cleaning up orphaned status.exe on Windows hosts..."
+for host in "${WINDOWS_HOSTS[@]}"; do
+  result=$(ssh -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
+    -o LogLevel=ERROR "$host" "taskkill /IM status.exe /F 2>&1" 2>&1)
+  rc=$?
+  if [ $rc -ne 0 ] && ! echo "$result" | grep -qi "not found" && ! echo "$result" | grep -qi "success"; then
+    echo "  $host: unreachable"
+  elif echo "$result" | grep -qi "not found"; then
+    echo "  $host: nothing to clean"
+  elif echo "$result" | grep -qi "success"; then
+    echo "  $host: cleaned"
+  else
+    echo "  $host: unknown — $result"
+  fi
+done
+
+echo "Done."
