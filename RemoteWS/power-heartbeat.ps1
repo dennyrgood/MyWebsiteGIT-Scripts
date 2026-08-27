@@ -3,7 +3,7 @@
   Standalone power-loss + WiFi-flap diagnostic heartbeat for RemoteWS.
 
 .PURPOSE
-  Two separate problems this has caught so far:
+  Three separate problems this has caught/tracked so far:
 
   1) RemoteWS hard-froze (Kernel-Power Event 41, BugcheckCode=0, no minidump)
      roughly every 2-15 days from 2026-07-17 through 2026-08-13. Believed fixed
@@ -18,24 +18,27 @@
      cycles (see status_transitions.jsonl on that host) while this box's own
      System event log shows no crash and this script's own heartbeat never
      gaps - i.e. the machine stays up, only reachability drops. Confirmed
-     2026-08-17/18: 24 WLAN reconnects (Microsoft-Windows-WLAN-AutoConfig
-     Event 11010) in ~13 hours, some seconds apart. 5GHz tested worse than
-     2.4GHz; driver is already current. Root cause suspected to be the mini
-     PC's cramped internal antennas - plan is an external-antenna USB WiFi
-     adapter, but that may be months out (no physical access to the box in
-     the meantime), and the user expects the flapping to recur. The
-     wifi_signal_pct/wifi_rssi_dbm/wifi_reconnects_* columns exist so the next
-     occurrence has a local trend line to correlate against the checker's
-     transitions log, instead of requiring another manual event-log dig.
+     2026-08-17/18: 24 WLAN reconnects in ~13 hours, some seconds apart.
+     Confirmed again 2026-08-20/22 in a different shape: association solid
+     (no reconnects) but gateway+WAN pings failing together, jittery latency -
+     added the gateway_*/wan_* reachability columns for that (see below).
+     wifi_state/signal alone are association-layer only and can say
+     "connected" while traffic still isn't passing.
 
-     2026-08-18 (later): wifi_state/signal alone are association-layer only -
-     the adapter can say "connected" with fine signal while traffic still
-     isn't passing (this fits the 8/18 12:52-17:11 outage the checker saw,
-     which had no matching WLAN reconnect events - i.e. it stayed
-     "associated" throughout while apparently not passing traffic). Added
-     actual reachability checks: a ping to the current default gateway (LAN/
-     AP-side reachability) and a ping to a fixed public IP (WAN-side), so a
-     future outage can be told apart as AP/local-network vs. upstream/ISP.
+  3) 2026-08-27: installed a Panda AXE3000 (MediaTek) USB WiFi adapter
+     alongside the onboard Realtek as a hardware fix attempt, set as the
+     preferred route (interface metric 10 vs onboard's 50, both
+     AutomaticMetric Disabled so it doesn't drift). Both stay connected
+     simultaneously (onboard as fallback, not disabled). This made the
+     single-adapter wifi_*/gateway_* columns from the v2/v3 schema actively
+     wrong: gateway/WAN pings were hardcoded to check via the "Wi-Fi" alias,
+     which is no longer necessarily the adapter Windows is actually routing
+     through. v4 fixes this by resolving the ACTIVE default-route interface
+     fresh every tick (not hardcoded) for the gateway/WAN checks, tracks
+     onboard and USB adapter state/signal/reconnects separately instead of
+     blending whichever netsh listed first, and adds an active_adapter
+     column + a switch counter so a future flap between the two adapters
+     (not just within one) is directly visible instead of inferred.
 
   This script appends one line every 15s to a local, append-only, per-day log
   file, synchronously flushed on every tick so a hard freeze can't lose a
@@ -52,11 +55,19 @@
   Logs to C:\fleet_monitor\power_heartbeat_remotews\ alongside the existing
   fleet_monitor heartbeat/metrics files for that host.
 
-  Schema note: 2026-08-18 added the wifi_* columns (v2), then later the same
-  day added gateway_*/wan_* reachability columns (v3). Older day-files only
-  have the earlier column sets - don't concatenate across versions without
-  accounting for the header change, hence the versioned
-  "power_heartbeat_v{2,3}_*" filename prefixes.
+  Schema note: v2 added wifi_* columns, v3 added gateway_*/wan_* reachability,
+  v4 (2026-08-27) split wifi_* into onboard_/usb_ per-adapter columns, fixed
+  the gateway/WAN check to follow the actual active route instead of a
+  hardcoded interface alias, and added active_adapter/adapter_switches_*.
+  Older day-files only have earlier column sets - don't concatenate across
+  versions without accounting for the header change, hence the versioned
+  "power_heartbeat_v{2,3,4}_*" filename prefixes.
+
+  Adapter aliases are hardcoded ("Wi-Fi" = onboard Realtek, "Wi-Fi 2" = USB
+  MediaTek) rather than discovered dynamically - acceptable for a
+  single-box diagnostic script, but if either adapter is ever replaced/
+  reinstalled and Windows assigns it a new alias (e.g. "Wi-Fi 3"), update
+  $OnboardAlias/$UsbAlias below.
 #>
 
 $ErrorActionPreference = 'Continue'
@@ -65,6 +76,8 @@ $LogDir = 'C:\fleet_monitor\power_heartbeat_remotews'
 $RetentionDays = 30
 $IntervalSeconds = 15
 $WanPingTarget = '1.1.1.1'   # fixed public IP, not DNS-dependent - WAN-side reachability check
+$OnboardAlias = 'Wi-Fi'      # Realtek 8852BE (internal antennas, the original flapping culprit)
+$UsbAlias = 'Wi-Fi 2'        # Panda AXE3000 / MediaTek (external antennas, added 2026-08-27, preferred route)
 
 if (-not (Test-Path $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
@@ -89,32 +102,69 @@ function Get-ThermalCelsius {
     return 'NA'
 }
 
-function Get-WifiInfo {
-    # Parses `netsh wlan show interfaces` rather than a WMI/netadapter cmdlet
-    # since that's what was already confirmed working manually on this box's
-    # Realtek 8852BE. NA fields if WiFi is disconnected or netsh fails.
-    $result = [pscustomobject]@{ State = 'NA'; SignalPct = 'NA'; RssiDbm = 'NA' }
+function Get-WifiInfoBlocks {
+    # `netsh wlan show interfaces` prints one block per adapter, each starting
+    # with a "Name : <alias>" line. With two WiFi adapters now, a single
+    # ungrouped regex match (the pre-2026-08-27 approach) grabs whichever
+    # adapter's block happens to come first - ambiguous and often wrong.
+    # This parses block-by-block and returns a hashtable keyed by alias.
+    $result = @{}
     try {
         $out = netsh wlan show interfaces 2>$null
-        if ($out) {
-            $m = $out | Select-String -Pattern '^\s*State\s*:\s*(.+?)\s*$'
-            if ($m) { $result.State = $m.Matches[0].Groups[1].Value }
-            $m = $out | Select-String -Pattern '^\s*Signal\s*:\s*(\d+)%'
-            if ($m) { $result.SignalPct = $m.Matches[0].Groups[1].Value }
-            $m = $out | Select-String -Pattern '^\s*Rssi\s*:\s*(-?\d+)'
-            if ($m) { $result.RssiDbm = $m.Matches[0].Groups[1].Value }
+        if (-not $out) { return $result }
+        $currentAlias = $null
+        $current = $null
+        foreach ($line in $out) {
+            if ($line -match '^\s*Name\s*:\s*(.+?)\s*$') {
+                if ($currentAlias) { $result[$currentAlias] = $current }
+                $currentAlias = $matches[1]
+                $current = [pscustomobject]@{ State = 'NA'; SignalPct = 'NA'; RssiDbm = 'NA' }
+                continue
+            }
+            if (-not $current) { continue }
+            if ($line -match '^\s*State\s*:\s*(.+?)\s*$') { $current.State = $matches[1] }
+            elseif ($line -match '^\s*Signal\s*:\s*(\d+)%') { $current.SignalPct = $matches[1] }
+            elseif ($line -match '^\s*Rssi\s*:\s*(-?\d+)') { $current.RssiDbm = $matches[1] }
         }
+        if ($currentAlias) { $result[$currentAlias] = $current }
     } catch {}
     return $result
 }
 
-function Get-DefaultGateway {
-    # Re-resolved every tick rather than cached, since the gateway/lease has
-    # been observed to change (a fresh DHCP lease landed mid-day on 2026-08-18
-    # alongside a "New Internet Connection Profile" event) - caching it could
-    # silently start pinging a stale address after that kind of reset.
+function Get-ActiveRouteAlias {
+    # Which adapter is Windows ACTUALLY routing through right now, i.e. the
+    # 0.0.0.0/0 route with the lowest effective metric (route metric +
+    # interface metric - what Windows itself uses to pick a route, not just
+    # interface metric alone). Re-resolved every tick rather than assumed,
+    # so a future metric change (accidental or automatic) shows up as a
+    # genuine active_adapter change instead of silently going unnoticed.
     try {
-        $cfg = Get-NetIPConfiguration -InterfaceAlias 'Wi-Fi' -ErrorAction Stop
+        $routes = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -AddressFamily IPv4 -ErrorAction Stop
+        $best = $null
+        $bestMetric = [int]::MaxValue
+        foreach ($r in $routes) {
+            $ifMetric = (Get-NetIPInterface -InterfaceIndex $r.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).InterfaceMetric
+            if ($null -eq $ifMetric) { continue }
+            $eff = $r.RouteMetric + $ifMetric
+            if ($eff -lt $bestMetric) { $bestMetric = $eff; $best = $r }
+        }
+        if ($best) {
+            return (Get-NetAdapter -InterfaceIndex $best.InterfaceIndex -ErrorAction SilentlyContinue).Name
+        }
+    } catch {}
+    return 'NA'
+}
+
+function Get-DefaultGateway {
+    # Follows whatever $InterfaceAlias is currently the active route (see
+    # Get-ActiveRouteAlias) rather than a fixed alias - re-resolved every
+    # tick since the gateway/lease has been observed to change (a fresh DHCP
+    # lease landed mid-day on 2026-08-18 alongside a "New Internet
+    # Connection Profile" event).
+    param([string]$InterfaceAlias)
+    if (-not $InterfaceAlias -or $InterfaceAlias -eq 'NA') { return $null }
+    try {
+        $cfg = Get-NetIPConfiguration -InterfaceAlias $InterfaceAlias -ErrorAction Stop
         return $cfg.IPv4DefaultGateway.NextHop
     } catch { return $null }
 }
@@ -134,60 +184,91 @@ function Test-PingTarget {
     }
 }
 
-function Get-NewReconnectCount {
-    # Counts Microsoft-Windows-WLAN-AutoConfig Event 11010 ("Wireless security
-    # started", fired on every reconnect/re-auth) since $sinceLocal. Windows
-    # event log timestamps are local time, so this is kept in local time
-    # throughout rather than mixed with the UTC timestamp used for the CSV
-    # row - StartTime is inclusive, so results are filtered to strictly after
-    # $sinceLocal to avoid double-counting the boundary event across ticks.
+function Get-NewReconnectEvents {
+    # Single Get-WinEvent call per tick for Microsoft-Windows-WLAN-AutoConfig
+    # Event 11010 ("Wireless security started", fired on every reconnect/
+    # re-auth) since $sinceLocal - callers then filter the returned events by
+    # adapter name themselves (Get-ReconnectCountFor) rather than querying the
+    # log twice per tick. Windows event log timestamps are local time, so this
+    # stays in local time throughout rather than mixing with the UTC CSV
+    # timestamp - StartTime is inclusive, so results are filtered to strictly
+    # after $sinceLocal to avoid double-counting the boundary event.
     param([datetime]$sinceLocal)
     try {
         $evts = Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-WLAN-AutoConfig/Operational'; Id=11010; StartTime=$sinceLocal} -ErrorAction SilentlyContinue
         if ($evts) {
-            return @($evts | Where-Object { $_.TimeCreated -gt $sinceLocal }).Count
+            return @($evts | Where-Object { $_.TimeCreated -gt $sinceLocal })
         }
     } catch {}
-    return 0
+    return @()
+}
+
+function Get-ReconnectCountFor {
+    # Event 11010's message body includes "Network Adapter: <friendly name>"
+    # (e.g. "Realtek 8852BE Wireless LAN WiFi 6 PCI-E NIC" or "MediaTek Wi-Fi
+    # 6/6E Wireless USB LAN Card") - match on that substring to attribute each
+    # reconnect to the right physical adapter instead of a single blended total.
+    param([array]$events, [string]$adapterNameMatch)
+    if (-not $events -or $events.Count -eq 0) { return 0 }
+    return @($events | Where-Object { $_.Message -match [regex]::Escape($adapterNameMatch) }).Count
 }
 
 # Write header once per new day-file
 function Ensure-Header($path) {
     if (-not (Test-Path $path)) {
-        [System.IO.File]::AppendAllText($path, "timestamp_utc,uptime_sec,cpu_pct,free_mem_mb,thermal_c,wifi_signal_pct,wifi_rssi_dbm,wifi_state,wifi_reconnects_new,wifi_reconnects_total,gateway_ip,gateway_ping_ok,gateway_ping_ms,wan_ping_ok,wan_ping_ms`r`n")
+        [System.IO.File]::AppendAllText($path, "timestamp_utc,uptime_sec,cpu_pct,free_mem_mb,thermal_c,active_adapter,adapter_switches_new,adapter_switches_total,onboard_wifi_state,onboard_wifi_signal_pct,onboard_wifi_rssi_dbm,onboard_wifi_reconnects_new,onboard_wifi_reconnects_total,usb_wifi_state,usb_wifi_signal_pct,usb_wifi_rssi_dbm,usb_wifi_reconnects_new,usb_wifi_reconnects_total,gateway_ip,gateway_ping_ok,gateway_ping_ms,wan_ping_ok,wan_ping_ms`r`n")
     }
 }
 
-# Loop-persistent reconnect-count state. Starts counting from script start
-# (i.e. from now, or from last boot/task-restart) - not retroactive to older
-# WLAN log history, since the point is a going-forward trend line.
+# Loop-persistent state. All start counting from script start (i.e. from now,
+# or from last boot/task-restart) - not retroactive to older log history,
+# since the point is a going-forward trend line.
 $script:LastReconnectCheck = Get-Date
-$script:ReconnectTotal = 0
+$script:OnboardReconnectTotal = 0
+$script:UsbReconnectTotal = 0
+$script:LastActiveAdapter = $null
+$script:AdapterSwitchTotal = 0
 
 while ($true) {
     try {
         $now = (Get-Date).ToUniversalTime()
         $nowLocal = Get-Date
-        $dayFile = Join-Path $LogDir ("power_heartbeat_v3_{0:yyyy-MM-dd}.csv" -f $now)
+        $dayFile = Join-Path $LogDir ("power_heartbeat_v4_{0:yyyy-MM-dd}.csv" -f $now)
         Ensure-Header $dayFile
 
         $uptimeSec = [math]::Round(((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalSeconds)
         $cpuPct = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
         $freeMemMb = [math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024)
         $thermal = Get-ThermalCelsius
-        $wifi = Get-WifiInfo
 
-        $newReconnects = Get-NewReconnectCount -sinceLocal $script:LastReconnectCheck
-        $script:ReconnectTotal += $newReconnects
+        $wifiBlocks = Get-WifiInfoBlocks
+        $onboardWifi = if ($wifiBlocks.ContainsKey($OnboardAlias)) { $wifiBlocks[$OnboardAlias] } else { [pscustomobject]@{ State = 'NA'; SignalPct = 'NA'; RssiDbm = 'NA' } }
+        $usbWifi = if ($wifiBlocks.ContainsKey($UsbAlias)) { $wifiBlocks[$UsbAlias] } else { [pscustomobject]@{ State = 'NA'; SignalPct = 'NA'; RssiDbm = 'NA' } }
+
+        $newEvents = Get-NewReconnectEvents -sinceLocal $script:LastReconnectCheck
+        $onboardNewReconnects = Get-ReconnectCountFor -events $newEvents -adapterNameMatch 'Realtek 8852BE'
+        $usbNewReconnects = Get-ReconnectCountFor -events $newEvents -adapterNameMatch 'MediaTek'
+        $script:OnboardReconnectTotal += $onboardNewReconnects
+        $script:UsbReconnectTotal += $usbNewReconnects
         $script:LastReconnectCheck = $nowLocal
 
-        $gateway = Get-DefaultGateway
+        $activeAdapter = Get-ActiveRouteAlias
+        $adapterSwitchedThisTick = 0
+        if ($script:LastActiveAdapter -and $activeAdapter -ne 'NA' -and $activeAdapter -ne $script:LastActiveAdapter) {
+            $adapterSwitchedThisTick = 1
+            $script:AdapterSwitchTotal++
+        }
+        $script:LastActiveAdapter = $activeAdapter
+
+        $gateway = Get-DefaultGateway -InterfaceAlias $activeAdapter
         $gwPing = Test-PingTarget -TargetIp $gateway
         $wanPing = Test-PingTarget -TargetIp $WanPingTarget
 
-        $line = "{0:yyyy-MM-ddTHH:mm:ss.fffZ},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13},{14}" -f `
+        $line = "{0:yyyy-MM-ddTHH:mm:ss.fffZ},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13},{14},{15},{16},{17},{18},{19},{20},{21},{22}" -f `
             $now, $uptimeSec, $cpuPct, $freeMemMb, $thermal, `
-            $wifi.SignalPct, $wifi.RssiDbm, $wifi.State, $newReconnects, $script:ReconnectTotal, `
+            $activeAdapter, $adapterSwitchedThisTick, $script:AdapterSwitchTotal, `
+            $onboardWifi.State, $onboardWifi.SignalPct, $onboardWifi.RssiDbm, $onboardNewReconnects, $script:OnboardReconnectTotal, `
+            $usbWifi.State, $usbWifi.SignalPct, $usbWifi.RssiDbm, $usbNewReconnects, $script:UsbReconnectTotal, `
             $(if ($gateway) { $gateway } else { 'NA' }), $gwPing.Ok, $gwPing.Ms, $wanPing.Ok, $wanPing.Ms
 
         # AppendAllText opens, writes, flushes, and closes the handle on every
