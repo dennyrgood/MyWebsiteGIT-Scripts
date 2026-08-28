@@ -12,6 +12,8 @@ at every login, restart automatically if they crash, and log to files.
 | `com.dennis.search-adv-web` | search_adv web GUI (`search_adv/.venv` python, `search_adv_web.py`) | 5025 | `~/Library/Logs/search_adv_web.log` |
 | `com.dennis.search-shows-web` | search_shows web GUI — cast/actor/show-info via TVmaze/TMDB/OMDb (`search_shows/.venv` python, `search_shows_web.py`) | 5020 | `~/Library/Logs/search_shows_web.log` |
 | `com.dennis.travel-http` | `python3 -m http.server` in `~/repos/dennyrgood.github.io/travel` | 5030 | `~/Library/Logs/travel_http.log` |
+| `com.dennis.comfy-fleet-http` | `python3 -m http.server` (bound `0.0.0.0` — LAN + Tailscale, not public internet) in `comfy-reports/fleet-output` — ComfyUI fleet reports/explorer | 5050 | `~/Library/Logs/comfy_fleet_http.log` |
+| `com.dennis.comfy-fleet-scan` | `comfyui/scheduled_scan.sh` — daily 5am: SSH-scans ImageBeast/ChatWorkhorse/TravelBeast, refreshes `fleet_report_latest.html`/`fleet_explorer_latest.html`, prunes old runs (keep last 3) | — | `~/Library/Logs/comfy_fleet_scan.log` |
 | `com.dennis.tmdb-explorer` | TMDB explorer web GUI — raw TMDB lookup/browse (`tmdb_explorer/.venv` python, `tmdb_explorer.py`). Runs on both mb (the canonical/live instance at `mb.ldmathes.cc:5035`) and mmm (independent second instance, added 2026-08-11) — different hosts, same plist and port, no conflict. | 5035 | `~/Library/Logs/tmdb_explorer.log` |
 | `com.dennis.heartbeat-writer` | `Status/onedrive_heartbeat_writer_all_macs.py` (fleet heartbeat → local `~/fleet_monitor`) | — | `~/Library/Logs/heartbeat_writer.log` |
 | `com.dennis.fleet-metrics-server` | `Status/fleet_metrics_server.py` (serves `~/fleet_monitor` to the checker over Tailscale) | 9100 | `~/Library/Logs/fleet_metrics_server.log` |

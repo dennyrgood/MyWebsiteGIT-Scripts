@@ -27,9 +27,79 @@ import re
 import sys
 import shutil
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict
+
+
+STALE_DAYS = 3  # warn when a machine's newest scan file is older than this
+
+# Machine-tag suffix on a workflow/PNG filename, e.g. "Foo (tb).json",
+# "Foo (ib).json", or "Foo (bare).json". Tolerant of stray whitespace
+# inside the parens (seen in the wild as "(tb ).png") and of "i"/"ib" as
+# the same tag -- both are in active use for "ImageBeast only". "bare"
+# means "runs on TravelBeast + ChatWorkhorse" (they share Models_bare, so
+# a (tb)/(c) split was mostly historical duplication -- see the
+# audit_tb_c_pairs.py one-time consolidation). Always resolve through
+# machine_tag() rather than matching "(tb)" etc. directly, so a messy
+# real-world variant doesn't silently fall through to "no tag" and get
+# miscategorized.
+MACHINE_TAG_RE = re.compile(r"\(\s*(tb|c|ib|i|bare)\s*\)", re.IGNORECASE)
+
+
+def machine_tag(name: str) -> str | None:
+    """Return 'tb' / 'c' / 'ib' / 'bare' / None for a workflow/PNG filename's machine tag."""
+    m = MACHINE_TAG_RE.search(name)
+    if not m:
+        return None
+    t = m.group(1).lower()
+    return "ib" if t == "i" else t
+
+
+# Quant/precision suffixes stripped when grouping models into a "family" for
+# fuzzy gap matching. Deliberately does NOT strip terms that change what the
+# model actually is (e.g. "turbo" vs non-turbo, "base" vs a fine-tune) --
+# those are different models, not just a different quant of the same one.
+# Stripping too aggressively caused a false match (z_image_bf16 vs
+# z_image_turbo_bf16) during a manual cleanup pass; keep this conservative.
+_QUANT_SUFFIXES = [
+    "fp4", "fp8", "fp16", "bf16",
+    "q2_k", "q3_k_m", "q3_k_s", "q4_k_m", "q4_k_s", "q5_k_m", "q5_k_s",
+    "q6_k", "q8_0", "iq4_xs",
+    "scaled", "mixed", "e4m3fn", "e5m2",
+]
+
+
+def base_family(filename: str) -> str:
+    """Reduce a model filename to a 'family' key by stripping quant/precision
+    suffixes, for fuzzy-matching a 'missing' reference against an on-disk
+    file that's really the same model under a different quant/rename."""
+    n = filename.lower()
+    n = re.sub(r"\.(safetensors|gguf|pth|pt|bin)$", "", n)
+    for tok in _QUANT_SUFFIXES:
+        n = re.sub(rf"(^|[-_]){tok}([-_]|$)", r"\1", n)
+    n = re.sub(r"[-_]+", "-", n).strip("-")
+    return n
+
+
+def build_output_evidence_set(data: dict) -> set:
+    """Fleet-wide set of model filenames (lowercased) that have appeared in
+    at least one real output PNG's embedded workflow anywhere on the fleet
+    -- regardless of on-disk status on any particular machine. Used to tell
+    apart 'missing and actually needed somewhere' from 'referenced only by a
+    workflow file that's never actually produced output.'"""
+    evidence = set()
+    for machine in data.values():
+        for row in machine.get("full_map", []):
+            if row.get("source", "") not in OUTPUT_EVIDENCE_SOURCES:
+                continue
+            ref = row.get("model_ref", "").replace("\\", "/").split("/")[-1]
+            if ref:
+                evidence.add(ref.lower())
+            fn = row.get("model_filename", "")
+            if fn and fn != "(not found on disk)":
+                evidence.add(fn.lower())
+    return evidence
 
 
 # ---------------------------------------------------------------------------
@@ -103,12 +173,21 @@ def load_all_machines(config: dict) -> dict:
             print(f"  SKIP: no files found for {hostname}")
             continue
 
+        newest_mtime = max((f.stat().st_mtime for f in files.values()), default=None)
+        scan_age_days = (
+            round((datetime.now().timestamp() - newest_mtime) / 86400, 1)
+            if newest_mtime is not None else None
+        )
+        if scan_age_days is not None and scan_age_days > STALE_DAYS:
+            print(f"  WARNING: {hostname} scan is {scan_age_days:.1f} days old (stale threshold: {STALE_DAYS})")
+
         entry = {
             "config":   machine_cfg,
             "files":    files,
             "models":   {},   # filename.lower() -> row
             "nodes":    set(),
             "full_map": [],
+            "scan_age_days": scan_age_days,
         }
 
         if "models" in files:
@@ -291,9 +370,9 @@ def compute_readiness(data: dict, wf_model_data: dict, hostname: str, year_filte
         if not row.get("workflow_modified", "").startswith(year_filter):
             continue
         wf = row["workflow_file"].split("\\")[-1]
-        # Non-source machines (Chat/Travel) cannot run (i) workflows — exclude them
-        # so they don't inflate the missing count or drive unnecessary sync candidates.
-        if not is_source and "(i)" in wf.lower():
+        # Non-source machines (Chat/Travel) cannot run (i)/(ib) workflows — exclude
+        # them so they don't inflate the missing count or drive unnecessary sync candidates.
+        if not is_source and machine_tag(wf) == "ib":
             continue
         wf_total.add(wf)
         if row["on_disk"] == "NO":
@@ -408,6 +487,7 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
     prime_scan        = report_data.get("prime_scan", {})
     si_coverage       = report_data.get("si_coverage", {})
     si_scan           = report_data.get("si_scan", {})
+    output_usage      = report_data.get("output_usage", {})
 
     hostnames = list(machines.keys())
 
@@ -430,14 +510,20 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
     actions_html += "</ul>"
 
     # --- READINESS ---
-    readiness_html = '<table><tr><th>Machine</th><th>VRAM</th><th>Workflows</th><th>Readiness</th></tr>'
+    readiness_html = '<table><tr><th>Machine</th><th>VRAM</th><th>Workflows</th><th>Readiness</th><th>Scan Age</th></tr>'
     for h in hostnames:
         r    = readiness.get(h, {})
         vram = machines[h]["config"].get("vram_gb", "?")
         pct  = r.get("pct", 0)
         can  = r.get("can_run", 0)
         tot  = r.get("total", 0)
-        readiness_html += f'<tr><td>{h}</td><td>{vram} GB</td><td>{can}/{tot}</td><td>{pct_badge(pct)}</td></tr>'
+        age  = machines[h].get("scan_age_days")
+        if age is None:
+            age_cell = '<span style="color:#888">?</span>'
+        else:
+            age_color = "#e74c3c" if age > STALE_DAYS else "#888"
+            age_cell = f'<span style="color:{age_color}">{age:.1f}d</span>'
+        readiness_html += f'<tr><td>{h}</td><td>{vram} GB</td><td>{can}/{tot}</td><td>{pct_badge(pct)}</td><td>{age_cell}</td></tr>'
     readiness_html += "</table>"
 
     # --- DRIFT ---
@@ -526,22 +612,48 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
         prime_html = f'<p>Scanned {json_c} JSON workflows + {png_c} PNGs &nbsp;|&nbsp; {len(total)} unique model references</p>'
 
         for hostname, cov in prime_coverage.items():
-            confirmed = cov["confirmed"]
-            missing   = cov["missing"]
-            beyond    = cov["beyond"]
+            confirmed         = cov["confirmed"]
+            beyond            = cov["beyond"]
+            likely_rename     = cov.get("likely_rename", [])
+            confirmed_missing = cov.get("confirmed_missing", [])
+            no_evidence       = cov.get("no_evidence", [])
             prime_html += f'<h4>{hostname}</h4>'
             prime_html += f'<p>'
             prime_html += f'<span style="color:#2ecc71">&#10003; {len(confirmed)} prime models confirmed on disk</span> &nbsp;|&nbsp; '
-            if missing:
-                prime_html += f'<span style="color:#e74c3c">&#10007; {len(missing)} prime models MISSING</span> &nbsp;|&nbsp; '
+            if confirmed_missing:
+                prime_html += f'<span style="color:#e74c3c">&#10007; {len(confirmed_missing)} MISSING (evidenced)</span> &nbsp;|&nbsp; '
+            if likely_rename:
+                prime_html += f'<span style="color:#f39c12">{len(likely_rename)} likely just renamed</span> &nbsp;|&nbsp; '
+            if no_evidence:
+                prime_html += f'<span style="color:#888">{len(no_evidence)} unconfirmed (no output evidence anywhere)</span> &nbsp;|&nbsp; '
             prime_html += f'<span style="color:#888">{len(beyond)} models beyond prime set</span>'
             prime_html += '</p>'
-            if missing:
-                prime_html += '<p><strong>Missing prime models (need to add):</strong></p>'
+            if confirmed_missing:
+                prime_html += '<p><strong style="color:#e74c3c">Missing — has produced real output somewhere on the fleet, actually needed:</strong></p>'
                 prime_html += '<table><tr><th>Model</th></tr>'
-                for m in missing:
+                for m in confirmed_missing:
                     prime_html += f'<tr style="background:#fff0f0"><td style="font-family:monospace">{m}</td></tr>'
                 prime_html += '</table>'
+            if likely_rename:
+                prime_html += (
+                    f'<details><summary style="cursor:pointer;color:#f39c12;margin:6px 0">'
+                    f'Likely just a naming/quant mismatch, not a real gap — {len(likely_rename)} (click to expand)'
+                    f'</summary>'
+                    f'<table><tr><th>Workflow asks for</th><th>Probably means (on disk)</th></tr>'
+                )
+                for r in likely_rename:
+                    prime_html += f'<tr><td style="font-family:monospace">{r["missing"]}</td><td style="font-family:monospace">{", ".join(r["matches"])}</td></tr>'
+                prime_html += '</table></details>'
+            if no_evidence:
+                prime_html += (
+                    f'<details><summary style="cursor:pointer;color:#888;margin:6px 0">'
+                    f'No output evidence anywhere on the fleet — verify before chasing — {len(no_evidence)} (click to expand)'
+                    f'</summary>'
+                    f'<table><tr><th>Model</th></tr>'
+                )
+                for m in no_evidence:
+                    prime_html += f'<tr><td style="font-family:monospace">{m}</td></tr>'
+                prime_html += '</table></details>'
             if beyond:
                 total_beyond_gb = sum(b["size_gb"] for b in beyond)
                 prime_html += (
@@ -608,6 +720,75 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
         )
     else:
         si_html = '<p>No Starting Images PNGs found. Add test output PNGs to the 000 Starting Images folder.</p>'
+
+    # --- OUTPUT-BASED MODEL USAGE ---
+    # Based on actual output PNG evidence (not workflow-JSON edit dates, which
+    # can go stale while a workflow is still run regularly).
+    usage_html = ""
+    for hostname, u in output_usage.items():
+        if not u.get("has_output_data"):
+            continue
+        never  = u["never_this_year"]
+        stale  = u["stale"]
+        recent = u.get("recent", [])
+        sdays  = u["stale_days"]
+        never_gb  = sum(m["size_gb"] for m in never)
+        stale_gb  = sum(m["size_gb"] for m in stale)
+        recent_gb = sum(m["size_gb"] for m in recent)
+        usage_html += f'<h4>{hostname}</h4>'
+        usage_html += (
+            f'<p><span style="color:#2ecc71">{len(recent)} models used in the last {sdays} days</span> '
+            f'({recent_gb:.2f} GB) &nbsp;|&nbsp; '
+            f'<span style="color:#888">{len(stale)} models with no output in the last {sdays} days</span> '
+            f'({stale_gb:.2f} GB) &nbsp;|&nbsp; '
+            f'<span style="color:#888">of which, {len(never)} have no {year_filter} output</span> '
+            f'({never_gb:.2f} GB)</p>'
+        )
+        if recent:
+            usage_html += (
+                f'<details><summary style="cursor:pointer;color:#2ecc71;margin:6px 0">'
+                f'Used in the last {sdays} days — {len(recent)} models, {recent_gb:.2f} GB (click to expand)'
+                f'</summary>'
+                f'<table><tr><th>Model</th><th>Category</th><th>Size</th><th>Last Output</th></tr>'
+            )
+            for m in recent:
+                usage_html += (
+                    f'<tr><td>{m["filename"]}</td><td>{m["category"]}</td>'
+                    f'<td>{m["size_gb"]:.2f} GB</td><td>{m["last_used"]}</td></tr>'
+                )
+            usage_html += '</table></details>'
+        stale_had_output = [m for m in stale if m["last_used"] != "never"]
+        stale_never      = [m for m in stale if m["last_used"] == "never"]
+        if stale_had_output:
+            had_gb = sum(m["size_gb"] for m in stale_had_output)
+            usage_html += (
+                f'<details><summary style="cursor:pointer;color:#888;margin:6px 0">'
+                f'Used earlier, nothing in {sdays}+ days — {len(stale_had_output)} models, {had_gb:.2f} GB (click to expand)'
+                f'</summary>'
+                f'<table><tr><th>Model</th><th>Category</th><th>Size</th><th>Last Output</th></tr>'
+            )
+            for m in stale_had_output:
+                usage_html += (
+                    f'<tr><td>{m["filename"]}</td><td>{m["category"]}</td>'
+                    f'<td>{m["size_gb"]:.2f} GB</td><td>{m["last_used"]}</td></tr>'
+                )
+            usage_html += '</table></details>'
+        if stale_never:
+            never_gb2 = sum(m["size_gb"] for m in stale_never)
+            usage_html += (
+                f'<details><summary style="cursor:pointer;color:#888;margin:6px 0">'
+                f'No output ever seen — {len(stale_never)} models, {never_gb2:.2f} GB (click to expand)'
+                f'</summary>'
+                f'<table><tr><th>Model</th><th>Category</th><th>Size</th></tr>'
+            )
+            for m in stale_never:
+                usage_html += (
+                    f'<tr><td>{m["filename"]}</td><td>{m["category"]}</td>'
+                    f'<td>{m["size_gb"]:.2f} GB</td></tr>'
+                )
+            usage_html += '</table></details>'
+    if not usage_html:
+        usage_html = '<p>No output PNG data available (no png-outputs/starting_images/workflows-png rows found).</p>'
 
     # --- UNUSED ON IMAGEBEAST ---
     unused_html = ""
@@ -690,6 +871,9 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
 
 <h2>Current Year Workflow Coverage ({year_filter})</h2>
 <div class="card">{prime_html}</div>
+
+<h2>Model Usage — By Actual Output</h2>
+<div class="card">{usage_html}</div>
 
 <details>
 <summary style="cursor:pointer;font-size:1.2em;font-weight:bold;color:#2c3e50;margin:30px 0 10px;padding-left:12px;border-left:4px solid #3498db">Unused Models on ImageBeast</summary>
@@ -829,15 +1013,28 @@ def scan_prime_workflows(config: dict) -> dict:
     }
 
 
-def analyze_prime_coverage(data: dict, prime_scan: dict, config: dict) -> dict:
+def analyze_prime_coverage(data: dict, prime_scan: dict, config: dict, output_evidence: set = None) -> dict:
     """
     For each machine, report:
     - which prime models are present (confirmed ready)
-    - which prime models are missing (need to be added)
+    - which prime models are missing, split three ways:
+        likely_rename    -- a same-family model IS on disk under a different
+                             quant/precision suffix; probably a naming
+                             mismatch, not a real gap
+        confirmed_missing -- no family match on disk, AND the model has
+                             appeared in a real output somewhere on the
+                             fleet -- a genuine, evidenced gap
+        no_evidence       -- no family match on disk, AND no output
+                             anywhere on the fleet ever referenced it --
+                             likely a template/unused workflow reference,
+                             not something worth chasing without checking
     - which machine models are beyond what prime workflows need
     """
     if not prime_scan:
         return {}
+
+    if output_evidence is None:
+        output_evidence = set()
 
     prime_models = prime_scan.get("prime_models", set())
     results = {}
@@ -845,9 +1042,26 @@ def analyze_prime_coverage(data: dict, prime_scan: dict, config: dict) -> dict:
     for hostname, machine in data.items():
         machine_models = set(machine["models"].keys())
 
-        confirmed   = sorted(prime_models & machine_models)
-        missing     = sorted(prime_models - machine_models)
-        beyond      = sorted(machine_models - prime_models)
+        confirmed = sorted(prime_models & machine_models)
+        missing   = sorted(prime_models - machine_models)
+        beyond    = sorted(machine_models - prime_models)
+
+        # Family index of what's actually on this machine, for fuzzy matching
+        family_on_disk = defaultdict(list)
+        for fn in machine_models:
+            family_on_disk[base_family(fn)].append(machine["models"][fn].get("filename", fn))
+
+        likely_rename     = []
+        confirmed_missing = []
+        no_evidence       = []
+        for fn in missing:
+            fam_hit = family_on_disk.get(base_family(fn))
+            if fam_hit:
+                likely_rename.append({"missing": fn, "matches": sorted(set(fam_hit))})
+            elif fn in output_evidence:
+                confirmed_missing.append(fn)
+            else:
+                no_evidence.append(fn)
 
         # Enrich beyond with size info
         beyond_rich = []
@@ -861,10 +1075,13 @@ def analyze_prime_coverage(data: dict, prime_scan: dict, config: dict) -> dict:
         beyond_rich.sort(key=lambda x: x["size_gb"], reverse=True)
 
         results[hostname] = {
-            "confirmed":    confirmed,
-            "missing":      missing,
-            "beyond":       beyond_rich,
-            "prime_total":  len(prime_models),
+            "confirmed":         confirmed,
+            "missing":           missing,
+            "likely_rename":     likely_rename,
+            "confirmed_missing": confirmed_missing,
+            "no_evidence":       no_evidence,
+            "beyond":            beyond_rich,
+            "prime_total":       len(prime_models),
         }
 
     return results
@@ -889,9 +1106,9 @@ def scan_starting_images(data: dict) -> dict:
             if row.get("source", "").lower() != "starting_images":
                 continue
             wf_name = row["workflow_file"].replace("\\", "/").split("/")[-1]
-            # Exclude (i) PNGs — ImageBeast-only workflows don't belong in the
+            # Exclude (i)/(ib) PNGs — ImageBeast-only workflows don't belong in the
             # travel readiness set even if they live in 000 Starting Images.
-            if "(i)" in wf_name.lower():
+            if machine_tag(wf_name) == "ib":
                 continue
             fn = row.get("model_filename", "")
             if fn and fn != "(not found on disk)":
@@ -928,6 +1145,22 @@ def analyze_starting_images_coverage(data: dict, si_scan: dict) -> dict:
         missing   = sorted(si_models - machine_models)
         beyond    = sorted(machine_models - si_models)
 
+        # Fuzzy-match missing against on-disk families (same rationale as
+        # analyze_prime_coverage) -- Starting Images evidence is already
+        # real-output-backed by construction, so no separate evidence check
+        # is needed here, just the rename check.
+        family_on_disk = defaultdict(list)
+        for fn in machine_models:
+            family_on_disk[base_family(fn)].append(machine["models"][fn].get("filename", fn))
+        likely_rename     = []
+        confirmed_missing = []
+        for fn in missing:
+            fam_hit = family_on_disk.get(base_family(fn))
+            if fam_hit:
+                likely_rename.append({"missing": fn, "matches": sorted(set(fam_hit))})
+            else:
+                confirmed_missing.append(fn)
+
         beyond_rich = []
         for fn in beyond:
             row = machine["models"].get(fn, {})
@@ -941,11 +1174,83 @@ def analyze_starting_images_coverage(data: dict, si_scan: dict) -> dict:
         results[hostname] = {
             "confirmed": confirmed,
             "missing":   missing,
+            "likely_rename":     likely_rename,
+            "confirmed_missing": confirmed_missing,
             "beyond":    beyond_rich,
             "si_total":  len(si_models),
         }
 
     return results
+
+# ---------------------------------------------------------------------------
+# Output-based model usage
+# Measures "is this model actually being used" by real generated outputs
+# (output PNGs, Starting Images, and their embedded workflows) rather than
+# by workflow-JSON edit dates -- a workflow file can sit unmodified for
+# months while still being run regularly, so edit date is not a reliable
+# usage signal on its own. Output-PNG timestamps are.
+# ---------------------------------------------------------------------------
+
+OUTPUT_EVIDENCE_SOURCES = {"png-outputs", "starting_images", "workflows-png"}
+STALE_OUTPUT_DAYS = 90  # "not used recently" window
+
+
+def analyze_output_usage(data: dict, year_filter: str, stale_days: int = STALE_OUTPUT_DAYS) -> dict:
+    """
+    Per machine: which on-disk models have no real output evidence this year,
+    and which haven't appeared in an output in the last `stale_days` days.
+    Only meaningful for machines with actual output history in the CSV.
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    cutoff_recent = (_dt.now() - _td(days=stale_days)).strftime("%Y-%m-%d")
+
+    results = {}
+    for hostname, machine in data.items():
+        last_used = {}  # filename.lower() -> latest output date seen
+        for row in machine.get("full_map", []):
+            if row.get("source", "") not in OUTPUT_EVIDENCE_SOURCES:
+                continue
+            fn = row.get("model_filename", "")
+            if not fn or fn == "(not found on disk)":
+                continue
+            mod = row.get("workflow_modified", "")
+            key = fn.lower()
+            if mod > last_used.get(key, ""):
+                last_used[key] = mod
+
+        never_this_year = []
+        stale = []
+        recent = []
+        for fn_lower, row in machine["models"].items():
+            lu = last_used.get(fn_lower, "")
+            entry = {
+                "filename":   row.get("filename", fn_lower),
+                "size_gb":    float(row.get("size_gb", 0)),
+                "category":   row.get("category", ""),
+                "last_used":  lu or "never",
+            }
+            if not lu.startswith(year_filter):
+                never_this_year.append(entry)
+            if lu < cutoff_recent:
+                stale.append(entry)
+            else:
+                recent.append(entry)
+
+        never_this_year.sort(key=lambda x: -x["size_gb"])
+        stale.sort(key=lambda x: -x["size_gb"])
+        recent.sort(key=lambda x: x["last_used"], reverse=True)
+
+        results[hostname] = {
+            "never_this_year": never_this_year,
+            "stale":           stale,
+            "recent":          recent,
+            "stale_days":      stale_days,
+            "has_output_data": bool(last_used) or any(
+                r.get("source") in OUTPUT_EVIDENCE_SOURCES for r in machine.get("full_map", [])
+            ),
+        }
+    return results
+
 
 # ---------------------------------------------------------------------------
 # Subdir mismatch analysis
@@ -1058,11 +1363,105 @@ def generate_subdir_fix_bat(mismatches: list, src_root: str, dest_root: str) -> 
 
 
 # ---------------------------------------------------------------------------
+# Output rotation
+# fleet-output/ and history/ grow one file-set per run forever. This lists
+# what's beyond the retention window; it never deletes unless the caller
+# passes --confirm-prune, so a plain run is always non-destructive.
+# ---------------------------------------------------------------------------
+
+def find_prune_candidates(output_dir: Path, history_dir: Path, reports_dir: Path, keep: int) -> dict:
+    """Return {'output': [...], 'history': [...], 'inputs': [...]} beyond the newest `keep` runs."""
+    run_ts = sorted({
+        m.group(1)
+        for f in output_dir.glob("*_*.html")
+        if (m := re.search(r"(\d{4}-\d{2}-\d{2}_\d{4})", f.name))
+    } | {
+        m.group(1)
+        for f in output_dir.glob("summary_*.txt")
+        if (m := re.search(r"(\d{4}-\d{2}-\d{2}_\d{4})", f.name))
+    })
+    stale_ts = set(run_ts[:-keep]) if len(run_ts) > keep else set()
+
+    output_candidates = [
+        f for f in output_dir.iterdir()
+        if f.is_file() and any(ts in f.name for ts in stale_ts)
+    ]
+
+    snapshots = sorted(history_dir.glob("snapshot-*.json"))
+    history_candidates = snapshots[:-keep] if len(snapshots) > keep else []
+
+    # Raw scan inputs are per-machine, timestamped independently by each
+    # machine's own scan run -- keep the newest `keep` timestamps per machine,
+    # not globally, since machines don't scan in lockstep.
+    input_candidates = []
+    by_machine_ts = defaultdict(set)
+    for f in reports_dir.iterdir():
+        if not f.is_file():
+            continue
+        m = re.match(r"^(IMAGEBEAST|CHATWORKHORSE|TRAVELBEAST)-.*?(\d{4}-\d{2}-\d{2}_\d{4})", f.name)
+        if m:
+            by_machine_ts[m.group(1)].add(m.group(2))
+
+    stale_input_ts = {}
+    for machine, ts_set in by_machine_ts.items():
+        ts_sorted = sorted(ts_set)
+        stale_input_ts[machine] = set(ts_sorted[:-keep]) if len(ts_sorted) > keep else set()
+
+    for f in reports_dir.iterdir():
+        if not f.is_file():
+            continue
+        m = re.match(r"^(IMAGEBEAST|CHATWORKHORSE|TRAVELBEAST)-.*?(\d{4}-\d{2}-\d{2}_\d{4})", f.name)
+        if m and m.group(2) in stale_input_ts.get(m.group(1), set()):
+            input_candidates.append(f)
+
+    return {
+        "output":   sorted(output_candidates),
+        "history":  history_candidates,
+        "inputs":   sorted(input_candidates),
+    }
+
+
+def prune_outputs(output_dir: Path, history_dir: Path, reports_dir: Path, keep: int, confirm: bool):
+    candidates = find_prune_candidates(output_dir, history_dir, reports_dir, keep)
+    total = len(candidates["output"]) + len(candidates["history"]) + len(candidates["inputs"])
+    if total == 0:
+        print(f"Prune: nothing beyond the last {keep} runs — nothing to do.")
+        return
+
+    print(f"\nPrune candidates (older than the last {keep} runs):")
+    for f in candidates["inputs"]:
+        print(f"  {f.name}")
+    for f in candidates["output"]:
+        print(f"  fleet-output/{f.name}")
+    for f in candidates["history"]:
+        print(f"  history/{f.name}")
+    print(f"Total: {total} files")
+
+    if not confirm:
+        print("Dry run only — re-run with --prune-output --confirm-prune to actually delete these.")
+        return
+
+    for f in candidates["inputs"] + candidates["output"] + candidates["history"]:
+        f.unlink()
+    print(f"Deleted {total} files.")
+
+
+# ---------------------------------------------------------------------------
 # Next actions builder
 # ---------------------------------------------------------------------------
 
-def build_actions(gaps: list, readiness: dict, drift: dict, nodes_data: dict) -> list:
+def build_actions(gaps: list, readiness: dict, drift: dict, nodes_data: dict, config: dict, data: dict) -> list:
     actions = []
+
+    # Stale scans - flag before anything else so drift/gaps aren't trusted blindly
+    for h, machine in data.items():
+        age = machine.get("scan_age_days")
+        if age is not None and age > STALE_DAYS:
+            actions.append({
+                "priority": "medium",
+                "title":    f"{h} scan is {age:.1f} days old",
+                "detail":   f"Re-run Run-FleetScan-{h}.bat — data below may not reflect current state.",
+            })
 
     # Model sync actions - use gap's own priority field
     seen_scripts = set()
@@ -1092,10 +1491,8 @@ def build_actions(gaps: list, readiness: dict, drift: dict, nodes_data: dict) ->
 
     # Missing nodes on TravelBeast
     travel_missing_nodes = nodes_data["missing"].get("TRAVELBEAST", [])
-    high_value = [n for n in travel_missing_nodes if n in {
-        "comfyui-qwenvl", "comfyui_ipadapter_plus", "was-ns",
-        "vantage-dreamomni2", "comfyui_layerstyle", "comfyui-advancedliveportrait",
-    }]
+    priority_nodes = set(config.get("priority_custom_nodes", []))
+    high_value = [n for n in travel_missing_nodes if n in priority_nodes]
     if high_value:
         actions.append({
             "priority": "medium",
@@ -1142,6 +1539,36 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str) -> str:
     def js(obj):
         return _json.dumps(obj, separators=(',', ':'))
 
+    recent_cutoff = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+
+    # Per-host family index for fuzzy rename matching (same logic as the
+    # text/HTML coverage report) -- a model marked "not found on disk" by
+    # the raw scan may really just be present under a different quant
+    # suffix. Surfacing that here as a distinct dot state, instead of a
+    # flat red "missing", is the whole point of doing this in the explorer.
+    family_on_disk = {}
+    for hostname, machine in data.items():
+        idx = defaultdict(list)
+        for fn_lower, row in machine["models"].items():
+            idx[base_family(fn_lower)].append(row.get("filename", fn_lower))
+        family_on_disk[hostname] = idx
+
+    def fuzzy_match(hostname, ref_or_fn):
+        hit = family_on_disk.get(hostname, {}).get(base_family(ref_or_fn))
+        return sorted(set(hit)) if hit else None
+
+    # The PS1 scan tags a Starting Images PNG as source=starting_images from
+    # its dedicated pass, AND as source=workflows-png from the general
+    # workflow-PNG pass over the same folder tree -- the same file, scanned
+    # twice, under two different source labels. Collect those basenames up
+    # front so the workflows-png copy can be folded into the starting_images
+    # entry instead of showing as a separate duplicate row.
+    starting_image_basenames = set()
+    for machine in data.values():
+        for row in machine.get("full_map", []):
+            if row.get("source", "") == "starting_images":
+                starting_image_basenames.add(row["workflow_file"].split("\\")[-1])
+
     # Build workflow and model data structures
     wf_data    = {}
     model_data = {}
@@ -1152,11 +1579,21 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str) -> str:
             wf_fname = row["workflow_file"].split("\\")[-1]
             wf_dir   = row.get("workflow_dir", "").replace("\\", "/")
             src_type = row.get("source", "workflows")
+            if src == "workflows-png" and wf_fname in starting_image_basenames:
+                src = "starting_images"  # fold the duplicate scan into the one entry
             if src_type == "png-outputs":
-                # Use last two segments of output dir as prefix e.g. "0ComfyUI/output"
-                _dparts = [p for p in wf_dir.split("/") if p]
-                _prefix = "/".join(_dparts[-2:]) if len(_dparts) >= 2 else _dparts[-1] if _dparts else "output"
-                wf_file = _prefix + "/" + wf_fname
+                # Show the path relative to the actual output/ folder, not a
+                # fixed "last 2 segments" guess -- that heuristic only worked
+                # for root-level files; anything in a subfolder (e.g.
+                # output/Dennis/Disney65/...) lost its real prefix and showed
+                # the wrong-looking "Dennis/Disney65/..." with no context.
+                # Every row here is already known to live under output/, so
+                # that redundant segment is dropped entirely rather than
+                # re-added everywhere -- root files show as a bare filename,
+                # nested ones show their true subpath.
+                _oi = wf_dir.lower().rfind("/output")
+                _sub = wf_dir[_oi + len("/output"):].strip("/") if _oi >= 0 else ""
+                wf_file = (_sub + "/" + wf_fname) if _sub else wf_fname
             else:
                 _ri = wf_dir.lower().find("/workflows/")
                 _sub = wf_dir[_ri + len("/workflows/"):] if _ri >= 0 else ""
@@ -1173,17 +1610,21 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str) -> str:
             if not mk:
                 continue
 
+            rename_hit = None if on_disk else fuzzy_match(hostname, mk)
+
             wk = f"{src}||{wf_file}"
             if wk not in wf_data:
                 wf_data[wk] = {
                     "name": wf_file, "source": src,
                     "modified": wf_mod, "year": wf_year,
                     "models": set(),
-                    "per_host": {h: {"present": 0, "missing": 0} for h in hostnames}
+                    "per_host": {h: {"present": 0, "renamed": 0, "missing": 0} for h in hostnames}
                 }
             wf_data[wk]["models"].add(mk)
             if on_disk:
                 wf_data[wk]["per_host"][hostname]["present"] += 1
+            elif rename_hit:
+                wf_data[wk]["per_host"][hostname]["renamed"] += 1
             else:
                 wf_data[wk]["per_host"][hostname]["missing"] += 1
 
@@ -1191,11 +1632,15 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str) -> str:
                 model_data[mk] = {
                     "filename": fn if fn and fn != "(not found on disk)" else ref,
                     "size_gb": size_gb, "category": cat,
-                    "on_hosts": {h: False for h in hostnames},
+                    "on_hosts": {h: "off" for h in hostnames},
+                    "rename_hint": {h: None for h in hostnames},
                     "workflows": set()
                 }
             if on_disk:
-                model_data[mk]["on_hosts"][hostname] = True
+                model_data[mk]["on_hosts"][hostname] = "on"
+            elif rename_hit and model_data[mk]["on_hosts"][hostname] != "on":
+                model_data[mk]["on_hosts"][hostname] = "renamed"
+                model_data[mk]["rename_hint"][hostname] = rename_hit
             if size_gb > model_data[mk]["size_gb"]:
                 model_data[mk]["size_gb"] = size_gb
             model_data[mk]["workflows"].add(wf_file)
@@ -1215,12 +1660,15 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str) -> str:
                 continue
             hs = {}
             for h in hostnames:
-                ph = wv["per_host"].get(h, {"present": 0, "missing": 0})
-                if ph["present"] == 0 and ph["missing"] == 0:
+                ph = wv["per_host"].get(h, {"present": 0, "renamed": 0, "missing": 0})
+                present, renamed, missing = ph["present"], ph.get("renamed", 0), ph["missing"]
+                if present == 0 and renamed == 0 and missing == 0:
                     hs[h] = "N"
-                elif ph["missing"] == 0:
+                elif missing == 0 and renamed == 0:
                     hs[h] = "R"
-                elif ph["present"] == 0:
+                elif missing == 0 and renamed > 0:
+                    hs[h] = "F"   # ready, but relies on a fuzzy/renamed match -- verify
+                elif present == 0 and renamed == 0:
                     hs[h] = "M"
                 else:
                     hs[h] = "P"
@@ -1234,48 +1682,14 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str) -> str:
         for mk, mv in model_data.items():
             out.append({"key": mk, "filename": mv["filename"], "size_gb": mv["size_gb"],
                         "category": mv["category"], "on_hosts": mv["on_hosts"],
+                        "rename_hint": mv.get("rename_hint", {}),
                         "workflows": mv["workflows"], "wf_count": len(mv["workflows"])})
         return sorted(out, key=lambda x: x["filename"].lower())
 
-    def pruning_models():
-        yr_models = set()
-        si_models = set()
-        for wv in wf_data.values():
-            if wv["source"] == "starting_images":
-                si_models.update(wv["models"])
-            if wv["year"] == year_filter and wv["source"] in ("workflows", "workflows-png"):
-                yr_models.update(wv["models"])
-        out = []
-        for mk, mv in model_data.items():
-            if not any(mv["on_hosts"].values()):
-                continue
-            if mk not in yr_models and mk not in si_models:
-                out.append({"key": mk, "filename": mv["filename"], "size_gb": mv["size_gb"],
-                            "category": mv["category"], "on_hosts": mv["on_hosts"],
-                            "wf_count": len(mv["workflows"]),
-                            "reason": f"Not in {year_filter} or Starting Images"})
-        return sorted(out, key=lambda x: -x["size_gb"])
-
-    def pruning_workflows():
-        out = []
-        for wk, wv in wf_data.items():
-            if wv["source"] not in ("workflows", "workflows-png"):
-                continue
-            if not wv["year"] or wv["year"] >= str(int(year_filter) - 1):
-                continue
-            out.append({"key": wk, "name": wv["name"], "modified": wv["modified"],
-                        "year": wv["year"], "model_count": len(wv["models"]),
-                        "reason": f"Last modified {wv['modified'] or 'unknown'}"})
-        return sorted(out, key=lambda x: x["modified"] or "")
-
     si_wfs    = wf_list(source_filter=["starting_images"])
-    yr_wfs    = wf_list(source_filter=["workflows", "workflows-png"], year=year_filter)
     all_wfs   = wf_list()  # no filter — truly all sources including png-outputs
-    older_wfs = [w for w in wf_list(source_filter=["workflows", "workflows-png"]) if w["year"] and w["year"] < year_filter]
     png_wfs   = wf_list(source_filter=["png-outputs"])
     ml        = model_list()
-    pm        = pruning_models()
-    pw        = pruning_workflows()
 
     CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1289,9 +1703,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
               border: 1px solid #0f3460; background: #0f3460; color: #e0e0e0;
               font-size: 0.9em; outline: none; }
 .search-box:focus { border-color: #4fc3f7; }
-.mode-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid #4fc3f7;
-            background: transparent; color: #4fc3f7; cursor: pointer; font-size: 0.85em; }
-.mode-btn.active, .mode-btn:hover { background: #4fc3f7; color: #1a1a2e; }
 .clear-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid #555;
              background: transparent; color: #888; cursor: pointer; font-size: 0.85em; }
 .clear-btn:hover { border-color: #e74c3c; color: #e74c3c; }
@@ -1321,6 +1732,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 .item.selected { background: #0f3460; border-left: 3px solid #4fc3f7; padding-left: 9px; }
 .item.dimmed { opacity: 0.2; }
 .item.highlighted { background: rgba(79,195,247,0.07); }
+.item-dir { font-size: 0.72em; color: #667; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            max-width: 160px; flex-shrink: 0; }
+.item-dir:not(:empty)::after { content: '/'; }
+.group-header { padding: 6px 12px 3px; font-size: 0.7em; font-weight: bold; letter-spacing: 0.05em;
+                 text-transform: uppercase; color: #4fc3f7; background: #16213e;
+                 border-bottom: 1px solid #0f3460; position: sticky; top: 0; z-index: 1; }
 .item-name { flex: 1; font-size: 0.82em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item-meta { font-size: 0.72em; color: #666; white-space: nowrap; }
 .item-size { font-size: 0.72em; color: #888; white-space: nowrap; min-width: 42px; text-align: right; }
@@ -1330,15 +1747,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 .dot-P { background: #f39c12; }
 .dot-M { background: #e74c3c; }
 .dot-N { background: #2a2a3e; }
+.dot-F { background: #f4d03f; }
 .dot-on { background: #2ecc71; }
+.dot-renamed { background: #f4d03f; }
 .dot-off { background: #e74c3c; }
 .dot-ghost { background: #2a2a3e; border: 1px solid #444; }
 .cat-tag { font-size: 0.68em; color: #666; background: #0d1b2e; padding: 1px 5px;
            border-radius: 4px; flex-shrink: 0; max-width: 90px; overflow: hidden;
            text-overflow: ellipsis; white-space: nowrap; }
-.prune-badge { background: #c0392b; color: white; font-size: 0.68em;
-               padding: 1px 5px; border-radius: 8px; flex-shrink: 0; white-space: nowrap; }
-.prune-reason { font-size: 0.7em; color: #e74c3c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .info-bar { background: #0f3460; padding: 6px 12px; font-size: 0.78em; color: #4fc3f7;
             flex-shrink: 0; min-height: 28px; border-top: 1px solid #16213e; }
 .empty { padding: 30px; text-align: center; color: #555; font-size: 0.85em; }
@@ -1347,37 +1763,55 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     JS = f"""
 const HN = {js(hostnames)};
 const HS = {js(host_short)};
+const RECENT_CUTOFF = {js(recent_cutoff)};
 const SI_WF    = {js(si_wfs)};
-const YR_WF    = {js(yr_wfs)};
-const OLDER_WF = {js(older_wfs)};
 const PNG_WF   = {js(png_wfs)};
 const ALL_WF   = {js(all_wfs)};
 const MODELS  = {js(ml)};
-const PRUNE_M  = {js(pm)};
-const PRUNE_WF= {js(pw)};
 
-let mode='normal', wfTab='all', modelTab='all';
-let wfFilter='all', modelFilter='all';
+let wfTab='all', modelTab='all';
+let wfFilter='all', modelFilter='all', statusFilter='all', wfShowFilter='all';
+let locFilter='all', recentFilter='all';
+let wfSort='name';
 let selectedWf=null, selectedModel=null, searchTerm='';
 let highlightedModels=new Set(), highlightedWfs=new Set();
 let showOnlyWf=false, showOnlyModel=false;
-let typeFilter='all', catFilter='all';
 
-function setMode(m) {{
-  mode=m;
-  document.getElementById('normalBtn').classList.toggle('active',m==='normal');
-  document.getElementById('pruneBtn').classList.toggle('active',m==='prune');
-  ['tab-pwf','tab-mpm'].forEach(id=>{{
-    const el=document.getElementById(id);
-    if(el) el.style.display=m==='prune'?'':'none';
-  }});
-  if(m==='prune'){{switchTab('pwf');switchModelTab('prune');}}
-  else{{switchTab('si');switchModelTab('all');}}
+// Which physical machine(s) a workflow's (tb)/(c)/(ib)/(bare) tag is
+// actually meant to run on -- built by matching hostnames rather than
+// hardcoded, in case the fleet grows or hostnames change. "bare" means
+// "runs on TravelBeast + ChatWorkhorse" (they share Models_bare).
+const HOST_FOR_TAG = (() => {{
+  const out = {{}};
+  for (const h of HN) {{
+    const hl = h.toLowerCase();
+    if (hl.includes('travel')) out.tb = h;
+    else if (hl.includes('chat')) out.c = h;
+    else if (hl.includes('image')) out.ib = h;
+  }}
+  out.bare = [out.tb, out.c].filter(Boolean);
+  return out;
+}})();
+
+function hostsForTag(tag) {{
+  if (tag === 'bare') return HOST_FOR_TAG.bare.length ? HOST_FOR_TAG.bare : HN;
+  if (tag && HOST_FOR_TAG[tag]) return [HOST_FOR_TAG[tag]];
+  return HN;
+}}
+
+function wfStatus(wf) {{
+  const tag = machineTag(wf.name);
+  const hosts = hostsForTag(tag);
+  const states = hosts.map(h => (wf.hs && wf.hs[h]) || 'N').filter(s => s !== 'N');
+  if (!states.length) return 'na';
+  if (states.some(s => s === 'M' || s === 'P')) return 'notready';
+  if (states.some(s => s === 'F')) return 'verify';
+  return 'ready';
 }}
 
 function switchTab(t) {{
   wfTab=t;
-  ['si','yr','older','png','all','pwf'].forEach(id=>{{
+  ['si','png','all'].forEach(id=>{{
     const el=document.getElementById('tab-'+id);
     if(el) el.classList.toggle('active',id===t);
   }});
@@ -1387,20 +1821,53 @@ function switchTab(t) {{
 function switchModelTab(t) {{
   modelTab=t;
   document.getElementById('tab-mall').classList.toggle('active',t==='all');
-  const mpm=document.getElementById('tab-mpm');
-  if(mpm) mpm.classList.toggle('active',t==='prune');
   renderModels();
 }}
 
 function setWfFilter(f) {{
   wfFilter=f;
-  ['all','tb','c','i','none'].forEach(id=>{{const el=document.getElementById('fwf-'+id);if(el)el.classList.toggle('active',id===f)}});
+  ['all','bare','tb','c','i','none'].forEach(id=>{{const el=document.getElementById('fwf-'+id);if(el)el.classList.toggle('active',id===f)}});
+  renderWf();
+}}
+
+function setLocFilter(f) {{
+  locFilter=f;
+  ['all','root'].forEach(id=>{{const el=document.getElementById('floc-'+id);if(el)el.classList.toggle('active',id===f)}});
+  renderWf();
+}}
+
+function setRecentFilter(f) {{
+  recentFilter=f;
+  ['all','recent','older'].forEach(id=>{{const el=document.getElementById('frec-'+id);if(el)el.classList.toggle('active',id===f)}});
+  renderWf();
+}}
+
+function setWfSort(s) {{
+  wfSort=s;
+  ['name','date'].forEach(id=>{{const el=document.getElementById('fsort-'+id);if(el)el.classList.toggle('active',id===s)}});
+  renderWf();
+}}
+
+function splitDir(name) {{
+  const i = name.lastIndexOf('/');
+  return i>=0 ? {{dir:name.slice(0,i), file:name.slice(i+1)}} : {{dir:'', file:name}};
+}}
+
+function setStatusFilter(f) {{
+  statusFilter=f;
+  ['all','notready','verify','ready'].forEach(id=>{{const el=document.getElementById('fst-'+id);if(el)el.classList.toggle('active',id===f)}});
+  renderWf();
+}}
+
+function setWfShowFilter(f) {{
+  wfShowFilter=f;
+  ['all','selmodel'].forEach(id=>{{const el=document.getElementById('fwfshow-'+id);if(el)el.classList.toggle('active',id===f)}});
   renderWf();
 }}
 
 function setModelFilter(f) {{
   modelFilter=f;
-  ['all','nowf','img','missingimg','chat','missingchat','travel','missing'].forEach(id=>{{const el=document.getElementById('fmod-'+id);if(el)el.classList.toggle('active',id===f)}});
+  ['all','selwf','nowf','img','missingimg','chat','missingchat','travel','missing'].forEach(id=>{{const el=document.getElementById('fmod-'+id);if(el)el.classList.toggle('active',id===f)}});
   renderModels();
 }}
 
@@ -1411,33 +1878,17 @@ function applySearch() {{
 
 function handleWfClick(el) {{
   const idx=parseInt(el.dataset.idx);
-  const src=getWfSource();
-  const filtered=src.filter(wf=>{{
-    if(!wfMatchesFilter(wf)) return false;
-    if(searchTerm && !wf.name.toLowerCase().includes(searchTerm)) return false;
-    return true;
-  }});
-  if(idx<filtered.length) selectWf(filtered[idx].key, filtered[idx].name||filtered[idx].key);
+  const visible=getVisibleWfList();
+  if(idx<visible.length) selectWf(visible[idx].key, visible[idx].name||visible[idx].key);
 }}
 function handleModelClick(el) {{
   const idx=parseInt(el.dataset.idx);
-  const msrc=modelTab==='prune'?PRUNE_M:MODELS;
-  const filtered=msrc.filter(m=>{{
+  const filtered=MODELS.filter(m=>{{
     if(!modelMatchesFilter(m)) return false;
     if(searchTerm&&!m.filename.toLowerCase().includes(searchTerm)&&!(m.category||'').toLowerCase().includes(searchTerm)) return false;
     return true;
   }});
   if(idx<filtered.length) selectModel(filtered[idx].key, filtered[idx].filename);
-}}
-function setTypeFilter(f) {{
-  typeFilter=f;
-  ['all','safetensors','gguf','pth','bin','ckpt'].forEach(id=>{{const el=document.getElementById('ftype-'+id);if(el)el.classList.toggle('active',id===f)}});
-  renderModels();
-}}
-function setCatFilter(f) {{
-  catFilter=f;
-  ['all','checkpoints','diffusion','loras','text_encoders','vae','upscale','controlnet','other'].forEach(id=>{{const el=document.getElementById('fcat-'+id);if(el)el.classList.toggle('active',id===f)}});
-  renderModels();
 }}
 function toggleShowOnlyWf() {{
   showOnlyWf=!showOnlyWf;
@@ -1464,62 +1915,66 @@ function clearSelection() {{
 
 function getWfSource() {{
   if(wfTab==='si') return SI_WF;
-  if(wfTab==='yr') return YR_WF;
-  if(wfTab==='older') return OLDER_WF;
   if(wfTab==='png') return PNG_WF;
-  if(wfTab==='pwf') return PRUNE_WF;
   return ALL_WF;
 }}
 
+const MACHINE_TAG_RE = /\(\s*(tb|c|ib|i|bare)\s*\)/i;
+function machineTag(name) {{
+  const m = MACHINE_TAG_RE.exec(name);
+  if(!m) return null;
+  const t = m[1].toLowerCase();
+  return t==='i' ? 'ib' : t;
+}}
 function wfMatchesFilter(wf) {{
+  if(wfShowFilter==='selmodel' && !highlightedWfs.has(wf.name||wf.key)) return false;
+  if(statusFilter!=='all' && wfStatus(wf)!==statusFilter) return false;
+  // "Root Only" -- the most-actively-used workflows live directly in the
+  // workflows folder, not in a subfolder like "999 Other/...".
+  if(locFilter==='root' && !(wf.source==='workflows' && !wf.name.includes('/'))) return false;
+  // Age is a uniform concept across every source (template file edit-date
+  // or output PNG creation-date) -- not tied to any one tab/year.
+  if(recentFilter==='recent' && !(wf.modified && wf.modified>=RECENT_CUTOFF)) return false;
+  if(recentFilter==='older' && !(wf.modified && wf.modified<RECENT_CUTOFF)) return false;
   if(wfFilter==='all') return true;
   const n=wf.name.toLowerCase();
-  if(wfFilter==='tb') return /[(]tb[)]/.test(n);
-  if(wfFilter==='c') return /[(]c[)]/.test(n);
-  if(wfFilter==='i') return /[(]i[)]/.test(n);
-  if(wfFilter==='none') return !/[(](tb|c|i)[)]/.test(n);
+  const tag = machineTag(n);
+  if(wfFilter==='tb') return tag==='tb';
+  if(wfFilter==='c') return tag==='c';
+  if(wfFilter==='i') return tag==='ib';
+  if(wfFilter==='bare') return tag==='bare';
+  if(wfFilter==='none') return tag===null;
   return true;
 }}
 
+function hostHas(oh,h) {{ return oh[h]==='on'||oh[h]==='renamed'; }}
 function modelMatchesFilter(m) {{
-  // machine/usage filter
+  // machine/usage filter -- "has" counts a fuzzy-renamed match as present,
+  // same as the dot rendering does.
   const oh=m.on_hosts;
+  const hasIB=hostHas(oh,'IMAGEBEAST'), hasC=hostHas(oh,'CHATWORKHORSE'), hasT=hostHas(oh,'TRAVELBEAST');
+  if(modelFilter==='selwf' && !highlightedModels.has(m.key)) return false;
   if(modelFilter==='nowf' && (m.wf_count||0)!==0) return false;
-  if(modelFilter==='img' && !oh.IMAGEBEAST) return false;
-  if(modelFilter==='missingimg' && (oh.IMAGEBEAST||(!oh.CHATWORKHORSE&&!oh.TRAVELBEAST))) return false;
-  if(modelFilter==='chat' && !oh.CHATWORKHORSE) return false;
-  if(modelFilter==='missingchat' && (!oh.IMAGEBEAST||oh.CHATWORKHORSE)) return false;
-  if(modelFilter==='travel' && !oh.TRAVELBEAST) return false;
-  if(modelFilter==='missing' && (!oh.IMAGEBEAST||oh.TRAVELBEAST)) return false;
-  // type filter
-  if(typeFilter!=='all') {{
-    const fn=(m.filename||'').toLowerCase();
-    if(typeFilter==='safetensors' && !fn.endsWith('.safetensors')) return false;
-    if(typeFilter==='gguf' && !fn.endsWith('.gguf')) return false;
-    if(typeFilter==='pth' && !fn.endsWith('.pth') && !fn.endsWith('.pt')) return false;
-    if(typeFilter==='bin' && !fn.endsWith('.bin')) return false;
-    if(typeFilter==='ckpt' && !fn.endsWith('.ckpt')) return false;
-  }}
-  // category filter
-  if(catFilter!=='all') {{
-    const cat=(m.category||'').toLowerCase();
-    if(catFilter==='diffusion' && !cat.includes('diffusion') && !cat.includes('unet')) return false;
-    if(catFilter==='upscale' && !cat.includes('upscale')) return false;
-    if(catFilter==='other' && ['checkpoints','diffusion_models','unet','loras','text_encoders','clip','vae','upscale_models','controlnet'].some(c=>cat.includes(c))) return false;
-    if(catFilter!=='diffusion' && catFilter!=='upscale' && catFilter!=='other' && !cat.includes(catFilter)) return false;
-  }}
+  if(modelFilter==='img' && !hasIB) return false;
+  if(modelFilter==='missingimg' && (hasIB||(!hasC&&!hasT))) return false;
+  if(modelFilter==='chat' && !hasC) return false;
+  if(modelFilter==='missingchat' && (!hasIB||hasC)) return false;
+  if(modelFilter==='travel' && !hasT) return false;
+  if(modelFilter==='missing' && (!hasIB||hasT)) return false;
   return true;
 }}
 
-function hostDots(hs, isModel) {{
+function hostDots(hs, isModel, hints) {{
   if(isModel) {{
-    const onAny=Object.values(hs).some(v=>v);
+    const onAny=Object.values(hs).some(v=>v==='on'||v==='renamed');
     return HN.map(h=>{{
-      let cls;
-      if(hs[h]) cls='dot dot-on';
+      const st=hs[h];
+      let cls, title=HS[h];
+      if(st==='on') cls='dot dot-on';
+      else if(st==='renamed') {{ cls='dot dot-renamed'; const hint=hints&&hints[h]; if(hint) title+=' -- probably: '+hint.join(', '); }}
       else if(onAny) cls='dot dot-off';
       else cls='dot dot-ghost';
-      return '<span class="'+cls+'" title="'+HS[h]+'"></span>';
+      return '<span class="'+cls+'" title="'+title+'"></span>';
     }}).join('');
   }}
   return HN.map(h=>{{
@@ -1528,28 +1983,58 @@ function hostDots(hs, isModel) {{
   }}).join('');
 }}
 
-function renderWf() {{
-  const container=document.getElementById('wf-list');
+function getVisibleWfList() {{
   const src=getWfSource();
   const filtered=src.filter(wf=>{{
     if(!wfMatchesFilter(wf)) return false;
     if(searchTerm && !wf.name.toLowerCase().includes(searchTerm)) return false;
     return true;
   }});
+  const hasSel=highlightedWfs.size>0;
+  let visible=showOnlyWf&&hasSel?filtered.filter(wf=>highlightedWfs.has(wf.name||wf.key)||selectedWf===wf.key):filtered;
+  if(wfSort==='date') {{
+    // Flat, cross-folder recency -- "what did I touch most recently"
+    // shouldn't be grouped by directory.
+    visible=[...visible].sort((a,b)=>(b.modified||'').localeCompare(a.modified||'')||a.name.localeCompare(b.name));
+  }} else {{
+    // Group by source first -- "root" means something different per source
+    // (workflows/ for templates, output/ for generated PNGs), so mixing
+    // sources (as the "All" tab does) before grouping by directory would
+    // collapse unrelated root-level items from different source trees into
+    // one group. Then by directory (root files as their own group, sorting
+    // first since '' < any folder name), then by filename within each
+    // group -- a flat sort on the full path interleaves root files with
+    // subfolder ones alphabetically, which reads as a jumble.
+    visible=[...visible].sort((a,b)=>{{
+      const da=splitDir(a.name), db=splitDir(b.name);
+      return (a.source||'').localeCompare(b.source||'') || da.dir.localeCompare(db.dir) || da.file.localeCompare(db.file);
+    }});
+  }}
+  return visible;
+}}
+
+function renderWf() {{
+  const container=document.getElementById('wf-list');
+  const visibleWf=getVisibleWfList();
+  const hasSel=highlightedWfs.size>0;
+
   document.getElementById('cnt-si').textContent='('+SI_WF.length+')';
-  document.getElementById('cnt-yr').textContent='('+YR_WF.length+')';
   document.getElementById('cnt-all').textContent='('+ALL_WF.length+')';
-  const colder=document.getElementById('cnt-older');
-  if(colder) colder.textContent='('+OLDER_WF.length+')';
   const cpng=document.getElementById('cnt-png');
   if(cpng) cpng.textContent='('+PNG_WF.length+')';
-  const cpwf=document.getElementById('cnt-pwf');
-  if(cpwf) cpwf.textContent='('+PRUNE_WF.length+')';
 
-  if(!filtered.length){{container.innerHTML='<div class="empty">No workflows match</div>';return;}}
-  const hasSel=highlightedWfs.size>0;
-  const visibleWf=showOnlyWf&&hasSel?filtered.filter(wf=>highlightedWfs.has(wf.name||wf.key)||selectedWf===wf.key):filtered;
+  if(!visibleWf.length){{
+    const msg = (wfShowFilter==='selmodel' && !selectedModel) ? 'Select a model to see its workflows' : 'No workflows match';
+    container.innerHTML='<div class="empty">'+msg+'</div>';
+    return;
+  }}
+  let prevSrc=null;
   const wfFiltered=visibleWf; container.innerHTML=visibleWf.map((wf,i)=>{{
+    let header='';
+    if(wfSort==='name' && wf.source!==prevSrc) {{
+      header='<div class="group-header">'+sourceLabel(wf.source)+'</div>';
+      prevSrc=wf.source;
+    }}
     const isSel=selectedWf===wf.key;
     const isHi=highlightedWfs.has(wf.name||wf.key);
     const isDim=hasSel&&!isHi&&!isSel&&!showOnlyWf;
@@ -1557,25 +2042,37 @@ function renderWf() {{
     const dots=wf.hs?'<div class="host-dots">'+hostDots(wf.hs,false)+'</div>':'';
     const mcount=wf.models?'<span class="item-meta">'+wf.models.length+'m</span>':'';
     const meta=wf.modified?'<span class="item-meta">'+wf.modified+'</span>':'';
-    const prune=wfTab==='pwf'&&wf.reason?'<span class="prune-reason">'+wf.reason+'</span>':'';
-    return '<div class="'+cls+'" data-idx="'+i+'" onclick="handleWfClick(this)">'
-      +dots+'<span class="item-name" title="'+wf.name+'">'+wf.name+'</span>'+mcount+meta+prune+'</div>';
+    const {{dir,file}}=splitDir(wf.name);
+    const dirSpan='<span class="item-dir" title="'+(dir||'0ComfyUI/output')+'">'+dir+'</span>';
+    const srcTag='<span class="cat-tag" title="'+sourceLabel(wf.source)+'">'+sourceBadge(wf.source)+'</span>';
+    return header+'<div class="'+cls+'" data-idx="'+i+'" onclick="handleWfClick(this)">'
+      +dots+srcTag+dirSpan+'<span class="item-name" title="'+wf.name+'">'+file+'</span>'+mcount+meta+'</div>';
   }}).join('');
+}}
+
+function sourceLabel(src) {{
+  return {{'workflows':'Workflows','workflows-png':'Workflow PNGs',
+           'starting_images':'Starting Images','png-outputs':'PNG Outputs'}}[src] || src || 'Other';
+}}
+function sourceBadge(src) {{
+  return {{'workflows':'WF','workflows-png':'WF-PNG',
+           'starting_images':'SI','png-outputs':'PNG'}}[src] || '?';
 }}
 
 function renderModels() {{
   const container=document.getElementById('model-list');
-  const src=modelTab==='prune'?PRUNE_M:MODELS;
-  const filtered=src.filter(m=>{{
+  const filtered=MODELS.filter(m=>{{
     if(!modelMatchesFilter(m)) return false;
     if(searchTerm&&!m.filename.toLowerCase().includes(searchTerm)&&!(m.category||'').toLowerCase().includes(searchTerm)) return false;
     return true;
   }});
   document.getElementById('cnt-mall').textContent='('+MODELS.length+')';
-  const cmpm=document.getElementById('cnt-mpm');
-  if(cmpm) cmpm.textContent='('+PRUNE_M.length+')';
 
-  if(!filtered.length){{container.innerHTML='<div class="empty">No models match</div>';return;}}
+  if(!filtered.length){{
+    const msg = (modelFilter==='selwf' && !selectedWf) ? 'Select a workflow to see its models' : 'No models match';
+    container.innerHTML='<div class="empty">'+msg+'</div>';
+    return;
+  }}
   const hasSel=highlightedModels.size>0;
   const visibleMod=showOnlyModel&&hasSel?filtered.filter(m=>highlightedModels.has(m.key)||selectedModel===m.key):filtered;
   const modFiltered=visibleMod; container.innerHTML=visibleMod.map((m,i)=>{{
@@ -1583,20 +2080,19 @@ function renderModels() {{
     const isHi=highlightedModels.has(m.key);
     const isDim=hasSel&&!isHi&&!isSel&&!showOnlyModel;
     let cls='item'+(isSel?' selected':isHi?' highlighted':isDim?' dimmed':'');
-    const dots='<div class="host-dots">'+hostDots(m.on_hosts,true)+'</div>';
+    const dots='<div class="host-dots">'+hostDots(m.on_hosts,true,m.rename_hint)+'</div>';
     const size=m.size_gb?'<span class="item-size">'+m.size_gb.toFixed(1)+'GB</span>':'';
     const cat=m.category?'<span class="cat-tag">'+m.category+'</span>':'';
     const wfc='<span class="item-meta">'+(m.wf_count||(m.workflows||[]).length)+'wf</span>';
-    const prune=modelTab==='prune'&&m.reason?'<span class="prune-badge">prune</span>':'';
     return '<div class="'+cls+'" data-idx="'+i+'" onclick="handleModelClick(this)">'
-      +dots+cat+'<span class="item-name" title="'+m.filename+'">'+m.filename+'</span>'+wfc+size+prune+'</div>';
+      +dots+cat+'<span class="item-name" title="'+m.filename+'">'+m.filename+'</span>'+wfc+size+'</div>';
   }}).join('');
 }}
 
 function selectWf(wfKey,wfName) {{
   if(selectedWf===wfKey){{clearSelection();return;}}
   selectedWf=wfKey; selectedModel=null;
-  const all=[...SI_WF,...YR_WF,...ALL_WF,...PNG_WF];
+  const all=ALL_WF;
   const wf=all.find(w=>w.key===wfKey);
   if(!wf) return;
   highlightedModels=new Set(wf.models||[]);
@@ -1634,8 +2130,6 @@ renderWf(); renderModels();
   <h1>⚡ Fleet Explorer</h1>
   <span class="ts">{timestamp}</span>
   <input class="search-box" id="globalSearch" placeholder="Search models or workflows..." oninput="applySearch()">
-  <button class="mode-btn active" id="normalBtn" onclick="setMode('normal')">Normal</button>
-  <button class="mode-btn" id="pruneBtn" onclick="setMode('prune')">🔪 Pruning Mode</button>
   <button class="clear-btn" onclick="clearSelection()">Clear</button>
 </div>
 <div class="main">
@@ -1644,20 +2138,42 @@ renderWf(); renderModels();
       <h2>WORKFLOWS</h2>
       <div class="tabs">
         <button class="tab" id="tab-si" onclick="switchTab('si')">Starting Images <span id="cnt-si"></span></button>
-        <button class="tab" id="tab-yr" onclick="switchTab('yr')">{year_filter} <span id="cnt-yr"></span></button>
-        <button class="tab" id="tab-older" onclick="switchTab('older')">Older <span id="cnt-older"></span></button>
         <button class="tab" id="tab-png" onclick="switchTab('png')">PNG Outputs <span id="cnt-png"></span></button>
         <button class="tab active" id="tab-all" onclick="switchTab('all')">All <span id="cnt-all"></span></button>
-        <button class="tab" id="tab-pwf" onclick="switchTab('pwf')" style="display:none">🔪 Prune <span id="cnt-pwf"></span></button>
       </div>
+    </div>
+    <div class="filters">
+      <span class="filter-label">Show:</span>
+      <button class="filter-chip active" id="fwfshow-all" onclick="setWfShowFilter('all')">All</button>
+      <button class="filter-chip" id="fwfshow-selmodel" onclick="setWfShowFilter('selmodel')">Selected Model</button>
+    </div>
+    <div class="filters">
+      <span class="filter-label">Status:</span>
+      <button class="filter-chip active" id="fst-all" onclick="setStatusFilter('all')">All</button>
+      <button class="filter-chip" id="fst-notready" onclick="setStatusFilter('notready')">Not Ready</button>
+      <button class="filter-chip" id="fst-verify" onclick="setStatusFilter('verify')">Needs Verification</button>
+      <button class="filter-chip" id="fst-ready" onclick="setStatusFilter('ready')">Ready</button>
     </div>
     <div class="filters">
       <span class="filter-label">Machine:</span>
       <button class="filter-chip active" id="fwf-all" onclick="setWfFilter('all')">All</button>
+      <button class="filter-chip" id="fwf-bare" onclick="setWfFilter('bare')">(bare)</button>
       <button class="filter-chip" id="fwf-tb" onclick="setWfFilter('tb')">(tb)</button>
       <button class="filter-chip" id="fwf-c" onclick="setWfFilter('c')">(c)</button>
-      <button class="filter-chip" id="fwf-i" onclick="setWfFilter('i')">(i)</button>
+      <button class="filter-chip" id="fwf-i" onclick="setWfFilter('i')">(ib)</button>
       <button class="filter-chip" id="fwf-none" onclick="setWfFilter('none')">no tag</button>
+    </div>
+    <div class="filters">
+      <span class="filter-label">Location:</span>
+      <button class="filter-chip active" id="floc-all" onclick="setLocFilter('all')">All</button>
+      <button class="filter-chip" id="floc-root" onclick="setLocFilter('root')">Root Only</button>
+      <span class="filter-label" style="margin-left:14px">Recency:</span>
+      <button class="filter-chip active" id="frec-all" onclick="setRecentFilter('all')">All</button>
+      <button class="filter-chip" id="frec-recent" onclick="setRecentFilter('recent')">Last 3 Months</button>
+      <button class="filter-chip" id="frec-older" onclick="setRecentFilter('older')">Older</button>
+      <span class="filter-label" style="margin-left:14px">Sort:</span>
+      <button class="filter-chip active" id="fsort-name" onclick="setWfSort('name')">Name</button>
+      <button class="filter-chip" id="fsort-date" onclick="setWfSort('date')">Date</button>
     </div>
     <div class="list-container" id="wf-list"></div>
     <div class="info-bar" style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span id="wf-info">Click a workflow to see its models</span><button id="toggleWf" class="filter-chip" onclick="toggleShowOnlyWf()">Show Only</button></div>
@@ -1667,40 +2183,19 @@ renderWf(); renderModels();
       <h2>MODELS</h2>
       <div class="tabs">
         <button class="tab active" id="tab-mall" onclick="switchModelTab('all')">All <span id="cnt-mall"></span></button>
-        <button class="tab" id="tab-mpm" onclick="switchModelTab('prune')" style="display:none">🔪 Prune <span id="cnt-mpm"></span></button>
       </div>
     </div>
     <div class="filters">
       <span class="filter-label">Show:</span>
       <button class="filter-chip active" id="fmod-all" onclick="setModelFilter('all')">All</button>
+      <button class="filter-chip" id="fmod-selwf" onclick="setModelFilter('selwf')">Selected Workflow</button>
       <button class="filter-chip" id="fmod-nowf" onclick="setModelFilter('nowf')">No Workflows</button>
-      <button class="filter-chip" id="fmod-img" onclick="setModelFilter('img')">On IMG</button>
-      <button class="filter-chip" id="fmod-missingimg" onclick="setModelFilter('missingimg')">Missing IMG</button>
-      <button class="filter-chip" id="fmod-chat" onclick="setModelFilter('chat')">On Chat</button>
-      <button class="filter-chip" id="fmod-missingchat" onclick="setModelFilter('missingchat')">Missing Chat</button>
-      <button class="filter-chip" id="fmod-travel" onclick="setModelFilter('travel')">On Travel</button>
-      <button class="filter-chip" id="fmod-missing" onclick="setModelFilter('missing')">Missing Travel</button>
-    </div>
-    <div class="filters" id="type-filters">
-      <span class="filter-label">Type:</span>
-      <button class="filter-chip active" id="ftype-all" onclick="setTypeFilter('all')">All</button>
-      <button class="filter-chip" id="ftype-safetensors" onclick="setTypeFilter('safetensors')">.safetensors</button>
-      <button class="filter-chip" id="ftype-gguf" onclick="setTypeFilter('gguf')">.gguf</button>
-      <button class="filter-chip" id="ftype-pth" onclick="setTypeFilter('pth')">.pth/.pt</button>
-      <button class="filter-chip" id="ftype-bin" onclick="setTypeFilter('bin')">.bin</button>
-      <button class="filter-chip" id="ftype-ckpt" onclick="setTypeFilter('ckpt')">.ckpt</button>
-    </div>
-    <div class="filters" id="cat-filters">
-      <span class="filter-label">Category:</span>
-      <button class="filter-chip active" id="fcat-all" onclick="setCatFilter('all')">All</button>
-      <button class="filter-chip" id="fcat-checkpoints" onclick="setCatFilter('checkpoints')">ckpt</button>
-      <button class="filter-chip" id="fcat-diffusion" onclick="setCatFilter('diffusion')">diffusion</button>
-      <button class="filter-chip" id="fcat-loras" onclick="setCatFilter('loras')">lora</button>
-      <button class="filter-chip" id="fcat-text_encoders" onclick="setCatFilter('text_encoders')">txt enc</button>
-      <button class="filter-chip" id="fcat-vae" onclick="setCatFilter('vae')">vae</button>
-      <button class="filter-chip" id="fcat-upscale" onclick="setCatFilter('upscale')">upscale</button>
-      <button class="filter-chip" id="fcat-controlnet" onclick="setCatFilter('controlnet')">cnet</button>
-      <button class="filter-chip" id="fcat-other" onclick="setCatFilter('other')">other</button>
+      <button class="filter-chip" id="fmod-img" onclick="setModelFilter('img')">On ib</button>
+      <button class="filter-chip" id="fmod-missingimg" onclick="setModelFilter('missingimg')">Missing ib</button>
+      <button class="filter-chip" id="fmod-chat" onclick="setModelFilter('chat')">On c</button>
+      <button class="filter-chip" id="fmod-missingchat" onclick="setModelFilter('missingchat')">Missing c</button>
+      <button class="filter-chip" id="fmod-travel" onclick="setModelFilter('travel')">On tb</button>
+      <button class="filter-chip" id="fmod-missing" onclick="setModelFilter('missing')">Missing tb</button>
     </div>
     <div class="list-container" id="model-list"></div>
     <div class="info-bar" style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span id="model-info">Click a model to see its workflows</span><button id="toggleModel" class="filter-chip" onclick="toggleShowOnlyModel()">Show Only</button></div>
@@ -1718,6 +2213,12 @@ def main():
     parser = argparse.ArgumentParser(description="ComfyUI Fleet Analysis")
     parser.add_argument("--config", default=None, help="Path to fleet_config.json")
     parser.add_argument("--year",   default=None, help="Override workflow year filter")
+    parser.add_argument("--prune-output", action="store_true",
+                         help="List fleet-output/history files beyond the retention window (dry run unless --confirm-prune)")
+    parser.add_argument("--confirm-prune", action="store_true",
+                         help="Actually delete the files --prune-output lists (no effect without --prune-output)")
+    parser.add_argument("--keep-runs", type=int, default=3,
+                         help="Number of most recent runs to retain when pruning (default 3)")
     args = parser.parse_args()
 
     # Find config - check: explicit arg, CWD, then script directory
@@ -1746,6 +2247,10 @@ def main():
 
     output_dir.mkdir(parents=True, exist_ok=True)
     history_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.prune_output:
+        prune_outputs(output_dir, history_dir, reports_dir, args.keep_runs, args.confirm_prune)
+        return
 
     print(f"\nReports dir : {reports_dir}")
     print(f"Output dir  : {output_dir}")
@@ -1817,13 +2322,23 @@ def main():
         missing_keys = set()
         for hostname in hostnames_in_group:
             machine = data[hostname]
+            # Family index of what's actually on this machine's disk, so a
+            # model that's only "missing" under its exact filename -- but
+            # present as a same-family rename/requant -- doesn't generate an
+            # unnecessary multi-GB robocopy line. Same fuzzy-match logic as
+            # the report's coverage tables and the explorer's dots.
+            family_idx = defaultdict(list)
+            for mfn, mrow in machine["models"].items():
+                family_idx[base_family(mfn)].append(mrow.get("filename", mfn))
             for fn_lower in wf_data:
                 if fn_lower not in machine["models"] and fn_lower in source_models:
+                    if family_idx.get(base_family(fn_lower)):
+                        continue  # likely just a rename/requant already on disk, not a real gap
                     # Only check source machine workflow names — other machines
                     # share the same workflow folder so their sets are redundant,
                     # and mixing them would dilute the (i) filter.
                     source_wf_names = wf_data[fn_lower]["workflows"].get(source_host, set())
-                    has_non_i = any("(i)" not in wf.lower() for wf in source_wf_names)
+                    has_non_i = any(machine_tag(wf) != "ib" for wf in source_wf_names)
                     if has_non_i:
                         missing_keys.add(fn_lower)
 
@@ -1893,7 +2408,8 @@ def main():
 
     # Prime workflow coverage analysis
     prime_scan     = scan_prime_workflows(config)
-    prime_coverage = analyze_prime_coverage(data, prime_scan, config)
+    output_evidence = build_output_evidence_set(data)
+    prime_coverage = analyze_prime_coverage(data, prime_scan, config, output_evidence)
     if prime_scan:
         print(f"Current year workflows scanned: {prime_scan['json_count']} JSON, {prime_scan['png_count']} PNG  ({len(prime_scan['prime_models'])} unique model refs)")
     else:
@@ -1906,6 +2422,9 @@ def main():
         print(f"Starting Images: {si_scan['png_count']} PNGs, {len(si_scan.get('models', set()))} unique model refs")
     else:
         print("Starting Images: no source=starting_images rows found — re-run fleet scans on Windows machines")
+
+    # Output-based model usage (what's actually been produced, not just referenced)
+    output_usage = analyze_output_usage(data, year_filter)
 
     # Build actions
     report_data = {
@@ -1921,8 +2440,9 @@ def main():
         "prime_scan":       prime_scan,
         "si_coverage":      si_coverage,
         "si_scan":          si_scan,
+        "output_usage":     output_usage,
     }
-    report_data["actions"] = build_actions(gaps, readiness, drift, nodes_data)
+    report_data["actions"] = build_actions(gaps, readiness, drift, nodes_data, config, data)
 
     # --- Write outputs ---
 
@@ -2010,14 +2530,26 @@ def main():
         total_prime = len(prime_scan.get("prime_models", set()))
         summary_lines.append(f"  Prime models referenced: {total_prime}")
         for hostname, cov in prime_coverage.items():
-            confirmed = cov["confirmed"]
-            missing   = cov["missing"]
-            beyond    = cov["beyond"]
+            confirmed         = cov["confirmed"]
+            beyond            = cov["beyond"]
+            likely_rename     = cov.get("likely_rename", [])
+            confirmed_missing = cov.get("confirmed_missing", [])
+            no_evidence       = cov.get("no_evidence", [])
             total_beyond_gb = sum(b["size_gb"] for b in beyond)
             summary_lines.append(f"  {hostname}:")
-            summary_lines.append(f"    Confirmed: {len(confirmed)}  Missing: {len(missing)}  Beyond: {len(beyond)} ({total_beyond_gb:.2f} GB)")
-            for m in missing:
-                summary_lines.append(f"    !! MISSING: {m}")
+            summary_lines.append(
+                f"    Confirmed: {len(confirmed)}  "
+                f"Missing(evidenced): {len(confirmed_missing)}  "
+                f"Likely renamed: {len(likely_rename)}  "
+                f"Unconfirmed: {len(no_evidence)}  "
+                f"Beyond: {len(beyond)} ({total_beyond_gb:.2f} GB)"
+            )
+            for m in confirmed_missing:
+                summary_lines.append(f"    !! MISSING (evidenced): {m}")
+            for r in likely_rename:
+                summary_lines.append(f"    ~~ likely renamed: {r['missing']}  ->  {', '.join(r['matches'])}")
+            for m in no_evidence:
+                summary_lines.append(f"    ?? unconfirmed (no output evidence): {m}")
 
     if si_coverage and si_scan and si_scan.get("png_count", 0) > 0:
         summary_lines.append("")
@@ -2033,6 +2565,33 @@ def main():
             summary_lines.append(f"  {hostname}: {status}  ({len(confirmed)} present, {len(missing)} missing, {len(beyond)} beyond/{total_beyond_gb:.2f}GB)")
             for m in missing:
                 summary_lines.append(f"    !! MISSING: {m}")
+
+    if output_usage:
+        summary_lines.append("")
+        summary_lines.append("MODEL USAGE — BY ACTUAL OUTPUT")
+        summary_lines.append("-" * 60)
+        for hostname, u in output_usage.items():
+            if not u.get("has_output_data"):
+                continue
+            never  = u["never_this_year"]
+            stale  = u["stale"]
+            recent = u.get("recent", [])
+            sdays  = u["stale_days"]
+            never_gb  = sum(m["size_gb"] for m in never)
+            stale_gb  = sum(m["size_gb"] for m in stale)
+            recent_gb = sum(m["size_gb"] for m in recent)
+            stale_had_output = [m for m in stale if m["last_used"] != "never"]
+            stale_never       = [m for m in stale if m["last_used"] == "never"]
+            summary_lines.append(f"  {hostname}:")
+            summary_lines.append(f"    Used in last {sdays} days: {len(recent)} models ({recent_gb:.2f} GB)")
+            summary_lines.append(f"    No {year_filter} output: {len(never)} models ({never_gb:.2f} GB)")
+            summary_lines.append(f"    No output in {sdays}+ days: {len(stale)} models ({stale_gb:.2f} GB)")
+            summary_lines.append(f"      -- used earlier, gone quiet: {len(stale_had_output)} models ({sum(m['size_gb'] for m in stale_had_output):.2f} GB)")
+            for m in [x for x in stale_had_output if x["size_gb"] >= 1.0][:10]:
+                summary_lines.append(f"      {m['size_gb']:>7.2f} GB  {m['filename']}  (last: {m['last_used']})")
+            summary_lines.append(f"      -- no output ever seen: {len(stale_never)} models ({sum(m['size_gb'] for m in stale_never):.2f} GB)")
+            for m in [x for x in stale_never if x["size_gb"] >= 1.0][:10]:
+                summary_lines.append(f"      {m['size_gb']:>7.2f} GB  {m['filename']}")
 
     if subdir_mismatches:
         summary_lines.append("")

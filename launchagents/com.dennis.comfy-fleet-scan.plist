@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dennis.comfy-fleet-scan</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/dennishmathes/repos/scripts/comfyui/scheduled_scan.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/dennishmathes/repos/scripts/comfyui</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>5</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <false/>
+
+    <!-- Same fix as mmm-plex-backup / mmm-nightly-summary: a background
+         launchd agent (no RunAtLoad+KeepAlive) doing network I/O -- here,
+         SSH to 3 Windows machines over Tailscale -- gets throttled by
+         macOS and can hang/timeout, even though the identical script runs
+         fine interactively. ProcessType Interactive avoids that. -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/dennishmathes/Library/Logs/comfy_fleet_scan.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dennishmathes/Library/Logs/comfy_fleet_scan.log</string>
+</dict>
+</plist>

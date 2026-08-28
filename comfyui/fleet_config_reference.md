@@ -114,6 +114,51 @@ Can also be overridden at runtime without editing the file:
 
 ---
 
+## priority_custom_nodes
+
+```json
+"priority_custom_nodes": [
+    "comfyui-qwenvl",
+    "comfyui_ipadapter_plus",
+    "was-ns",
+    "vantage-dreamomni2",
+    "comfyui_layerstyle",
+    "comfyui-advancedliveportrait"
+]
+```
+
+Custom nodes considered high-value. If any of these are missing on TravelBeast,
+`comfy_fleet.py` surfaces a "Next Action" telling you to install them via ComfyUI
+Manager. Matched against the lowercased node folder name.
+
+**Change if:** you start relying on a different node package while traveling, or
+stop needing one on this list.
+
+**Why each one is on the list** (from an earlier manual TravelBeast node audit):
+
+| Node | Why it matters for travel |
+|------|---------------------------|
+| `comfyui-qwenvl` | Qwen Vision Language model nodes — used heavily |
+| `comfyui_ipadapter_plus` | IPAdapter face/style transfer — needed for ipadapter workflows |
+| `was-ns` | WAS Node Suite — huge utility pack used in many older workflows |
+| `vantage-dreamomni2` | DreamOmni2 image editing nodes |
+| `comfyui_layerstyle` | Layer compositing, masks, blend modes |
+| `comfyui-advancedliveportrait` | Animates portraits / face reenactment |
+
+Other nodes considered and deliberately left off this list (present at the time
+of the audit but judged niche/skip-for-travel): `comfyui-art-venture`,
+`comfyui-crystools`, `comfyui-esesimagecompare`, `comfyui-joycaption`,
+`cocotools_io`, `comfyui-csv-loader`, `comfyui-grounding`, `comfyui-image-compare`,
+`comfyui-imgloader`, `comfyui-inpaint-nodes` (overlaps `impact-pack`),
+`comfyui-lmstudio-image-to-text-node`, `comfyui-resolution-master`, `comfyui-tbox`,
+`comfyui-ultralytics-yolo`, `comfyui-wd14-tagger`, `comfyui_qwen3-vl-instruct`,
+`comfyui_segment_anything` (overlaps `impact-pack`), `comfyui_swwan`,
+`comfyui_tinyterranodes`, `comfyui_wordcloud`, `panorama-stickers`, `res4lyf`,
+`seedvarianceenhancer`, `zhihui_nodes_comfyui`. Revisit this list if travel
+workflows start depending on one of them.
+
+---
+
 ## sync
 
 ```json
@@ -143,9 +188,13 @@ Used to build the robocopy scripts.
 1. Add a new entry under `machines` with the correct hostname
 2. Set `vram_gb`, `is_source: false`, `models_bare` path, `sync_group`
 3. If it shares Models_bare with existing machines, give it the same `sync_group` value
-4. Create a new `Run-FleetScan-NEWMACHINE.bat` and deploy it
-5. Run the fleet scan on the new machine
-6. Run `comfy_fleet.sh` — it will auto-discover the new machine's reports
+4. Create a new `Run-FleetScan-NEWMACHINE.bat` and deploy it to `C:\repos\scripts\comfyui\`
+   on that machine (for RDP/manual use)
+5. Add an SSH host block for it in `~/.ssh/config` (Tailscale hostname) and a matching
+   case in `~/repos/scripts/comfyui/remote_scan.sh`'s `scan_host()` — same params as
+   the `.bat` file, plus an alias in the top-level arg parsing if you want a short one
+6. Run `comfy_fleet.sh` (or `comfy_fleet.sh NEWMACHINE`) — it will SSH-scan the new
+   machine and `comfy_fleet.py` will auto-discover its reports
 
 ---
 

@@ -45,14 +45,17 @@ FLEET_ONLY="com.dennis.heartbeat-writer com.dennis.fleet-metrics-server"
 # directly on mmm, separate from the live one on mb (different host, same port,
 # no conflict). Same plist as mb's — see launchagents/README.md.
 MMM_ONLY="$FLEET_ONLY com.dennis.mmm-plex-backup com.dennis.mmm-nightly-summary com.dennis.mmm-health-monitor com.dennis.tmdb-explorer"
-ALL_AGENTS="com.dennis.search-adv-web com.dennis.search-shows-web com.dennis.travel-http $MMM_ONLY"
+ALL_AGENTS="com.dennis.search-adv-web com.dennis.search-shows-web com.dennis.travel-http com.dennis.comfy-fleet-http com.dennis.comfy-fleet-scan $MMM_ONLY"
 
 RAW_HOST="$(scutil --get ComputerName 2>/dev/null || hostname -s)"
-# Normalize: lowercase, spaces -> hyphens. Not every Mac has been renamed to
-# match its Tailscale name exactly (e.g. mmm's ComputerName is "Mathes Mac
-# mini", not "mathes-mac-mini") — match on the normalized form instead of
-# requiring an exact rename everywhere.
-HOST="$(echo "$RAW_HOST" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')"
+# Normalize: strip apostrophes (straight ' and curly macOS default '),
+# lowercase, spaces -> hyphens. Not every Mac has been renamed to match its
+# Tailscale name exactly (e.g. mmm's ComputerName is "Mathes Mac mini", not
+# "mathes-mac-mini", and mb's default ComputerName is "Dennis's MacBook
+# Air" with a curly apostrophe that a plain space/case normalization
+# doesn't remove) — match on the normalized form instead of requiring an
+# exact rename everywhere.
+HOST="$(echo "$RAW_HOST" | sed "s/['’]//g" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')"
 case "$HOST" in
     denniss-macbook-air)
         LABELS="$ALL_AGENTS" ;;
