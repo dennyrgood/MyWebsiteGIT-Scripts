@@ -38,6 +38,15 @@ LAST_SEEN_MAX_H=24          # hours since s3g last seen before this is a failure
 # Raise it only if a genuine import is repeatedly tripping it.
 BACKLOG_MAX_DAYS=3
 
+# s3g runs verify-restic-integrity-scheduled.ps1 monthly and publishes the
+# result through fleet_metrics_server.py, whose allowlist already accepts
+# watchdog_*.json. That check re-hashes a rotating twelfth of the repo against
+# each file's own content-addressed name -- the only way to detect rot on the
+# far disk, since Syncthing re-hashes only files whose size or mtime changed
+# and would report 100% forever while a bit quietly flipped.
+GC_VERIFY_URL="http://100.72.84.84:9100/watchdog_restic-offsite_surface3-gc.json"
+GC_VERIFY_MAX_DAYS=45       # monthly cadence, with margin for one missed run
+
 SUCCESS_MARKER="SYNCTHING OFFSITE OK"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$LOG"; }
@@ -151,6 +160,7 @@ if [ -r "$STATE" ]; then
     # exists and is briefly behind. Same number, very different exposure.
     FIRST_COMPLETE=$(grep -oP '(?<=^FIRST_COMPLETE=).*' "$STATE" 2>/dev/null | head -1)
     LAST_COMPLETE=$(grep -oP '(?<=^LAST_COMPLETE=).*' "$STATE" 2>/dev/null | head -1)
+    GC_SEEN=$(grep -oP '(?<=^GC_SEEN=).*' "$STATE" 2>/dev/null | head -1)
 fi
 
 NOW_EPOCH=$(date -u +%s)
@@ -182,10 +192,65 @@ if [ "$NEED" -gt 0 ] && [ -n "$PREV_NEED" ] && [ -n "$PREV_AT" ]; then
     fi
 fi
 
+# --- s3g's own integrity report ----------------------------------------------
+# Reported, and allowed to fail the check, only once it has been seen at least
+# once. Before that this is simply not deployed yet, and failing on its absence
+# would make the check red until the Task Scheduler entry exists.
+GC_TXT=""
+GC_JSON=$(curl -sf --max-time 15 "$GC_VERIFY_URL" 2>/dev/null) || GC_JSON=""
+
+if [ -n "$GC_JSON" ]; then
+    GC_PARSED=$(printf '%s' "$GC_JSON" | python3 -c "
+import sys,json,datetime
+d=json.load(sys.stdin)
+print('true' if d.get('ok') else 'false')
+print(d.get('mismatches',0))
+print(d.get('unreadable',0))
+print(d.get('files_checked',0))
+print(d.get('bucket','?'))
+fin=d.get('finished_utc')
+if fin:
+    t=datetime.datetime.strptime(fin,'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
+    print(round((datetime.datetime.now(datetime.timezone.utc)-t).total_seconds()/86400,1))
+else:
+    print(-1)
+" 2>/dev/null) || GC_PARSED=""
+
+    if [ -n "$GC_PARSED" ]; then
+        GC_OK=$(echo "$GC_PARSED"   | sed -n 1p)
+        GC_BAD=$(echo "$GC_PARSED"  | sed -n 2p)
+        GC_UNRD=$(echo "$GC_PARSED" | sed -n 3p)
+        GC_N=$(echo "$GC_PARSED"    | sed -n 4p)
+        GC_BKT=$(echo "$GC_PARSED"  | sed -n 5p)
+        GC_AGE=$(echo "$GC_PARSED"  | sed -n 6p)
+        log "s3g self-check: ok=$GC_OK checked=$GC_N bucket=$GC_BKT bad=$GC_BAD unreadable=$GC_UNRD age=${GC_AGE}d"
+        GC_SEEN="yes"
+        GC_TXT=", GC verify ${GC_N} files/${GC_BAD} bad [${GC_AGE}d]"
+
+        [ "$GC_OK" = "true" ] || die "s3g reports its copy of the repo is damaged: $GC_BAD corrupt, $GC_UNRD unreadable"
+        if awk -v a="$GC_AGE" -v m="$GC_VERIFY_MAX_DAYS" 'BEGIN{exit !(a>m)}'; then
+            die "s3g self-check is ${GC_AGE} days old (threshold ${GC_VERIFY_MAX_DAYS}) -- has the scheduled task stopped?"
+        fi
+    else
+        log "WARNING: s3g published a self-check that could not be parsed"
+    fi
+elif [ "${GC_SEEN:-}" = "yes" ]; then
+    # It reported before and now does not. That is a regression, not an
+    # absence: the task was removed, the metrics server is down, or the box is
+    # unreachable -- all worth knowing.
+    die "s3g self-check has stopped reporting (was previously present at $GC_VERIFY_URL)"
+else
+    log "s3g self-check: not reporting yet (verify-restic-integrity-scheduled.ps1 not deployed)"
+fi
+
+# State is written HERE, not earlier: GC_SEEN is set by the s3g block above,
+# and writing before it meant "have we ever seen a report from s3g" never
+# persisted -- so a check that stopped reporting would look like one that had
+# never started.
 mkdir -p "$(dirname "$STATE")"
-printf 'NEED=%s\nAT=%s\nBACKLOG_SINCE=%s\nFIRST_COMPLETE=%s\nLAST_COMPLETE=%s\n' \
+printf 'NEED=%s\nAT=%s\nBACKLOG_SINCE=%s\nFIRST_COMPLETE=%s\nLAST_COMPLETE=%s\nGC_SEEN=%s\n' \
     "$NEED" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BACKLOG_SINCE" \
-    "$FIRST_COMPLETE" "$LAST_COMPLETE" > "$STATE"
+    "$FIRST_COMPLETE" "$LAST_COMPLETE" "${GC_SEEN:-}" > "$STATE"
 
 # --- verdict -----------------------------------------------------------------
 [ "$FERRORS" -eq 0 ] 2>/dev/null || die "folder reports $FERRORS error(s)"
@@ -216,7 +281,7 @@ fi
 # copy actually exists, an hourglass while one is still being built.
 if [ "$NEED" -eq 0 ]; then
     log "off-site copy is fully up to date"
-    log "$SUCCESS_MARKER [current] (100%, up to date)"
+    log "$SUCCESS_MARKER [current] (100%, up to date${GC_TXT})"
 elif [ -z "$FIRST_COMPLETE" ]; then
     log "INITIAL SEED still running — no complete off-site copy exists yet"
     log "$SUCCESS_MARKER [seeding] (${PCT}%, ${NEED_GB}GiB outstanding${ETA_TXT} — no complete copy yet)"
