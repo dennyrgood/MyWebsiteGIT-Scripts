@@ -23,20 +23,33 @@
 # reuses, just on a timer instead of at-startup). Safe to run when healthy -
 # does nothing in that case beyond the once-a-day alive ping.
 #
+# 2026-08-28: logs into the SAME shared watchdog_remotews.log that
+# FleetMetricsWatchdog.ps1 already writes to (not a separate file) - the
+# fleet dashboard's existing "WATCHDOG" button/badges already fetch and
+# parse that exact file via fleet_api.py's /api/watchdog/<host> endpoint
+# (see Status/Web/ST/tiles.html), and "remotews" is already in its host
+# list. Piggybacking on it means this shows up on the dashboard with no
+# server or dashboard changes - just prefix every line with "[JumpConnect]"
+# so it stays distinguishable from FleetMetricsWatchdog's own lines. The
+# dashboard's parser treats any line containing "fail" (case-insensitive)
+# as an issue and anything else recent as reassuring activity - the prefix
+# doesn't interfere with either check, both are substring matches.
+#
 # ASCII only - PowerShell 5.1 has no BOM handling and mis-decodes non-ASCII.
 
 $ErrorActionPreference = "Stop"
 
 $ServiceName = "JumpConnect"
+$LogTag = "[JumpConnect]"
 $LogDir = "C:\fleet_monitor"
-$LogFile = Join-Path $LogDir "jumpconnect_watchdog_remotews.log"
+$LogFile = Join-Path $LogDir "watchdog_remotews.log"
 $AliveMarkerFile = Join-Path $LogDir ".jumpconnect_watchdog_remotews.alive"
 $PostActionWaitSeconds = 8
 
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null }
 
 function Log($msg) {
-    $line = "$(Get-Date -Format o) $msg"
+    $line = "$(Get-Date -Format o) $LogTag $msg"
     Write-Output $line
     Add-Content -Path $LogFile -Value $line
 }
