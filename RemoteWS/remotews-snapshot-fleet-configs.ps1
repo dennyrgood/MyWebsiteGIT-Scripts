@@ -17,6 +17,9 @@
 # 2026-08-25: added jump[-_ ]?connect to also pick up "JumpConnect Watchdog" (runs
 # jumpconnect-watchdog.ps1 as SYSTEM every 5 min - see RemoteWS/jumpconnect-watchdog.ps1).
 #
+# 2026-08-28: added tailscale[-_ ]?watchdog to also pick up "Tailscale Watchdog" (runs
+# tailscale-watchdog.ps1 as SYSTEM every 5 min - see RemoteWS/tailscale-watchdog.ps1).
+#
 # Hardened: one stale or protected task never aborts the run. Do NOT set
 # $ErrorActionPreference='Stop' (it turns schtasks' stderr into a terminating error);
 # each export checks $LASTEXITCODE and is wrapped.
@@ -33,7 +36,7 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 $wanted = [System.Collections.Generic.List[string]]::new()
 Get-ChildItem $dest -Filter *.xml -ErrorAction SilentlyContinue | ForEach-Object { $wanted.Add($_.BaseName) }
 Get-ScheduledTask | Where-Object {
-    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat[-_ ]?writer|run[-_ ]?hidden|watchdog|power[-_ ]?heartbeat'
+    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat[-_ ]?writer|run[-_ ]?hidden|watchdog|power[-_ ]?heartbeat|tailscale[-_ ]?watchdog'
 } | ForEach-Object { $wanted.Add($_.TaskName) }
 $wanted = @($wanted | Select-Object -Unique)
 
