@@ -30,6 +30,19 @@
 
 set -u
 
+# --fix re-runs the same comparison WITHOUT -n, so mismatched files are
+# actually re-sent. Deliberately opt-in: the audit should never change
+# anything by accident, and you want to know WHICH side is wrong before
+# overwriting either. rsync cannot tell you that; Immich's per-asset checksum
+# can, and the restic repo is verified against WBU's content.
+FIX=0
+[ "${1:-}" = "--fix" ] && FIX=1
+# Explicit variable, NOT $(... || echo -n): `echo -n` means "no trailing
+# newline" and prints nothing, so that idiom would silently DROP the dry-run
+# flag and let the audit modify FleetNAS.
+DRYRUN="-n"
+[ "$FIX" -eq 1 ] && DRYRUN=""
+
 SRC="/mnt/immich-data/immich/images/"
 DEST_HOST="dhm@192.168.178.123"
 # UGOS ships a patched rsync whose server side rejects absolute paths, so the
@@ -54,14 +67,21 @@ log "dest:   $DEST"
 [ -r "$SSH_KEY" ] || { log "FAILED: cannot read $SSH_KEY"; exit 1; }
 mountpoint -q /mnt/immich-data || { log "FAILED: /mnt/immich-data not mounted"; exit 1; }
 
-log "This reads ~85 GiB at BOTH ends and will take hours. Starting..."
+if [ "$FIX" -eq 1 ]; then
+    log "MODE: --fix — mismatched files WILL be re-sent to FleetNAS from WBU"
+else
+    log "MODE: dry run — nothing on FleetNAS will be changed"
+fi
+# Measured 8 minutes for ~85 GiB on 2026-08-28, not the hours first estimated:
+# the NAS reads faster than assumed and 1GbE is not the constraint.
+log "This reads ~85 GiB at BOTH ends (~8 min measured). Starting..."
 START=$(date +%s)
 
 # -a archive, -i itemise, -n dry run, -c compare by checksum not size+mtime.
 # --no-perms must match the sync script, or every file reports a permission
 # difference and drowns the real signal.
 nice -n 10 ionice -c2 -n7 \
-    rsync -ain --no-perms --delete -c \
+    rsync -ai $DRYRUN --no-perms --delete -c \
         -e "$SSH_OPTS" --out-format='%i|%n' \
         "$SRC" "$DEST" 2>>"$LOG" > "$DIFFS"
 RC=$?
@@ -75,12 +95,20 @@ if [ "$RC" -ne 0 ]; then
 fi
 
 TOTAL=$(wc -l < "$DIFFS")
-# In itemised output the third character is 'c' when the CHECKSUM differs.
-# That is the finding this audit exists for: same size, same mtime, different
-# content — exactly the shape memory corruption leaves behind.
-CONTENT=$(grep -c '^>f..c' "$DIFFS" 2>/dev/null || echo 0)
-MISSING=$(grep -c '^>f+++++++++' "$DIFFS" 2>/dev/null || echo 0)
-DELETES=$(grep -c '^\*deleting' "$DIFFS" 2>/dev/null || echo 0)
+# rsync itemised output is "YXcstpoguax": Y is the direction ('<' for a push
+# like this one), X the file type, then POSITIONAL flags where index 2 is the
+# checksum. So a content mismatch on a pushed regular file is "<fc........" —
+# same size, same mtime, different bytes, which is exactly the shape memory
+# corruption leaves behind. Matching '>f..c' as an earlier version did was
+# wrong on both the direction character and the offset, and reported 0 while
+# a real mismatch sat in the output.
+#
+# `|| true`, not `|| echo 0`: grep -c already PRINTS 0 when it matches nothing,
+# and also exits 1, so the fallback appended a second line and every numeric
+# test afterwards failed with "integer expression expected".
+CONTENT=$(grep -c '^[<>]fc' "$DIFFS" 2>/dev/null || true)
+MISSING=$(grep -c '^[<>]f+++++++++' "$DIFFS" 2>/dev/null || true)
+DELETES=$(grep -c '^\*deleting' "$DIFFS" 2>/dev/null || true)
 
 log "--- results ---"
 log "total itemised differences : $TOTAL"
@@ -100,7 +128,12 @@ else
     log "        cannot tell you which side is the good one."
     log "        The restic repo is the tiebreaker — it verified clean, so WBU's"
     log "        current content is trustworthy and FleetNAS should be corrected."
-    grep '^>f..c' "$DIFFS" | head -20 | tee -a "$LOG"
+    grep '^[<>]fc' "$DIFFS" | head -20 | tee -a "$LOG"
+    log ""
+    log "        Immich records a SHA-1 per asset at ingest and is the authority:"
+    log "          docker exec immich_postgres psql -U postgres -d immich -t -A \\"
+    log "            -c \"select encode(checksum,'hex') from asset where \\\"originalPath\\\" like '%<uuid>%';\""
+    log "        Compare against sha1sum of each copy, then repair with: $0 --fix" 
 fi
 
 log "full itemised output: $DIFFS"
