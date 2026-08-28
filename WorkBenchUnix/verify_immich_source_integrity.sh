@@ -38,6 +38,11 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$LOG"; }
 
 MARKER="IMMICH SOURCE INTEGRITY OK"
 
+# Investigated mismatches that are NOT disk corruption. One asset UUID per
+# line, "#" for comments. See the tie-break note further down for why the
+# database is not automatically the authority.
+EXCEPTIONS="/etc/immich-integrity-exceptions"
+
 die() { log "PROBLEM: $*"; log "=== source integrity check ended WITHOUT success ==="; exit 1; }
 
 log "=== Verifying Immich originals against the database ==="
@@ -91,6 +96,25 @@ if [ "$MISSING" -gt 0 ]; then
     # file removed outside Immich. Worth seeing, not corruption.
     log "note: missing files are DB rows without a file on disk, not damage:"
     grep 'No such file' "$FAILED" | head -5 | sed 's/^/    /' | tee -a "$LOG"
+fi
+
+# Drop investigated exceptions before judging. Without this, a single
+# permanently-disagreeing asset makes the weekly check red forever, and an
+# alarm that is always on is one you stop reading.
+if [ -r "$EXCEPTIONS" ] && [ "$MISMATCH" -gt 0 ]; then
+    EXCLUDED=0
+    while read -r uuid _; do
+        case "$uuid" in ''|\#*) continue ;; esac
+        if grep -q "$uuid" "$FAILED" 2>/dev/null; then
+            grep -v "$uuid" "$FAILED" > "$FAILED.tmp" && mv "$FAILED.tmp" "$FAILED"
+            EXCLUDED=$((EXCLUDED + 1))
+        fi
+    done < "$EXCEPTIONS"
+    if [ "$EXCLUDED" -gt 0 ]; then
+        MISMATCH=$(grep -c ': FAILED$' "$FAILED" 2>/dev/null || true)
+        log "known exceptions skipped        : $EXCLUDED (see $EXCEPTIONS)"
+        log "CONTENT MISMATCHES after skips  : $MISMATCH"
+    fi
 fi
 
 if [ "$MISMATCH" -gt 0 ]; then
