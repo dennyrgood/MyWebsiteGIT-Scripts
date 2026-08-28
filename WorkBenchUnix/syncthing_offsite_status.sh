@@ -202,7 +202,10 @@ GC_JSON=$(curl -sf --max-time 15 "$GC_VERIFY_URL" 2>/dev/null) || GC_JSON=""
 if [ -n "$GC_JSON" ]; then
     GC_PARSED=$(printf '%s' "$GC_JSON" | python3 -c "
 import sys,json,datetime
-d=json.load(sys.stdin)
+# utf-8-sig, not json.load(sys.stdin): a Windows producer may prepend a BOM,
+# which json rejects. Strip it here rather than depending on every publisher
+# getting its encoding right.
+d=json.loads(sys.stdin.buffer.read().decode('utf-8-sig'))
 print('true' if d.get('ok') else 'false')
 print(d.get('mismatches',0))
 print(d.get('unreadable',0))

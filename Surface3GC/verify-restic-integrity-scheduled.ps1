@@ -58,7 +58,12 @@ function Write-Result($ok, $note) {
         elapsed_sec    = [int]((Get-Date) - $started).TotalSeconds
     }
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-    $r | ConvertTo-Json -Depth 4 | Set-Content -Path $outFile -Encoding UTF8
+    # NOT Set-Content -Encoding UTF8: on Windows PowerShell 5.1 that writes a
+    # byte-order mark, and Python's json.load rejects a leading BOM outright.
+    # wbu could fetch this file but not parse it, so the check reported nothing
+    # while appearing to work. Write UTF-8 with no BOM explicitly.
+    $json = $r | ConvertTo-Json -Depth 4
+    [System.IO.File]::WriteAllText($outFile, $json, (New-Object System.Text.UTF8Encoding $false))
     Write-Host ($r | ConvertTo-Json -Depth 4)
 }
 
