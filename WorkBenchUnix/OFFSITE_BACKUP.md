@@ -286,6 +286,48 @@ integrity check all succeed. A corrupted blob or a failed `check` can never read
 success. This follows the convention already established for `$FLEETNAS_IMG` in
 `nightly_summary.sh`.
 
+### The backup run confirms the copy reached Gran Canaria
+
+A verified local repo is only half the claim, so `backup_immich_to_restic.sh`
+waits for the packs it just wrote to actually land at s3g before reporting
+success. Nothing runs on s3g for this: Syncthing computes completion from what
+the REMOTE reports holding, and the remote builds that by hashing what it
+wrote, so "0 outstanding, 0 errors" is a statement about s3g's disk rather than
+about what wbu transmitted.
+
+Three details make it honest rather than decorative:
+
+**It forces a rescan first.** The folder has `fsWatcherDelayS=10`, so seconds
+after restic writes a new snapshot and index, Syncthing has not noticed them --
+and `needBytes` would read 0 because the files are *unknown*, not because they
+were delivered. The first version of this check passed in 0 s for exactly that
+reason. It now POSTs to `/rest/db/scan` before polling.
+
+**It requires `state=idle` on two consecutive polls.** A single reading taken
+between the rescan finishing and the transfer starting is indistinguishable
+from genuinely being up to date.
+
+**The wait is progress-aware, not a flat timeout.** A fixed value cannot suit
+both cases: the nightly delta settles in seconds, while importing a few
+thousand photos legitimately takes half an hour on a 2.4 MiB/s link. It keeps
+waiting while the outstanding byte count is falling, and gives up once it stops
+moving for two minutes -- at which point more waiting achieves nothing.
+`OFFSITE_WAIT_SECS=7200` is only a backstop against pathological slowness.
+
+Outcomes, in the run's final line:
+
+| Result | Backup verdict |
+|---|---|
+| `confirmed at s3g (100%, 0 errors, 30s)` | success |
+| `still syncing (94.1%, 4.20GiB outstanding)` | **success** — the local backup is good, and a deliberate import should not turn the subject red |
+| `STALLED (61.0%, 12.4GiB outstanding)` | success, but flagged; the 06:25 check judges it against the backlog limit |
+| folder reports N errors | **FAILURE** |
+
+Errors fail the run because that is the 2026-08-26 bug: unreadable files were
+silently excluded from the completion figure while the copy sat unrestorable.
+Outstanding bytes do not fail it, because failing on a large import you did on
+purpose is how alerts get ignored.
+
 ### The off-site line has three states, not two
 
 | Glyph | Meaning | Subject line |

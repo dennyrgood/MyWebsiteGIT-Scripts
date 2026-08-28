@@ -56,6 +56,22 @@ KEEP_MONTHLY=24
 PRUNE_DAY="01"               # day-of-month to run prune; empty disables prune
 READ_DATA_SUBSET="1/30"      # deep-verify this fraction nightly -> full repo/month
 
+# After the local backup is verified, wait for Syncthing to push the new packs
+# to s3g and for s3g to confirm it holds them.
+#
+# The wait is progress-aware rather than a flat timeout. A flat value cannot be
+# right for both cases: the nightly delta settles in seconds, while importing a
+# few thousand photos legitimately takes half an hour on a 2.4 MiB/s link. So
+# it keeps waiting as long as the outstanding byte count is FALLING, and gives
+# up early once it stops moving -- at which point more waiting achieves
+# nothing. OFFSITE_WAIT_SECS is only a backstop against pathological slowness.
+OFFSITE_WAIT_SECS=7200      # hard cap: 2h, and only reachable while still progressing
+OFFSITE_STALL_POLLS=8       # give up after this many consecutive polls with no progress (8 x 15s = 2 min)
+OFFSITE_DEVICE="2U2VAWO-KDK4BX5-2W37CAZ-FA7R7BK-TTM3X4H-74YNQCQ-5JEV6RN-OHE2PQB"
+OFFSITE_NAME="s3g"
+ST_FOLDER="immich-restic"
+ST_CONFIG="/home/dhm/.local/state/syncthing/config.xml"
+
 LOG="/var/log/immich-restic.log"
 LOCK="/var/lock/immich-restic.lock"
 
@@ -181,10 +197,128 @@ nice -n 10 ionice -c2 -n7 \
     restic -r "$REPO" check --read-data-subset="$READ_DATA_SUBSET" 2>&1 | tee -a "$LOG"
 [ "${PIPESTATUS[0]}" -eq 0 ] || die "restic check FAILED — repo integrity problem, investigate before trusting this backup"
 
+# ------------------------------------------------- off-site confirmation -----
+# A verified LOCAL repo is only half the claim. This waits for the packs just
+# written to actually reach Gran Canaria before the run reports success.
+#
+# Nothing needs to run on s3g for this. Syncthing computes completion from what
+# the REMOTE reports holding, and the remote builds that by hashing what it
+# wrote -- so "0 outstanding, 0 errors" is a statement about s3g's disk, not
+# merely about what wbu transmitted.
+#
+# Errors FAIL the run: that is the 2026-08-26 bug, where unreadable files were
+# silently excluded from the completion figure and the copy was quietly
+# unrestorable. Bytes still outstanding do NOT fail it -- the backup itself is
+# good, a large import legitimately takes longer than this window, and
+# syncthing_offsite_status.sh owns that judgement with its backlog-age limit.
+OFFSITE_STATUS="not checked"
+
+if [ -r "$ST_CONFIG" ] && systemctl is-active --quiet syncthing@dhm; then
+    ST_KEY=$(grep -oPm1 '(?<=<apikey>)[^<]+' "$ST_CONFIG" 2>/dev/null || true)
+    if grep -q '<gui[^>]*tls="true"' "$ST_CONFIG"; then
+        ST_URL="https://127.0.0.1:8384"; ST_CURL=(-sf -k)
+    else
+        ST_URL="http://127.0.0.1:8384";  ST_CURL=(-sf)
+    fi
+
+    if [ -n "${ST_KEY:-}" ]; then
+        log "--- confirming the new packs reached $OFFSITE_NAME ---"
+
+        # Force a rescan FIRST. The folder has fsWatcherDelayS=10, so seconds
+        # after restic writes a new snapshot and index, Syncthing has not yet
+        # noticed them -- and needBytes would read 0 because the files are
+        # unknown, not because they were delivered. Without this the check
+        # confirms a state that predates the backup it is meant to verify.
+        curl "${ST_CURL[@]}" --max-time 20 -X POST -H "X-API-Key: $ST_KEY" \
+            "$ST_URL/rest/db/scan?folder=$ST_FOLDER" -o /dev/null 2>/dev/null \
+            || log "WARNING: could not trigger a rescan; falling back to the watcher"
+
+        WAITED=0
+        SETTLED=0
+        STALL=0
+        PREV_NEED=-1
+        while :; do
+            ST_JSON=$(curl "${ST_CURL[@]}" --max-time 15 -H "X-API-Key: $ST_KEY" \
+                "$ST_URL/rest/db/status?folder=$ST_FOLDER" 2>/dev/null) || ST_JSON=""
+            OUT=$(printf '%s' "$ST_JSON" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+print(d.get('state','unknown'))
+print(int(d.get('errors',0)))
+" 2>/dev/null) || OUT=""
+
+            CMP=$(curl "${ST_CURL[@]}" --max-time 15 -H "X-API-Key: $ST_KEY" \
+                "$ST_URL/rest/db/completion?folder=$ST_FOLDER&device=$OFFSITE_DEVICE" 2>/dev/null \
+                | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+print(int(d.get('needBytes',0)))
+print(round(d.get('completion',0),2))
+" 2>/dev/null) || CMP=""
+
+            if [ -z "$OUT" ] || [ -z "$CMP" ]; then
+                OFFSITE_STATUS="unverified (syncthing API unreadable)"
+                log "WARNING: could not query Syncthing — off-site state unconfirmed"
+                break
+            fi
+
+            FSTATE=$(echo "$OUT" | sed -n 1p)
+            ERRS=$(echo "$OUT" | sed -n 2p)
+            REMOTE_NEED=$(echo "$CMP" | sed -n 1p)
+            PCT_S=$(echo "$CMP" | sed -n 2p)
+
+            [ "$ERRS" -eq 0 ] || die "off-site folder reports $ERRS error(s) — s3g copy is INCOMPLETE despite any completion figure"
+
+            # Require the folder idle AND the remote needing nothing, on two
+            # consecutive polls. A single reading taken between the rescan
+            # finishing and the transfer starting is indistinguishable from
+            # genuinely being up to date.
+            if [ "$FSTATE" = "idle" ] && [ "$REMOTE_NEED" -eq 0 ]; then
+                SETTLED=$((SETTLED + 1))
+                if [ "$SETTLED" -ge 2 ]; then
+                    OFFSITE_STATUS="confirmed at $OFFSITE_NAME (100%, 0 errors, ${WAITED}s)"
+                    log "off-site copy confirmed: $OFFSITE_NAME holds every pack, 0 errors (waited ${WAITED}s)"
+                    break
+                fi
+            else
+                SETTLED=0
+            fi
+
+            # Progress tracking: falling byte count resets the stall counter.
+            if [ "$PREV_NEED" -ge 0 ] && [ "$REMOTE_NEED" -ge "$PREV_NEED" ]; then
+                STALL=$((STALL + 1))
+            else
+                STALL=0
+            fi
+            PREV_NEED="$REMOTE_NEED"
+
+            NEED_GB=$(awk -v b="$REMOTE_NEED" 'BEGIN{printf "%.2f", b/1073741824}')
+
+            if [ "$REMOTE_NEED" -gt 0 ] && [ "$STALL" -ge "$OFFSITE_STALL_POLLS" ]; then
+                OFFSITE_STATUS="STALLED (${PCT_S}%, ${NEED_GB}GiB outstanding)"
+                log "off-site transfer is not progressing: ${PCT_S}%, ${NEED_GB}GiB outstanding after ${WAITED}s — no movement for $((STALL * 15))s"
+                log "backup itself is good; syncthing_offsite_status.sh will judge this against the backlog limit"
+                break
+            fi
+
+            if [ "$WAITED" -ge "$OFFSITE_WAIT_SECS" ]; then
+                OFFSITE_STATUS="still syncing (${PCT_S}%, ${NEED_GB}GiB outstanding)"
+                log "off-site still catching up at the ${OFFSITE_WAIT_SECS}s cap: ${PCT_S}%, ${NEED_GB}GiB outstanding (not a failure)"
+                break
+            fi
+            sleep 15
+            WAITED=$((WAITED + 15))
+        done
+    fi
+else
+    log "WARNING: syncthing not running or config unreadable — off-site state unconfirmed"
+    OFFSITE_STATUS="unverified (syncthing not running)"
+fi
+
 # ----------------------------------------------------------------- report ---
 SNAP_COUNT=$(restic -r "$REPO" snapshots --tag immich --json 2>/dev/null | grep -o '"time"' | wc -l)
 REPO_SIZE=$(du -sh "$REPO" 2>/dev/null | awk '{print $1}')
 
-log "snapshots retained: $SNAP_COUNT   repo size on disk: $REPO_SIZE"
+log "snapshots retained: $SNAP_COUNT   repo size on disk: $REPO_SIZE   off-site: $OFFSITE_STATUS"
 log "$SUCCESS_MARKER"
 exit 0
