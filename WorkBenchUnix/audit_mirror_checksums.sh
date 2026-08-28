@@ -146,11 +146,17 @@ log "CONTENT MISMATCHES         : $CONTENT   <- the ones that matter"
 log "missing at destination     : $MISSING"
 log "extra at destination       : $DELETES"
 
+# Success marker for nightly_summary.sh. Emitted only when CONTENT is zero:
+# additions and deletions since the last sync are expected, corruption is not.
+SUCCESS_MARKER="MIRROR AUDIT OK"
+
 if [ "$CONTENT" -eq 0 ] && [ "$TOTAL" -eq 0 ]; then
     log "RESULT: $TARGET matches WBU byte-for-byte. No corruption propagated."
+    log "$SUCCESS_MARKER ($TARGET, 0 mismatches, 0 differences)"
 elif [ "$CONTENT" -eq 0 ]; then
     log "RESULT: no content mismatches. The $TOTAL difference(s) are additions or"
     log "        deletions since the last sync — expected given a $CADENCE cadence."
+    log "$SUCCESS_MARKER ($TARGET, 0 mismatches, $TOTAL benign differences)"
 else
     log "RESULT: $CONTENT FILE(S) DIFFER IN CONTENT between WBU and $TARGET."
     log "        Same size and mtime, different bytes."
@@ -166,6 +172,10 @@ else
     log "        WBU correct and the mirror damaged, which is the expected"
     log "        direction: corruption happened in WBU's memory in transit,"
     log "        not on disk. Repair with: $0 $TARGET --fix"
+    log "full itemised output: $DIFFS"
+    # Non-zero so cron and the nightly summary both treat this as a failure.
+    # The success marker is deliberately not emitted on this path.
+    exit 1
 fi
 
 log "full itemised output: $DIFFS"

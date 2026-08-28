@@ -47,6 +47,15 @@ FLEETNAS_DB=$(ls -1t /home/dhm/.cache/fleetnas-sync/fleetnas_db_*.log 2>/dev/nul
 FLEETNAS_DB=${FLEETNAS_DB:-/home/dhm/.cache/fleetnas-sync/fleetnas_db_NONE.log}
 FLEETNAS_IMG=$(ls -1t /home/dhm/.cache/fleetnas-sync/fleetnas_images_*.log 2>/dev/null | head -1)
 FLEETNAS_IMG=${FLEETNAS_IMG:-/home/dhm/.cache/fleetnas-sync/fleetnas_images_NONE.log}
+# Integrity checks run weekly/monthly and log per run, so pick the newest of
+# each. The `:-` fallback keeps the arrays valid before the first ever run.
+SRC_INTEGRITY=$(ls -1t /home/dhm/.cache/immich-integrity/source_integrity_*.log 2>/dev/null | head -1)
+SRC_INTEGRITY=${SRC_INTEGRITY:-/home/dhm/.cache/immich-integrity/source_integrity_NONE.log}
+AUDIT_NAS=$(ls -1t /home/dhm/.cache/mirror-audit/fleetnas_audit_*.log 2>/dev/null | head -1)
+AUDIT_NAS=${AUDIT_NAS:-/home/dhm/.cache/mirror-audit/fleetnas_audit_NONE.log}
+AUDIT_MM=$(ls -1t /home/dhm/.cache/mirror-audit/macmini_audit_*.log 2>/dev/null | head -1)
+AUDIT_MM=${AUDIT_MM:-/home/dhm/.cache/mirror-audit/macmini_audit_NONE.log}
+
 EXPORT_ARCHIVE=$(cat /home/dhm/.cache/immich-export/export_archive.log 2>/dev/null | wc -l > /dev/null; echo /home/dhm/.cache/immich-export/export_archive.log)
 
 LOGS=(
@@ -54,6 +63,9 @@ LOGS=(
     "/var/log/immich-dump-for-cwhu.log"
     "/var/log/immich-restic.log"
     "/var/log/syncthing-offsite.log"
+    "$SRC_INTEGRITY"
+    "$AUDIT_NAS"
+    "$AUDIT_MM"
     "$MACMINI_DB"
     "$MACMINI_IMG"
     "$CWHU_SYNC"
@@ -402,6 +414,13 @@ declare -A EXPECTED=(
     # outstanding -- actually moving. Deliberately NOT "100% synced": that
     # would fail nightly for days during a seed and train you to ignore it.
     ["/var/log/syncthing-offsite.log"]="SYNCTHING OFFSITE OK"
+    # Content-integrity checks. These compare against an INDEPENDENT record —
+    # Immich's ingest checksum, and WBU's actual bytes — rather than against
+    # size and mtime, which is what let a corrupted file sit on FleetNAS
+    # unnoticed from June to 2026-08-28.
+    ["$SRC_INTEGRITY"]="IMMICH SOURCE INTEGRITY OK"
+    ["$AUDIT_NAS"]="MIRROR AUDIT OK"
+    ["$AUDIT_MM"]="MIRROR AUDIT OK"
     ["$CWHU_SYNC"]="Warm-sync complete."
     ["$FLEETNAS_DB"]="Postgres dump sync to FleetNAS complete"
     # Deliberately NOT the trailing "=== Live image sync ... complete ===" banner:
@@ -415,6 +434,9 @@ declare -A LABEL=(
     ["/var/log/immich-dump-for-cwhu.log"]="CWHU DB dump"
     ["/var/log/immich-restic.log"]="restic repo backup"
     ["/var/log/syncthing-offsite.log"]="off-site replication"
+    ["$SRC_INTEGRITY"]="source integrity"
+    ["$AUDIT_NAS"]="FleetNAS content audit"
+    ["$AUDIT_MM"]="Mac Mini content audit"
     ["$CWHU_SYNC"]="CWHU warm-sync"
     ["$FLEETNAS_DB"]="FleetNAS DB backup"
     ["$FLEETNAS_IMG"]="FleetNAS image backup"
@@ -453,6 +475,27 @@ if [ "$OK" -eq 1 ]; then
         FILE_AGE=$(( $(date +%s) - $(stat -c %Y "$LOG") ))
         if [ "$FILE_AGE" -gt 86400 ]; then
             OK=0; REASON="${LABEL[$LOG]:-$(basename "$LOG")} stale ($((FILE_AGE / 3600))h)"
+            break
+        fi
+    done
+fi
+
+# --- Staleness for the weekly/monthly integrity checks ---
+# Deliberately NOT in the 24h loop above: those run daily, these do not, and a
+# weekly log is legitimately six days old. But a check that quietly stops
+# running is exactly as dangerous as one that fails, so each gets a threshold
+# matched to its own cadence with a generous margin for a missed run.
+if [ "$OK" -eq 1 ]; then
+    declare -A INTEGRITY_MAX=(
+        ["$SRC_INTEGRITY"]=1209600     # weekly  -> 14d
+        ["$AUDIT_NAS"]=4838400         # monthly -> 56d
+        ["$AUDIT_MM"]=4838400          # monthly -> 56d
+    )
+    for LOG in "${!INTEGRITY_MAX[@]}"; do
+        [ -f "$LOG" ] || continue      # never run yet; the EXPECTED loop reports it
+        FILE_AGE=$(( $(date +%s) - $(stat -c %Y "$LOG") ))
+        if [ "$FILE_AGE" -gt "${INTEGRITY_MAX[$LOG]}" ]; then
+            OK=0; REASON="${LABEL[$LOG]:-$(basename "$LOG")} stale ($((FILE_AGE / 86400))d)"
             break
         fi
     done
