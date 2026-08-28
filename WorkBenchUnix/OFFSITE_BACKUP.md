@@ -363,6 +363,51 @@ hand does not distort it.
 
 ---
 
+## Integrity: what checks what
+
+The 2026-08-26 and 2026-08-28 findings had the same shape twice: a metric read
+healthy because the thing it measured had not actually been looked at. Every
+check below therefore compares CONTENT against a record that does not assume
+WBU is correct. None of them look at size or mtime, which is what let a
+corrupted file sit on FleetNAS from June until it was found.
+
+| Check | Compares | Cadence | Automated |
+|---|---|---|---|
+| restic blob hash on write | data in RAM vs its hash | every backup | yes |
+| restic `check --read-data-subset=1/30` | repo packs vs their ids | nightly, full repo monthly | yes |
+| off-site confirmation | s3g's report vs what was just written | after every backup | yes |
+| `syncthing_offsite_status.sh` | connection, errors, backlog age | 06:25 daily | yes |
+| `verify_immich_source_integrity.sh` | originals vs Immich's ingest SHA-1 | Sun 02:00 | yes |
+| `audit_mirror_checksums.sh fleetnas` | FleetNAS bytes vs WBU bytes | 15th 02:00 | yes |
+| `audit_mirror_checksums.sh macmini` | Mac Mini bytes vs WBU bytes | 15th 02:40 | yes |
+| `verify-restic-integrity-scheduled.ps1` | s3g's packs vs their ids | 16th 03:00, on s3g | yes |
+| `verify-offsite-restic.ps1` | s3g repo opens and returns files | occasional, by hand | no |
+
+### The one that closes the circle
+
+`verify_immich_source_integrity.sh` is the only check that can catch WBU itself
+being wrong. Every other one compares a copy against WBU's current file, so if
+an original rots on this disk, restic stores the rotten version, verifies it
+perfectly, replicates it to Gran Canaria, and everything reports green. Immich
+records a SHA-1 for all 70,458 assets at ingest, and that is the only
+independent record of the original bytes.
+
+### The far end checks itself without a key
+
+Syncthing verifies block hashes on TRANSFER and re-hashes only files whose size
+or mtime changed -- it never re-reads unchanged files, so rot on s3g's disk
+would leave completion reading 100% forever.
+
+`verify-restic-integrity-scheduled.ps1` closes that, and needs no passphrase:
+every file in a restic repo is named by the SHA-256 of its own contents, so
+integrity is a matter of re-hashing and comparing to the filename. Running
+`restic check` there instead would put the key next to the ciphertext and undo
+the property the whole design rests on -- that s3g holds data it cannot read.
+
+It publishes JSON through `fleet_metrics_server.py` (allowlist already accepts
+`watchdog_*.json`), and `syncthing_offsite_status.sh` fails if s3g reports
+damage or if the report goes stale past 45 days.
+
 ## The RAM fault (found by this work, unrelated to its design)
 
 The very first backup failed:
