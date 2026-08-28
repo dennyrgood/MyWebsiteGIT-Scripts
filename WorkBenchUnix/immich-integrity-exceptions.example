@@ -1,0 +1,24 @@
+# /etc/immich-integrity-exceptions
+#
+# Asset UUIDs whose file on disk disagrees with Immich's recorded checksum,
+# investigated and found NOT to be disk corruption. One UUID per line.
+# verify_immich_source_integrity.sh skips these but still reports the count.
+#
+# 2026-08-28 -- the three largest videos in the library. For each, WBU and
+# FleetNAS hold IDENTICAL bytes (two independent reads agreeing) and the files
+# are structurally valid; only Immich's database disagrees, and it disagrees
+# with both copies rather than matching either.
+#
+# Immich streams the whole file through memory to hash it at ingest, so a
+# multi-gigabyte video passes ~1000x more data through RAM than a photo does.
+# All three were ingested between 2026-06-22 and 2026-08-22, inside the window
+# when this machine ran four mismatched DIMMs. Every asset under ~150 MB
+# matched its record; only the multi-GB ones did not. The recorded checksums
+# are the corrupted values, not the files.
+#
+# Re-check these if Immich ever recomputes checksums; the entries can be
+# removed once the database agrees with the disk again.
+
+45d01a4e-a5b6-46c6-84a4-2c779be21f26   # 5.4 GB mp4
+9d8cb158-b14f-4477-bca2-d204ffa90773   # 2.0 GB mp4
+c81cb913-6860-4bbf-b9fc-adb7727703d2   # 3.0 GB mp4

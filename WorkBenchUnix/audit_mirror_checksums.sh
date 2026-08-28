@@ -59,10 +59,14 @@ case "$TARGET" in
         SSH_KEY="/home/dhm/.ssh/id_ed25519_macmini"
         REMOTE_PATH="/Volumes/Expansion/Immich/backup/images"
         DEST="$DEST_HOST:$REMOTE_PATH/"
-        # backup_immich_images_to_macmini.sh uses a plain `rsync -aq --delete`
-        # with no --no-perms, so permissions are already in sync and the audit
-        # must NOT pass it either.
-        PERM_OPT=""
+        # Measured 2026-08-28: WITHOUT --no-perms this produced 372,401 lines of
+        # pure permission noise (283,801 files + 88,600 dirs) around 23 real
+        # content mismatches. The destination is an external volume on macOS
+        # that does not honour Unix modes, so every entry itemises a permission
+        # difference, the weekly sync re-sets them, and they drift straight
+        # back. Suppress them -- a report nobody can read is a report nobody
+        # reads. Content comparison is unaffected: -c is what finds corruption.
+        PERM_OPT="--no-perms"
         # Weekly, so expect files added since Friday to show as missing at the
         # destination. Those are not corruption — only the content-mismatch
         # count is.
