@@ -55,4 +55,4 @@ elseif ($svc.Status -ne "Running") { Write-Host "WARNING: sshd is $($svc.Status)
 else                           { Write-Host "sshd is running." }
 
 Write-Host ""
-Write-Host "Test from WorkBenchUnix:  ssh imagebeast hostname"
+Write-Host "Test from WorkBenchUnix:  ssh chatworkhorse hostname"
