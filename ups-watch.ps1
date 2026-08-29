@@ -163,11 +163,49 @@ try {
     $status = Get-UpsVar "ups.status"
 }
 catch {
-    # Deliberately does NOT shut down. A rebooting NUT server, a switch blip or a
-    # saturated link are indistinguishable from a real outage here, and powering the
-    # machine off every time WBU is briefly unreachable would cause far more downtime
-    # than it prevents.
-    Write-Log "WARN: cannot read $UpsName@${UpsHost}: $($_.Exception.Message) - no action taken."
+    $why = $_.Exception.Message
+
+    # An unreadable UPS means two completely different things depending on whether a
+    # countdown is already running, and the original version of this script treated
+    # them the same.
+    #
+    # NOT ARMED: a rebooting NUT server, a switch blip or a saturated link are
+    # indistinguishable from a real outage, and powering off every time WBU is briefly
+    # unreachable would cause far more downtime than it prevents. Do nothing.
+    #
+    # ALREADY ARMED: we have seen OB and are counting. The server going away now is
+    # evidence the outage is ONGOING - most likely the server shut itself down because
+    # of it - which is the opposite of a reason to stand down. Keep counting on
+    # elapsed wall-clock, which needs no UPS, and fire at the threshold.
+    #
+    # 2026-08-29: ChatWorkhorse reached "7.0min of 8min", then WorkBenchUnix powered
+    # off 30 seconds before its 8-minute poll. Every subsequent poll landed here and
+    # did nothing. It missed shutting down by 60 seconds, on battery, with the NUT
+    # server already gone.
+    if (Test-Path $StateFile) {
+        $since   = [datetime]::Parse((Get-Content $StateFile -Raw).Trim()).ToUniversalTime()
+        $elapsed = ((Get-Date).ToUniversalTime() - $since).TotalMinutes
+
+        # A state file far older than the threshold is stale, not a live countdown -
+        # e.g. left behind by a reboot while the server happened to be down. Firing on
+        # that would shut the machine down on mains for no reason.
+        if ($elapsed -gt [Math]::Max($MinutesOnBattery * 3, 60)) {
+            Remove-Item $StateFile -Force
+            Write-Log ("WARN: cannot read {0}@{1}: {2} - discarding stale {3:N1}min countdown." -f $UpsName, $UpsHost, $why, $elapsed)
+            exit 0
+        }
+
+        if ($elapsed -ge $MinutesOnBattery) {
+            Write-Log ("WARN: cannot read {0}@{1}: {2}" -f $UpsName, $UpsHost, $why)
+            Invoke-FleetShutdown ("UPS unreadable AND countdown expired - {0:N1}min of {1}min on battery" -f $elapsed, $MinutesOnBattery)
+            exit 0
+        }
+
+        Write-Log ("WARN: cannot read {0}@{1}: {2} - countdown continues on elapsed time ({3:N1} of {4}min)." -f $UpsName, $UpsHost, $why, $elapsed, $MinutesOnBattery)
+        exit 0
+    }
+
+    Write-Log "WARN: cannot read $UpsName@${UpsHost}: $why - not armed, no action taken."
     exit 0
 }
 
