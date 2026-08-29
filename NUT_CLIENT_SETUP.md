@@ -17,7 +17,7 @@ much lighter load and a correspondingly slower discharge.
 | **ChatWorkhorseUnix** (VM) | 5 | `upsmon` + `upssched` | Must be down before its host |
 | **ImageBeast** | 8 | `ups-watch.ps1` | |
 | **ChatWorkhorse** (host) | 8 | `ups-watch.ps1 -VMName` | Also *waits* for the VM to reach poweroff |
-| WorkBenchUnix | 10 | `upsmon` + `upssched` | Already configured |
+| WorkBenchUnix | 20 | `upsmon` + `upssched` | Already configured; runs the NUT server, so it must be last |
 
 CWHU's 5 minutes gives a 3-minute margin before its host even begins. The host's wait
 loop is the second line of defence — the margin makes it usually right, the wait makes

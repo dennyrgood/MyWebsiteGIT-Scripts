@@ -36,7 +36,7 @@
         CWHU (VM)      5   (its own upsmon, not this script)
         ImageBeast     8
         ChatWorkhorse  8   (waits for the VM regardless)
-        WorkBenchUnix 10   (its own upssched timer)
+        WorkBenchUnix 20   (its own upssched timer; runs the NUT server, so last)
 
 .PARAMETER VMName
     Optional VirtualBox VM to stop before shutting down. Used on ChatWorkhorse for
