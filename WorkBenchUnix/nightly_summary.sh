@@ -456,9 +456,18 @@ fi
 
 # --- Staleness check for CWHU sync log (lives on remote machine, can go stale) ---
 # Also guarded so a fresh fault outranks a stale-sync warning in the subject.
+#
+# 2026-08-29: raised 6h -> 24h. The warm-sync runs once a day at 04:00 and this
+# email goes at 06:30, so a healthy log is ~2.5h old -- but at 6h the check only
+# passed when the summary ran at its scheduled time. Every manual run after
+# about 10:00 reported "CWHU warm-sync stale" for a sync that had completed
+# normally that morning, which is how a real fault gets lost in familiar noise.
+#
+# 24h matches the FleetNAS pair below and gives the same property: one missed
+# night puts the log at ~26h and is caught by the very next email.
 if [ "$OK" -eq 1 ] && [ -f "$CWHU_SYNC" ]; then
     FILE_AGE=$(( $(date +%s) - $(stat -c %Y "$CWHU_SYNC") ))
-    if [ "$FILE_AGE" -gt 21600 ]; then  # 6 hours
+    if [ "$FILE_AGE" -gt 86400 ]; then  # 24 hours
         OK=0; REASON="CWHU warm-sync stale ($((FILE_AGE / 3600))h)"
     fi
 fi
