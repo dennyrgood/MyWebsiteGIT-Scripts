@@ -63,13 +63,45 @@ Dry run first — reads the UPS, logs, shuts down nothing:
 
 | Setting | Value |
 |---|---|
-| Trigger | At startup, repeat every **1 minute**, indefinitely |
+| Triggers | **Two of them** — see the trap below. (1) At startup, (2) Daily. Both repeating every **1 minute**, indefinitely |
 | Action | `powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\repos\scripts\ups-watch.ps1 -MinutesOnBattery 8` |
 | Run as | SYSTEM or a local admin |
 | Options | Run whether user is logged on or not |
 
 One minute is the poll interval, not the countdown — the countdown is a timestamp in
 `C:\ProgramData\ups-watch\`, so it survives the script exiting between runs.
+
+### The boot-trigger trap — read this before trusting the task
+
+A **startup trigger alone is not enough**, and it fails invisibly.
+
+A `BootTrigger`'s repetition does not begin until the trigger actually fires. Create
+the task on a running machine and nothing is scheduled until its next reboot — which
+on a server may be months away. Meanwhile every indicator you would naturally check
+reads healthy:
+
+```
+Scheduled Task State: Enabled     Status: Ready     Last Result: 0
+Next Run Time:        N/A         <-- the only field that tells the truth
+```
+
+This is exactly how ImageBeast sat through the 2026-08-29 full-outage test. Task
+present, correctly configured, enabled, last result 0 — and never once scheduled,
+because it was created on 2026-08-12 while the machine had been up since 2026-08-03.
+
+Two consequences:
+
+1. **Add a Daily trigger as well**, also repeating every 1 minute indefinitely. It
+   makes the schedule independent of reboots and re-establishes itself every day, so
+   the watchdog cannot be silently unscheduled for weeks.
+2. **Verify with `Next Run Time`, never with Status.** After creating the task:
+
+   ```
+   schtasks /query /tn "UPS-Watch-ImageBeast" /fo LIST /v
+   ```
+
+   `Next Run Time: N/A` means nothing is scheduled, whatever else it says. You want a
+   timestamp within the next minute.
 
 ---
 
