@@ -17,11 +17,23 @@
 # connection to Jump's relay). No such connection => treat as wedged and force
 # a service restart, the same fix that worked by hand.
 #
-# Run on a recurring Task Scheduler trigger (e.g. every 5 min), as SYSTEM
-# (Restart-Service on another session's service needs admin rights - see
-# "Power Heartbeat Logger" task for the same SYSTEM-at-startup pattern this
-# reuses, just on a timer instead of at-startup). Safe to run when healthy -
-# does nothing in that case beyond the once-a-day alive ping.
+# 2026-08-29: rewritten from a one-shot script fired by a Task Scheduler
+# "Daily, repeat every 5 min, for a duration of Indefinitely" trigger to a
+# single long-running process with its own internal loop, triggered "At
+# system startup" - exactly Power Heartbeat Logger's pattern. The repeating-
+# trigger version silently stopped being re-invoked after about 3 days with
+# no error (LastTaskResult 0, NextRunTime just went blank) - a known Windows
+# Task Scheduler quirk where "repeat indefinitely" doesn't actually mean
+# indefinitely. Power Heartbeat Logger never had this problem because it was
+# never relying on that repetition mechanism in the first place. This changes
+# to match: no Task Scheduler repetition setting to silently expire, just one
+# process that loops forever until the box reboots (at which point "At
+# startup" + SYSTEM brings it right back, no logon required - see Power
+# Heartbeat Logger's own notes on why that matters here).
+#
+# Deployed via Scheduled Task "JumpConnect Watchdog" (At system startup, runs
+# as SYSTEM - Restart-Service on another session's service needs admin
+# rights, and SYSTEM doesn't need an interactive RDP logon to start).
 #
 # 2026-08-28: logs into the SAME shared watchdog_remotews.log that
 # FleetMetricsWatchdog.ps1 already writes to (not a separate file) - the
@@ -37,7 +49,7 @@
 #
 # ASCII only - PowerShell 5.1 has no BOM handling and mis-decodes non-ASCII.
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
 $ServiceName = "JumpConnect"
 $LogTag = "[JumpConnect]"
@@ -45,6 +57,7 @@ $LogDir = "C:\fleet_monitor"
 $LogFile = Join-Path $LogDir "watchdog_remotews.log"
 $AliveMarkerFile = Join-Path $LogDir ".jumpconnect_watchdog_remotews.alive"
 $PostActionWaitSeconds = 8
+$IntervalSeconds = 300   # 5 min, matching the original Task Scheduler repeat cadence
 
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null }
 
@@ -52,16 +65,6 @@ function Log($msg) {
     $line = "$(Get-Date -Format o) $LogTag $msg"
     Write-Output $line
     Add-Content -Path $LogFile -Value $line
-}
-
-# Same "healthy run logs nothing, except once a day" convention as
-# FleetMetricsWatchdog.ps1 - "no issues today" stays visible without waiting
-# for a failure, but a 5-min cadence doesn't spam a line every run.
-$today = (Get-Date).ToString("yyyy-MM-dd")
-$lastAliveDate = if (Test-Path $AliveMarkerFile) { (Get-Content $AliveMarkerFile -Raw -ErrorAction SilentlyContinue).Trim() } else { $null }
-if ($lastAliveDate -ne $today) {
-    Log "watchdog alive, checking..."
-    Set-Content -Path $AliveMarkerFile -Value $today
 }
 
 function Get-JumpConnectProcessId {
@@ -83,44 +86,66 @@ function Test-HasEstablishedConnection($processId) {
     }
 }
 
-$svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-if (-not $svc) {
-    Log "service '$ServiceName' not found on this box - nothing to watch, exiting"
-    exit 1
-}
-
-if ($svc.Status -ne 'Running') {
-    Log "service is $($svc.Status), starting it"
-    try { Start-Service -Name $ServiceName } catch { Log "Start-Service failed: $($_.Exception.Message)" }
-    Start-Sleep -Seconds $PostActionWaitSeconds
-    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-    if ($svc.Status -ne 'Running') {
-        Log "SERVICE START FAILED - still $($svc.Status) after Start-Service"
-        exit 1
+function Invoke-HealthCheck {
+    # Same "healthy run logs nothing, except once a day" convention as
+    # FleetMetricsWatchdog.ps1 - "no issues today" stays visible without
+    # waiting for a failure, but a 5-min cadence doesn't spam a line every run.
+    $today = (Get-Date).ToString("yyyy-MM-dd")
+    $lastAliveDate = if (Test-Path $AliveMarkerFile) { (Get-Content $AliveMarkerFile -Raw -ErrorAction SilentlyContinue).Trim() } else { $null }
+    if ($lastAliveDate -ne $today) {
+        Log "watchdog alive, checking..."
+        Set-Content -Path $AliveMarkerFile -Value $today
     }
-    Log "service started, now Running"
+
+    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    if (-not $svc) {
+        Log "service '$ServiceName' not found on this box - nothing to watch this cycle"
+        return
+    }
+
+    if ($svc.Status -ne 'Running') {
+        Log "service is $($svc.Status), starting it"
+        try { Start-Service -Name $ServiceName } catch { Log "Start-Service failed: $($_.Exception.Message)" }
+        Start-Sleep -Seconds $PostActionWaitSeconds
+        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if ($svc.Status -ne 'Running') {
+            Log "SERVICE START FAILED - still $($svc.Status) after Start-Service"
+            return
+        }
+        Log "service started, now Running"
+    }
+
+    $processId = Get-JumpConnectProcessId
+    if (Test-HasEstablishedConnection $processId) {
+        # Healthy - nothing to do beyond the daily alive ping above.
+        return
+    }
+
+    Log "service is Running (PID $processId) but has no established outbound connection - likely wedged after a network blip, restarting"
+    try {
+        Restart-Service -Name $ServiceName -Force
+    } catch {
+        Log "Restart-Service failed: $($_.Exception.Message)"
+        return
+    }
+
+    Start-Sleep -Seconds $PostActionWaitSeconds
+    $newProcessId = Get-JumpConnectProcessId
+    if (Test-HasEstablishedConnection $newProcessId) {
+        Log "restart succeeded, PID $newProcessId now has an established outbound connection"
+    } else {
+        Log "RESTART DID NOT RESTORE CONNECTIVITY (or too soon to tell) - PID $newProcessId"
+    }
 }
 
-$processId = Get-JumpConnectProcessId
-if (Test-HasEstablishedConnection $processId) {
-    # Healthy - nothing to do beyond the daily alive ping above.
-    exit 0
-}
-
-Log "service is Running (PID $processId) but has no established outbound connection - likely wedged after a network blip, restarting"
-try {
-    Restart-Service -Name $ServiceName -Force
-} catch {
-    Log "Restart-Service failed: $($_.Exception.Message)"
-    exit 1
-}
-
-Start-Sleep -Seconds $PostActionWaitSeconds
-$newProcessId = Get-JumpConnectProcessId
-if (Test-HasEstablishedConnection $newProcessId) {
-    Log "restart succeeded, PID $newProcessId now has an established outbound connection"
-    exit 0
-} else {
-    Log "RESTART DID NOT RESTORE CONNECTIVITY (or too soon to tell) - PID $newProcessId"
-    exit 1
+while ($true) {
+    try {
+        Invoke-HealthCheck
+    } catch {
+        # Never let a transient WMI/CIM/IO hiccup kill the loop - that would
+        # silently turn this back into the exact "stopped and nobody noticed"
+        # failure mode this rewrite exists to fix.
+        try { Log "unexpected error in health check: $($_.Exception.Message)" } catch {}
+    }
+    Start-Sleep -Seconds $IntervalSeconds
 }
