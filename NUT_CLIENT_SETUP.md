@@ -55,12 +55,43 @@ battery is weakest, and it is not a rare scenario.
 | WorkBenchUnix | 15% | `ignorelb` + `override.battery.charge.low = 15` in its own `ups.conf`; upsmon acts on LOWBATT |
 | ChatWorkhorseUnix | 15% | inherited — as an upsmon secondary with `MINSUPPLIES 1` it shuts down on `OB LB` |
 | ImageBeast | 35% | `ups-watch.ps1 -MinBatteryPercent` (default) |
-| ChatWorkhorse | 45% suggested | as above; it can spend up to `VMWaitSeconds` waiting for the VM before Windows even begins |
+| ChatWorkhorse | **30%** | as above; it can spend up to `VMWaitSeconds` waiting for the VM before Windows even begins |
 
 The Windows clients need a floor well above 15% rather than simply honouring `LB`: at
 the rate measured on 2026-08-29 the gap between 35% and 15% is only about four minutes,
 and a Windows box has a 30-second shutdown delay plus the shutdown itself to get
 through. They honour `LB` too, as a last-resort backstop.
+
+### The ordering invariant — it applies to BOTH axes
+
+**A machine's charge floor must sit BELOW the charge at which everything depending on
+it is expected to have already gone — just as its minutes sit above theirs.**
+
+Getting this right on one axis and wrong on the other is easy, and was: ChatWorkhorse
+was first given a 45% floor while ChatWorkhorseUnix, which must stop before it, had
+only the inherited 15% `LB`. Against the 2026-08-29 discharge curve:
+
+```
+22:57:04  outage begins
+23:00:35  battery ~45%   -> CWH would fire here      (3.5 min)
+23:02:04  CWHU's 5-minute timer                       (5.0 min)
+```
+
+CWH would have gone ~90 seconds before the VM it is supposed to wait for. Not
+corrupting — `Stop-VMAndWait` SSHes in and runs `clean.ubuntu.shutdown` on CWHU first —
+but it makes the fallback path the normal one and reduces CWHU's own upsmon to
+decoration. 30% moves CWH to ~6.5 min on that curve, back behind CWHU.
+
+**Why CWHU cannot simply be given a higher floor instead:** `LB` is a single
+fleet-wide signal, published from WBU's `ups.conf`. Raising
+`override.battery.charge.low` to fire CWHU earlier fires it on WBU too — and WBU must
+be last. NUT gives secondaries no per-client charge threshold, so this ordering has to
+be expressed in the *client's* number, never in `LB`.
+
+Consequence: 30% preserves the order on that particular discharge curve. On a
+sufficiently faster one it could invert again. The only structural guarantee is CWH
+waiting for the VM to reach `poweroff`. Ordering by threshold is the optimisation; the
+wait is the correctness.
 
 ---
 
