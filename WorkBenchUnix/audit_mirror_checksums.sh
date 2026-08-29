@@ -84,7 +84,20 @@ TS=$(date -u +%Y%m%d_%H%M%SZ)
 LOG_DIR="/home/dhm/.cache/mirror-audit"
 LOG="$LOG_DIR/${TARGET}_audit_$TS.log"
 DIFFS="$LOG_DIR/${TARGET}_diffs_$TS.txt"
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" 2>/dev/null
+# Fail here with a clear message rather than letting `tee` spray "Permission
+# denied" and rsync exit 1 for reasons that look unrelated. That happens when a
+# previous run was launched with sudo and left the directory root-owned. These
+# scripts need no root: the source is dhm-readable, the ssh keys are dhm's, and
+# dhm is in the docker group -- so they run as dhm like their sibling backup
+# scripts, and mixing sudo and non-sudo invocations is what breaks them.
+if [ ! -w "$LOG_DIR" ]; then
+    echo "FAILED: $LOG_DIR is not writable by $(id -un)."
+    echo "        Owner: $(stat -c '%U:%G' "$LOG_DIR" 2>/dev/null || echo '?')"
+    echo "        Fix:   sudo chown -R dhm:dhm $LOG_DIR"
+    echo "        Then run this WITHOUT sudo."
+    exit 1
+fi
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$LOG"; }
 

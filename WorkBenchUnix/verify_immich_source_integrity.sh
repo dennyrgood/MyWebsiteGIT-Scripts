@@ -32,7 +32,18 @@ LOG_DIR="/home/dhm/.cache/immich-integrity"
 LOG="$LOG_DIR/source_integrity_$TS.log"
 SUMS="$LOG_DIR/expected_$TS.sha1"
 FAILED="$LOG_DIR/failed_$TS.txt"
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" 2>/dev/null
+# Fail here with a clear message rather than letting `tee` spray "Permission
+# denied" and rsync exit 1 for reasons that look unrelated. This happens when a
+# previous run was launched with sudo and left the directory root-owned: these
+# scripts run as dhm, like their sibling backup scripts, and need no root.
+if [ ! -w "$LOG_DIR" ]; then
+    echo "FAILED: $LOG_DIR is not writable by $(id -un)."
+    echo "        Owned by $(stat -c '%U:%G' "$LOG_DIR" 2>/dev/null || echo '?')."
+    echo "        Fix with: sudo chown -R $(id -un):$(id -gn) $LOG_DIR"
+    echo "        Run this script WITHOUT sudo -- it does not need root."
+    exit 1
+fi
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$LOG"; }
 
