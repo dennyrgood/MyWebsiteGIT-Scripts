@@ -57,6 +57,20 @@ die() {
     exit 1
 }
 
+# Root check BEFORE the first log() call. This script writes /var/log and
+# /var/lib and runs from ROOT's crontab -- unlike verify_immich_source_integrity.sh
+# and audit_mirror_checksums.sh, which run as dhm from dhm's crontab because
+# they only need dhm's ssh keys and docker access. Without this guard a
+# non-root run sprays "tee: Permission denied" on every line while still
+# printing OK, which reads as working and silently records nothing.
+if [ "$(id -u)" -ne 0 ]; then
+    echo "FAILED: this script must run as root (use sudo)."
+    echo "        It writes $LOG and $STATE."
+    echo "        Note: verify_immich_source_integrity.sh and"
+    echo "        audit_mirror_checksums.sh are the opposite -- run those WITHOUT sudo."
+    exit 1
+fi
+
 log "=== Checking off-site replication to $DEVICE_NAME ==="
 
 systemctl is-active --quiet syncthing@dhm || die "syncthing@dhm is not running"

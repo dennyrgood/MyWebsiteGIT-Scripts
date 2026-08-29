@@ -383,6 +383,30 @@ corrupted file sit on FleetNAS from June until it was found.
 | `verify-restic-integrity-scheduled.ps1` | s3g's packs vs their ids | 16th 03:00, on s3g | yes |
 | `verify-offsite-restic.ps1` | s3g repo opens and returns files | occasional, by hand | no |
 
+### Which scripts need sudo, and which must not have it
+
+Two groups, split by what they write rather than by what they do. Getting it
+wrong fails in confusing ways, so it is worth stating plainly.
+
+| Script | Run as | Because |
+|---|---|---|
+| `backup_immich_to_restic.sh` | **root** (`sudo`) | reads the passphrase file, writes `/var/log` |
+| `syncthing_offsite_status.sh` | **root** (`sudo`) | writes `/var/log` and `/var/lib` |
+| `nightly_summary.sh` | **root** (`sudo`) | reads `/var/log`, NVMe SMART, pstore |
+| `verify_immich_source_integrity.sh` | **dhm** (no sudo) | only needs docker group + readable source |
+| `audit_mirror_checksums.sh` | **dhm** (no sudo) | only needs dhm's ssh keys + readable source |
+| `restic-wbu` | **root** (`sudo`) | the passphrase file is root-only |
+
+The dhm ones sit in dhm's crontab beside `backup_immich_images_to_macmini.sh`
+and `_to_fleetnas.sh`, which need exactly the same access. The root ones sit in
+root's crontab beside `dump_immich_db_for_cwhu.sh`.
+
+Running a dhm script under sudo leaves root-owned logs in `~/.cache`, which then
+refuses the next non-sudo run. Running a root script as dhm sprays
+`tee: Permission denied` on every line while still printing a success marker --
+it looks like it worked and records nothing. Both scripts now check and say
+which way round they want to be run.
+
 ### The one that closes the circle
 
 `verify_immich_source_integrity.sh` is the only check that can catch WBU itself
