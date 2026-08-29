@@ -14,7 +14,7 @@ The user refers to fleet machines by short alias in conversation — recognize t
 |---|---|---|---|
 | amsdt | amsterdamdesktop | `AmsterdamDesktop/` | Windows |
 | cwh | chatworkhorse | `ChatWorkHorse/` | Windows |
-| cwhu | chatworkhorseunix | `ChatWorkhorseUnix/` | Ubuntu |
+| cwhu | chatworkhorseunix | `ChatWorkhorseUnix/` | Ubuntu — VirtualBox VM on the ChatWorkHorse Windows host, not bare metal |
 | ib | imagebeast | `ImageBeast/` | Windows |
 | mb | denniss-macbook-air | `DennissMacBookAir/` | macOS — main workstation |
 | mb2 | denniss-2nd-macbook-air | `Denniss2ndMacBookAir/` | macOS |
