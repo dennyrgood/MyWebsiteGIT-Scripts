@@ -40,6 +40,26 @@ systemctl is-enabled nut-monitor > "$DEST/nut-monitor.enabled.txt" 2>&1 || true
 systemctl is-enabled fleet_metrics_server > "$DEST/fleet_metrics_server.enabled.txt" 2>&1 || true
 
 
+# Immich integrity exceptions (added 2026-08-29). Asset UUIDs whose on-disk
+# file disagrees with Immich's recorded checksum but has been investigated and
+# found sound -- see WorkBenchUnix/OFFSITE_BACKUP.md. Without this file the
+# weekly verify_immich_source_integrity.sh run reports six mismatches and goes
+# red forever, so a rebuilt box needs it back.
+#
+# The scripts repo carries immich-integrity-exceptions.example as the starting
+# point; THIS copy is the live state, which is what a rebuild actually wants.
+# No secrets in it -- UUIDs and comments.
+#
+# NOT captured, deliberately: /root/.restic-passphrase. It is the only key to
+# the off-site repo, and fleet-configs is a git repo that syncs between boxes
+# and to GitHub. Its off-site copy belongs in a password manager and on paper,
+# not here. See the Open items section of OFFSITE_BACKUP.md.
+if [ -f /etc/immich-integrity-exceptions ]; then
+    cp -p /etc/immich-integrity-exceptions "$DEST/etc-immich-integrity-exceptions.txt"
+else
+    echo "note: /etc/immich-integrity-exceptions not present - source integrity check will alarm"
+fi
+
 # Syncthing (added 2026-08-25). Replicates the restic repo off-site to s3g --
 # see WorkBenchUnix/OFFSITE_BACKUP.md.
 #
