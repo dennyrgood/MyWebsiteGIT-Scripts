@@ -32,6 +32,42 @@ it guaranteed.
 CWHU shuts *itself* down rather than being driven entirely from the host, so it still
 stops cleanly if the host's scheduled task is broken or misconfigured.
 
+### Minutes are not enough on their own — the charge floor
+
+Every machine now stops on **whichever of three conditions arrives first**: the minutes
+above, a battery-charge floor, or the UPS's own `LB` flag.
+
+Elapsed time alone silently assumes a known runtime, and runtime varies enormously with
+how recently the battery was last drained. Measured on 2026-08-29, same UPS, same load,
+two hours apart:
+
+| Battery state | Discharge rate | Implied runtime |
+|---|---|---|
+| Rested | 1.15 %/min | ~45–65 min |
+| 35 min of recharge after a drain to 50% | **5.20 %/min** | **~12 min** |
+
+It reported **98%** at the start of the second test. That was surface charge, not
+stored energy — a lead-acid battery does not recover in 35 minutes. So a percentage
+read shortly after a discharge cannot be trusted in absolute terms, but *falling
+through a floor* is still a reliable "stop now".
+
+This matters because a second outage an hour after the first is exactly when the
+battery is weakest, and it is not a rare scenario.
+
+**Where each machine gets its floor:**
+
+| Machine | Floor | Source |
+|---|---|---|
+| WorkBenchUnix | 15% | `ignorelb` + `override.battery.charge.low = 15` in its own `ups.conf`; upsmon acts on LOWBATT |
+| ChatWorkhorseUnix | 15% | inherited — as an upsmon secondary with `MINSUPPLIES 1` it shuts down on `OB LB` |
+| ImageBeast | 35% | `ups-watch.ps1 -MinBatteryPercent` (default) |
+| ChatWorkhorse | 45% suggested | as above; it can spend up to `VMWaitSeconds` waiting for the VM before Windows even begins |
+
+The Windows clients need a floor well above 15% rather than simply honouring `LB`: at
+the rate measured on 2026-08-29 the gap between 35% and 15% is only about four minutes,
+and a Windows box has a 30-second shutdown delay plus the shutdown itself to get
+through. They honour `LB` too, as a last-resort backstop.
+
 ---
 
 ## Why PowerShell rather than a NUT client on Windows

@@ -38,6 +38,26 @@
         ChatWorkhorse  8   (waits for the VM regardless)
         WorkBenchUnix 10   (its own upssched timer)
 
+.PARAMETER MinBatteryPercent
+    Shut down if battery charge falls to or below this, regardless of elapsed time.
+    Whichever of the three conditions fires first wins: this floor, the UPS's own LB
+    flag, or MinutesOnBattery.
+
+    This exists because elapsed time alone assumes a known runtime, and runtime varies
+    enormously with how recently the battery was last drained. Measured 2026-08-29:
+    a rested battery fell 1.15%/min, but the same battery after only 35 minutes of
+    recharging fell 5.20%/min - 4.5x faster - while still reporting 98% at the start.
+    A percentage read shortly after a discharge is surface charge, not stored energy.
+
+    WorkBenchUnix and ChatWorkhorseUnix already have this via NUT: WBU's ups.conf sets
+    `ignorelb` with `override.battery.charge.low = 15`, so upsd publishes LB at 15% and
+    both act on it. The Windows clients were the only machines with no floor at all.
+
+    35 is deliberately well above that 15% LB: at the discharge rate measured on
+    2026-08-29 the gap between them is only a couple of minutes, and a Windows box has
+    a 30-second shutdown delay plus the actual shutdown to get through. ChatWorkhorse
+    may want more still, since it can spend up to VMWaitSeconds waiting for the VM.
+
 .PARAMETER VMName
     Optional VirtualBox VM to stop before shutting down. Used on ChatWorkhorse for
     ChatWorkhorseUnix. Leave empty elsewhere.
@@ -81,6 +101,7 @@ param(
     [int]   $MinutesOnBattery = 8,
     [string]$VMName           = "",
     [int]   $VMWaitSeconds    = 180,
+    [int]   $MinBatteryPercent = 35,
     [string]$SSHUser          = "dhm",
     [string]$SSHKeyPath       = (Join-Path $env:USERPROFILE ".ssh\cwh_ups_watch_ed25519"),
     [int]   $SSHConnectTimeoutSeconds = 10,
@@ -236,18 +257,41 @@ if (" $status " -notlike "* OB *") {
 # means the UPS was read, so the latch above gets its chance the moment power returns.
 if (Test-Path $TriggerFile) { exit 0 }
 
+# Arm on first sight of OB, then fall through to the checks below rather than
+# returning. If the battery is already critical when the outage starts - a second
+# outage on a half-recharged battery, say - waiting a further minute to notice is
+# exactly the wrong thing to do.
 if (-not (Test-Path $StateFile)) {
     Set-Content -Path $StateFile -Value ((Get-Date).ToUniversalTime().ToString("o"))
     Write-Log "ON BATTERY (status: $status) - ${MinutesOnBattery}min countdown started."
-    exit 0
 }
 
 $since   = [datetime]::Parse((Get-Content $StateFile -Raw).Trim()).ToUniversalTime()
 $elapsed = ((Get-Date).ToUniversalTime() - $since).TotalMinutes
 
-if ($elapsed -ge $MinutesOnBattery) {
-    Invoke-FleetShutdown ("on battery {0:N1}min, threshold {1}min" -f $elapsed, $MinutesOnBattery)
+# Read charge only while on battery - on mains this script has already exited.
+# Failure is non-fatal: fall back to elapsed time and the LB flag.
+$charge = $null
+try { $charge = [int](Get-UpsVar "battery.charge") } catch { }
+
+# Three independent reasons to stop, whichever arrives first. Elapsed time alone was
+# not enough: see .PARAMETER MinBatteryPercent for the 2026-08-29 measurements.
+$reason = $null
+if (" $status " -like "* LB *") {
+    # The UPS itself, via WBU's override.battery.charge.low, says the battery is done.
+    $reason = "UPS reports LOW BATTERY (status: $status)"
+}
+elseif ($null -ne $charge -and $charge -le $MinBatteryPercent) {
+    $reason = "battery {0}% at or below floor {1}%, after {2:N1}min on battery" -f $charge, $MinBatteryPercent, $elapsed
+}
+elseif ($elapsed -ge $MinutesOnBattery) {
+    $reason = "on battery {0:N1}min, threshold {1}min" -f $elapsed, $MinutesOnBattery
+}
+
+if ($reason) {
+    Invoke-FleetShutdown $reason
 }
 else {
-    Write-Log ("On battery {0:N1}min of {1}min." -f $elapsed, $MinutesOnBattery)
+    $c = if ($null -eq $charge) { "?" } else { "$charge" }
+    Write-Log ("On battery {0:N1}min of {1}min, charge {2}% (floor {3}%)." -f $elapsed, $MinutesOnBattery, $c, $MinBatteryPercent)
 }
