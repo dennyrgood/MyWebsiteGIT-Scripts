@@ -159,10 +159,6 @@ function Invoke-FleetShutdown([string]$Reason) {
 
 # --- main ------------------------------------------------------------------
 
-# Already fired during this power event. The shutdown is in flight (the VM wait
-# alone can take minutes); do not stack another on top of it. Cleared on ONLINE.
-if (Test-Path $TriggerFile) { exit 0 }
-
 try {
     $status = Get-UpsVar "ups.status"
 }
@@ -181,9 +177,26 @@ if (" $status " -notlike "* OB *") {
         Remove-Item $StateFile -Force
         Write-Log "Power restored (status: $status) - countdown cancelled."
     }
-    if (Test-Path $TriggerFile) { Remove-Item $TriggerFile -Force }
-    exit 0    # Silent when healthy, so this does not write a log line every minute forever.
+    # Clearing the latch MUST happen here, after the UPS has been read, and not be
+    # guarded by an early exit at the top of main.
+    #
+    # 2026-08-29: it previously was. `if (Test-Path $TriggerFile) { exit 0 }` sat
+    # above the status read, so once this file existed the script exited before ever
+    # reaching this line - the only line that removes it. Any machine that fired a
+    # shutdown was therefore permanently disarmed from its next boot onward, and
+    # silently, because the early exit came before any logging. Found when ImageBeast
+    # sat through the 2026-08-29 full-outage test without shutting down.
+    if (Test-Path $TriggerFile) {
+        Remove-Item $TriggerFile -Force
+        Write-Log "Trigger latch cleared - armed again."
+    }
+    exit 0    # Otherwise silent when healthy, so this does not log every minute forever.
 }
+
+# On battery, and we already fired for THIS event: the shutdown is in flight (the VM
+# wait alone can take minutes), so do not stack another on top of it. Reaching here
+# means the UPS was read, so the latch above gets its chance the moment power returns.
+if (Test-Path $TriggerFile) { exit 0 }
 
 if (-not (Test-Path $StateFile)) {
     Set-Content -Path $StateFile -Value ((Get-Date).ToUniversalTime().ToString("o"))
