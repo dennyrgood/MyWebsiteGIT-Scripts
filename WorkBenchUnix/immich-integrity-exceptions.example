@@ -4,21 +4,30 @@
 # investigated and found NOT to be disk corruption. One UUID per line.
 # verify_immich_source_integrity.sh skips these but still reports the count.
 #
-# 2026-08-28 -- the three largest videos in the library. For each, WBU and
-# FleetNAS hold IDENTICAL bytes (two independent reads agreeing) and the files
-# are structurally valid; only Immich's database disagrees, and it disagrees
-# with both copies rather than matching either.
+# ---------------------------------------------------------------------------
+# 2026-08-28/29: six assets, and every one is a corrupted RECORD, not a
+# corrupted file. For each: WBU and FleetNAS hold identical bytes, the file is
+# structurally valid, and its size matches Immich's own EXIF record exactly.
+# Only the stored checksum disagrees -- and it disagrees with both copies
+# rather than matching either.
 #
-# Immich streams the whole file through memory to hash it at ingest, so a
-# multi-gigabyte video passes ~1000x more data through RAM than a photo does.
-# All three were ingested between 2026-06-22 and 2026-08-22, inside the window
-# when this machine ran four mismatched DIMMs. Every asset under ~150 MB
-# matched its record; only the multi-GB ones did not. The recorded checksums
-# are the corrupted values, not the files.
+# Immich hashes a file once, in memory, at ingest. All six were ingested on
+# 2026-06-23, the day 45,482 assets (65% of the library) were imported in a
+# single session, inside the window when this machine ran four mismatched
+# DIMMs. Six bad records in 45,482 is roughly 1 in 7,580 -- what marginal
+# memory does over a long sustained import.
 #
-# Re-check these if Immich ever recomputes checksums; the entries can be
-# removed once the database agrees with the disk again.
+# Note the correlation is the INGEST DATE, not file size: the six range from
+# 2.4 MB to 5.4 GB. An earlier reading of this as a large-file effect was
+# wrong.
+#
+# Remove an entry if Immich ever recomputes checksums and the database agrees
+# with the disk again.
+# ---------------------------------------------------------------------------
 
 45d01a4e-a5b6-46c6-84a4-2c779be21f26   # 5.4 GB mp4
 9d8cb158-b14f-4477-bca2-d204ffa90773   # 2.0 GB mp4
 c81cb913-6860-4bbf-b9fc-adb7727703d2   # 3.0 GB mp4
+3c50864a-670d-47e7-83d9-091d24d69d90   # 2.8 MB PNG, 1242x2208
+931d6b61-3fee-4185-a069-f251309f1968   # 2.4 MB JPEG
+c13a243b-7df3-4ad3-9074-5948ceaa4585   # 3.0 MB JPEG
