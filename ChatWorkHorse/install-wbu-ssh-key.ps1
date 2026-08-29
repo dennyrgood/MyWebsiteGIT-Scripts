@@ -6,13 +6,13 @@
 .DESCRIPTION
     Created: 2026-08-29 UTC.
 
-    Run ELEVATED on ChatWorkhorse:   powershell -ExecutionPolicy Bypass -File .\ChatWorkhorse\install-wbu-ssh-key.ps1
+    Run ELEVATED on ChatWorkhorse:   powershell -ExecutionPolicy Bypass -File .\ChatWorkHorse\install-wbu-ssh-key.ps1
 
     WHY administrators_authorized_keys AND NOT ~/.ssh/authorized_keys:
     Windows OpenSSH treats any account in the local Administrators group specially.
     For those accounts sshd reads ONLY C:\ProgramData\ssh\administrators_authorized_keys
-    and ignores the per-profile file entirely. CHATWORKHORSE\Pc is the primary local
-    account (SID ...-1000) and is an administrator, so a key placed in the profile
+    and ignores the per-profile file entirely. CHATWORKHORSE\Pc is the interactive local
+    account (SID ...-1001) and is an administrator, so a key placed in the profile
     would be silently ignored - the login just falls back to asking for a password,
     which looks identical to having installed nothing.
 
