@@ -88,8 +88,12 @@ reads healthy:
 
 ```
 Scheduled Task State: Enabled     Status: Ready     Last Result: 0
-Next Run Time:        N/A         <-- the only field that tells the truth
+Next Run Time:        N/A
 ```
+
+**None of those four fields can tell you.** `Next Run Time` reads `N/A` for a
+repetition-based schedule whether it is running or not — verified on ImageBeast
+2026-08-29, N/A both while dead for 17 days and while polling correctly every minute.
 
 This is exactly how ImageBeast sat through the 2026-08-29 full-outage test. Task
 present, correctly configured, enabled, last result 0 — and never once scheduled,
@@ -100,14 +104,20 @@ Two consequences:
 1. **Add a Daily trigger as well**, also repeating every 1 minute indefinitely. It
    makes the schedule independent of reboots and re-establishes itself every day, so
    the watchdog cannot be silently unscheduled for weeks.
-2. **Verify with `Next Run Time`, never with Status.** After creating the task:
+2. **Verify that `Last Run Time` ADVANCES.** It is the only field that distinguishes
+   a running schedule from a dead one. Sample it twice, ~90 seconds apart:
 
    ```
-   schtasks /query /tn "UPS-Watch-ImageBeast" /fo LIST /v
+   schtasks /query /tn "UPS-Watch-ImageBeast" /fo LIST /v | findstr /i "last run"
    ```
 
-   `Next Run Time: N/A` means nothing is scheduled, whatever else it says. You want a
-   timestamp within the next minute.
+   It must move forward by a minute between samples. A fixed timestamp — however old —
+   means nothing is running, no matter what Status, Last Result or Next Run Time say.
+   On ImageBeast it sat at `8/12/2026 1:19:39 AM` for 17 days while every other field
+   read healthy.
+
+   Do not check the log instead: on mains the script exits silently by design, so an
+   empty log is indistinguishable from one that never ran.
 
 ---
 
