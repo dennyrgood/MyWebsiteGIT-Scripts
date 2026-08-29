@@ -106,6 +106,27 @@ log "=== clean.ubuntu.$ACTION starting on $(hostname) ==="
 log "Log: $LOG_FILE"
 
 # ---------------------------------------------------------------------------
+# 0. Refuse anywhere that is not systemd-managed Linux.
+#
+# The scripts repo is checked out on the Macs too and this is on PATH there, so
+# running it on the wrong machine is one tab-completion away. Without this guard it
+# runs the entire way through on macOS: prompts for a sudo password, reports "All
+# Compose stacks stopped cleanly" having stopped nothing, promises dockerd will
+# restart containers that do not exist, and only then fails on the final line with
+# `sudo: systemctl: command not found`.
+#
+# Nothing is damaged by that, but every line of it is false, and the password prompt
+# is the part worth never reaching. Hit on a MacBook Air, 2026-08-29.
+if [ "$(uname -s)" != "Linux" ] || ! command -v systemctl >/dev/null 2>&1; then
+    log "This is $(uname -s), not systemd-managed Linux — none of this applies here."
+    case "$(uname -s)" in
+        Darwin) log "On macOS use:  sudo shutdown -h now    (or -r now to reboot)" ;;
+        *)      log "Use whatever this platform's native shutdown command is." ;;
+    esac
+    die "refusing to run on a non-systemd host — nothing was touched."
+fi
+
+# ---------------------------------------------------------------------------
 # 1. Busy check — before anything is touched, so a refusal costs nothing.
 # ---------------------------------------------------------------------------
 BUSY=""
@@ -260,7 +281,9 @@ if [ -n "$UNCLEAN" ]; then
     STOP_FAILED=1
 fi
 
-if [ "$STOP_FAILED" -eq 0 ]; then
+# Only claim success when there was actually something to stop. Saying "all stopped
+# cleanly" after finding nothing reads as confirmation that the teardown worked.
+if [ -n "$PROJECTS" ] && [ "$STOP_FAILED" -eq 0 ]; then
     log "All Compose stacks stopped cleanly."
 fi
 
@@ -270,6 +293,6 @@ log "Syncing filesystems..."
 sync
 
 log "=== Teardown complete — issuing $ACTION ==="
-log "On boot, dockerd restarts these containers automatically (restart: always)."
+[ -n "$PROJECTS" ] && log "On boot, dockerd restarts these containers automatically (restart: always)."
 
 exec sudo systemctl "$ACTION"
