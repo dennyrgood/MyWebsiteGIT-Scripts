@@ -26,72 +26,45 @@ it guaranteed.
 CWHU shuts *itself* down rather than being driven entirely from the host, so it still
 stops cleanly if the host's scheduled task is broken or misconfigured.
 
-### Minutes are not enough on their own — the charge floor
+### One ordering axis, plus a shared floor
 
-Every machine now stops on **whichever of three conditions arrives first**: the minutes
-above, a battery-charge floor, or the UPS's own `LB` flag.
+**Minutes are the only ordering.** Every machine's position in the sequence is
+expressed in minutes and nothing else, so there is a single sorted list to check
+rather than two that must agree.
 
-Elapsed time alone silently assumes a known runtime, and runtime varies enormously with
-how recently the battery was last drained. Measured on 2026-08-29, same UPS, same load,
-two hours apart:
+A per-machine battery percentage was tried on 2026-08-29 and removed the same evening.
+It is a second ordering, and within minutes of adding it ChatWorkhorse's floor had been
+set above ChatWorkhorseUnix's — inverting the very sequence the minutes were arranged
+to produce. Two orderings across four machines is eight numbers that must jointly
+agree, maintained by hand in three files. The bug class was the design, not the number.
 
-| Battery state | Discharge rate | Implied runtime |
-|---|---|---|
-| Rested | 1.15 %/min | ~45–65 min |
-| 35 min of recharge after a drain to 50% | **5.20 %/min** | **~12 min** |
+**`LB` is not a second ordering**, which is why it is safe to keep. It is one shared
+signal, published by WBU's `ups.conf` and delivered to every machine at the same
+instant — a floor, not a sequence. Nothing has to be kept consistent with anything.
+It means "the battery is genuinely running out, everyone stop now", a case where
+ordering no longer matters and each machine simply shuts itself down cleanly.
+ChatWorkhorse still waits for the VM.
 
-It reported **98%** at the start of the second test. That was surface charge, not
-stored energy — a lead-acid battery does not recover in 35 minutes. So a percentage
-read shortly after a discharge cannot be trusted in absolute terms, but *falling
-through a floor* is still a reliable "stop now".
+| Machine | Acts on `LB` via |
+|---|---|
+| WorkBenchUnix | its own `upsmon`, LOWBATT → SHUTDOWNCMD |
+| ChatWorkhorseUnix | inherited — upsmon secondary with `MINSUPPLIES 1` shuts down on `OB LB` |
+| ImageBeast / ChatWorkhorse | `ups-watch.ps1` reads `LB` out of `ups.status` |
 
-This matters because a second outage an hour after the first is exactly when the
-battery is weakest, and it is not a rare scenario.
+The floor is **30%**, set once in `WorkBenchUnix/nut-ups.conf` as
+`override.battery.charge.low`. Raised from 15% on 2026-08-29: at the 5.2%/min measured
+on a half-recharged battery, 15% left about three minutes, and a Windows box needs a
+30-second shutdown delay plus the shutdown itself.
 
-**Where each machine gets its floor:**
+It stays a genuine backstop rather than second-guessing the timers. On a rested battery
+the measured rate was 1.15%/min from a settled ~75%, so 30% is not reached for roughly
+39 minutes — long after every timer has fired. It engages only when the battery is
+degraded or half-recharged. That was the only reason it was needed: the 2026-08-29
+figures came from two outages stacked with no chance to recover to full, not from
+normal operation.
 
-| Machine | Floor | Source |
-|---|---|---|
-| WorkBenchUnix | 15% | `ignorelb` + `override.battery.charge.low = 15` in its own `ups.conf`; upsmon acts on LOWBATT |
-| ChatWorkhorseUnix | 15% | inherited — as an upsmon secondary with `MINSUPPLIES 1` it shuts down on `OB LB` |
-| ImageBeast | 35% | `ups-watch.ps1 -MinBatteryPercent` (default) |
-| ChatWorkhorse | **30%** | as above; it can spend up to `VMWaitSeconds` waiting for the VM before Windows even begins |
-
-The Windows clients need a floor well above 15% rather than simply honouring `LB`: at
-the rate measured on 2026-08-29 the gap between 35% and 15% is only about four minutes,
-and a Windows box has a 30-second shutdown delay plus the shutdown itself to get
-through. They honour `LB` too, as a last-resort backstop.
-
-### The ordering invariant — it applies to BOTH axes
-
-**A machine's charge floor must sit BELOW the charge at which everything depending on
-it is expected to have already gone — just as its minutes sit above theirs.**
-
-Getting this right on one axis and wrong on the other is easy, and was: ChatWorkhorse
-was first given a 45% floor while ChatWorkhorseUnix, which must stop before it, had
-only the inherited 15% `LB`. Against the 2026-08-29 discharge curve:
-
-```
-22:57:04  outage begins
-23:00:35  battery ~45%   -> CWH would fire here      (3.5 min)
-23:02:04  CWHU's 5-minute timer                       (5.0 min)
-```
-
-CWH would have gone ~90 seconds before the VM it is supposed to wait for. Not
-corrupting — `Stop-VMAndWait` SSHes in and runs `clean.ubuntu.shutdown` on CWHU first —
-but it makes the fallback path the normal one and reduces CWHU's own upsmon to
-decoration. 30% moves CWH to ~6.5 min on that curve, back behind CWHU.
-
-**Why CWHU cannot simply be given a higher floor instead:** `LB` is a single
-fleet-wide signal, published from WBU's `ups.conf`. Raising
-`override.battery.charge.low` to fire CWHU earlier fires it on WBU too — and WBU must
-be last. NUT gives secondaries no per-client charge threshold, so this ordering has to
-be expressed in the *client's* number, never in `LB`.
-
-Consequence: 30% preserves the order on that particular discharge curve. On a
-sufficiently faster one it could invert again. The only structural guarantee is CWH
-waiting for the VM to reach `poweroff`. Ordering by threshold is the optimisation; the
-wait is the correctness.
+**To change the floor, change that one line and reinstall `ups.conf` on WBU.** Never
+express per-machine ordering in it.
 
 ---
 
