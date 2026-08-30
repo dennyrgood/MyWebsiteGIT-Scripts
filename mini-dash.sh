@@ -68,7 +68,7 @@ while true; do
   fi
 
   # --- MOLE DISPLAY OUTPUT ---
-  echo -e "\033[1;35m🐹 Mole System Status 🐹\033[0m\033[K"
+  echo -e "\033[1;35m🐹 Mini-Mole System Status 🐹\033[0m\033[K"
   printf "Health: %b\033[K\n" "$HEALTH_STR"
   echo -e "\033[1;30m----------------------------------------\033[0m\033[K"
   
