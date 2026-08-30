@@ -31,6 +31,23 @@ NOW=$(date +%s)
 ALERT_INTERVAL=$((30 * 60))
 FAIL_THRESHOLD=2   # consecutive 5-min samples before alerting (anti-flap on restarts)
 
+# 2026-08-30: COMFY_HTTP gets its own longer threshold. It's a bare `python3 -m
+# http.server` serving a live OneDrive-synced folder (fleet-output/) -- a real
+# incident this same day showed a transient OneDrive sync lock on that folder can
+# wedge the process's directory listing (curl 404 "No permission to list
+# directory") for 10+ minutes without self-healing (needed a manual kickstart),
+# so the flakiness is real, not a false positive -- but it's also a low-stakes
+# personal convenience server, not fleet-critical infra like heartbeat-writer/
+# metrics-server. Widening ITS threshold alone buys fewer emails for this one
+# known-flaky service without dulling real alerts for the services that actually
+# blind the fleet dashboard if missed.
+FAIL_THRESHOLD_COMFY_HTTP=5   # ~25 min instead of the default ~10 min
+threshold_for() {
+    local svc=$1 override
+    override=$(eval echo \$FAIL_THRESHOLD_${svc})
+    echo "${override:-$FAIL_THRESHOLD}"
+}
+
 # HEARTBEAT_WRITER has no HTTP endpoint of its own — its "down" state comes from the
 # freshness check below instead of check_service's usual curl. FLEET_METRICS's own
 # liveness proof IS this box's own heartbeat file being served, so that doubles as
@@ -138,7 +155,7 @@ for svc in COMFY_HTTP METRICS_SERVER HEARTBEAT_WRITER SEARCH_ADV SEARCH_SHOWS TM
     last=$(eval echo \$MISSING_${svc}_LAST_ALERT)
     active=$(eval echo \$MISSING_${svc}_ACTIVE)
     streak=$(eval echo \$MISSING_${svc}_STREAK)
-    read verdict new_streak <<< "$(check_condition_streak $trig $last $active $streak $FAIL_THRESHOLD)"
+    read verdict new_streak <<< "$(check_condition_streak $trig $last $active $streak $(threshold_for $svc))"
     eval "MISSING_${svc}_STREAK=$new_streak"
     case "$verdict" in
         alert)
@@ -157,7 +174,7 @@ for svc in COMFY_HTTP METRICS_SERVER HEARTBEAT_WRITER SEARCH_ADV SEARCH_SHOWS TM
     last=$(eval echo \$DOWN_${svc}_LAST_ALERT)
     active=$(eval echo \$DOWN_${svc}_ACTIVE)
     streak=$(eval echo \$DOWN_${svc}_STREAK)
-    read verdict new_streak <<< "$(check_condition_streak $trig $last $active $streak $FAIL_THRESHOLD)"
+    read verdict new_streak <<< "$(check_condition_streak $trig $last $active $streak $(threshold_for $svc))"
     eval "DOWN_${svc}_STREAK=$new_streak"
     case "$verdict" in
         alert)
@@ -184,9 +201,11 @@ WHAT THESE ALERTS MEAN AND WHAT TO DO
 <SVC> MISSING:
 No process matching the service's launchd command was found — it quit or
 crashed. Requires ${FAIL_THRESHOLD} consecutive checks (~$((FAIL_THRESHOLD * 5)) min) before
-alerting, to ride out a normal restart. All of these are launchd KeepAlive
-agents, so this firing at all usually means it's crash-looping faster than
-launchd can win.
+alerting for most services (COMFY_HTTP uses a longer ${FAIL_THRESHOLD_COMFY_HTTP}-check
+/ ~$((FAIL_THRESHOLD_COMFY_HTTP * 5))-min threshold — it's prone to transient
+OneDrive-sync hiccups on the folder it serves), to ride out a normal restart.
+All of these are launchd KeepAlive agents, so this firing at all usually means
+it's crash-looping faster than launchd can win.
 
 What to do:
   1. launchctl list | grep com.dennis
