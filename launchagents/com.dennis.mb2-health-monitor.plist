@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dennis.mb2-health-monitor</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/dennishmathes/repos/scripts/Denniss2ndMacBookAir/mb2-health-monitor.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/dennishmathes/repos/scripts/Denniss2ndMacBookAir</string>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <false/>
+
+    <!-- Matches mb/mmm-health-monitor.plist's fix (2026-08-05): background launchd
+         agents (no RunAtLoad+KeepAlive) get throttled by macOS by default, which
+         can kill network I/O (curl health checks) mid-run under launchd even
+         though the identical script completes fine interactively. -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/dennishmathes/Library/Logs/mb2_health_monitor.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dennishmathes/Library/Logs/mb2_health_monitor.log</string>
+</dict>
+</plist>

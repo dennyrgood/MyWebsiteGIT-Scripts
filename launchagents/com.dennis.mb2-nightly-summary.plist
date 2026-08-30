@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dennis.mb2-nightly-summary</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/dennishmathes/repos/scripts/Denniss2ndMacBookAir/mb2-nightly-summary.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/dennishmathes/repos/scripts/Denniss2ndMacBookAir</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <false/>
+
+    <!-- Matches mb/mmm-nightly-summary.plist's fix (2026-08-05) — see mb2-health-monitor
+         .plist's comment for the underlying launchd-throttling issue this avoids. -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/dennishmathes/Library/Logs/mb2_nightly_summary.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dennishmathes/Library/Logs/mb2_nightly_summary.log</string>
+</dict>
+</plist>
