@@ -63,6 +63,28 @@ fmt_age() {
     fi
 }
 
+# 2026-08-30: per-service breakdown of $MONITOR_STATE for the TLDR — added after the
+# generic "no active alerts" aggregate line turned out to look identical whether or
+# not TMDB/HEARTBEAT_WRITER/METRICS_SERVER checks existed at all: they were real
+# (visible in the full state dump at the bottom), but nothing at-a-glance in the TLDR
+# actually named them, so a passing run looked no different pre/post. This reads the
+# same MISSING_${svc}_ACTIVE/DOWN_${svc}_ACTIVE keys mmm-health-monitor.sh already
+# writes — no new state, just surfacing what's already there per-service instead of
+# only as one aggregate line.
+svc_status() {
+    local svc=$1
+    local missing down
+    missing=$(grep "^MISSING_${svc}_ACTIVE=" "$MONITOR_STATE" 2>/dev/null | cut -d= -f2)
+    down=$(grep "^DOWN_${svc}_ACTIVE=" "$MONITOR_STATE" 2>/dev/null | cut -d= -f2)
+    if [ "$missing" = "1" ]; then
+        echo "⚠️ MISSING"
+    elif [ "$down" = "1" ]; then
+        echo "⚠️ NOT RESPONDING"
+    else
+        echo "✓"
+    fi
+}
+
 OK=1
 REASON="all healthy"
 
@@ -180,6 +202,11 @@ if [ -f "$MONITOR_STATE" ]; then
     else
         TLDR+="  mmm-health-monitor: no active alerts ✓\n"
     fi
+    TLDR+="    plex:             $(svc_status PLEX)\n"
+    TLDR+="    syncthing:        $(svc_status SYNCTHING)\n"
+    TLDR+="    tmdb-explorer:    $(svc_status TMDB)\n"
+    TLDR+="    heartbeat-writer: $(svc_status HEARTBEAT_WRITER)\n"
+    TLDR+="    metrics-server:   $(svc_status METRICS_SERVER)\n"
 else
     TLDR+="  mmm-health-monitor: ⚠️ state file missing ($MONITOR_STATE)\n"
     [ "$OK" -eq 1 ] && { OK=0; REASON="health monitor stale/missing"; }
