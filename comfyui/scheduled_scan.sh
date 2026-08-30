@@ -26,6 +26,12 @@ latest_explorer=$(ls -t "$OUTPUT_DIR"/fleet_explorer_*.html 2>/dev/null | head -
 
 # Keep the last 3 runs' worth of timestamped files (inputs, fleet-output,
 # history) -- same retention already used interactively this session.
-python3 "$SCRIPT_DIR/comfy_fleet.py" --config "$REPORTS_DIR/fleet_config.json" --prune-output --confirm-prune --keep-runs 3
+# 2026-08-30: pinned to the Homebrew interpreter explicitly -- under launchd's
+# minimal PATH, bare `python3` resolves to Apple's system Python (/usr/bin/python3,
+# 3.9.6), which predates PEP 604's `str | None` syntax (added in 3.10) that
+# comfy_fleet.py's own type hints use. Ran fine interactively (Homebrew's 3.14.7
+# is first on an interactive shell's PATH) but crashed every night under launchd
+# with "TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'".
+/opt/homebrew/bin/python3 "$SCRIPT_DIR/comfy_fleet.py" --config "$REPORTS_DIR/fleet_config.json" --prune-output --confirm-prune --keep-runs 3
 
 echo "=== $(date) -- scheduled fleet scan complete ==="

@@ -43,4 +43,10 @@ fi
 
 cd "$REPORTS_DIR" || { echo "ERROR: Could not cd to $REPORTS_DIR"; exit 1; }
 
-python3 "$SCRIPT_DIR/comfy_fleet.py" "${PY_ARGS[@]}"
+# 2026-08-30: pinned to the Homebrew interpreter explicitly -- see the matching
+# comment in scheduled_scan.sh. This one usually gets away with bare `python3`
+# since it's normally run interactively (an interactive shell's PATH finds
+# Homebrew's 3.14 first), but any non-interactive/minimal-PATH invocation (cron,
+# a bare SSH command, launchd) would resolve to Apple's system Python 3.9.6
+# instead and hit the same "str | None" (PEP 604, needs 3.10+) crash.
+/opt/homebrew/bin/python3 "$SCRIPT_DIR/comfy_fleet.py" "${PY_ARGS[@]}"
