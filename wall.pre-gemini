@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# wall — launch the fleet status wall in a Fleet-profile Terminal window on the second display
+# 2026-08-26 ~18:15 UTC — initial version: load tmuxp wall, then bias row heights
+# 2026-08-26 ~18:45 UTC — removed row-bias resize; added even re-tile so all panes render
+# 2026-08-26 ~19:05 UTC — open in Fleet profile + maximize via AppleScript
+# 2026-08-26 ~19:20 UTC — more robust profile selection: set current settings on the new window explicitly
+# 2026-08-26 ~19:45 UTC — fill screen via explicit window bounds (normal window, accepts overlays)
+# 2026-08-26 ~20:05 UTC — support a saved LAYOUT string (paste captured layout below); falls back to tiled
+# 2026-08-26 ~21:35 UTC — add per-pane hostname border labels (single-line do script; avoids multi-line parse error)
+# 2026-08-26 ~22:10 UTC — allow-rename off so Windows conhost title can't overwrite RWS/S3G pane labels
+# 2026-08-26 ~21:15 UTC — open directly at a fixed region of the second (left) display, not full screen
+# 2026-08-26 ~21:25 UTC — apply LAYOUT *after* the window resize; label+attach in do-script, then bounds,
+#                          then settle + select-layout at final size. Capture LAYOUT at the final size.
+# 2026-08-26 ~21:40 UTC — right-third bounds {-640,25,0,1080}; lock acf0 (207x134); force-resize grid
+#                          to 207x134 before select-layout; double-apply to snap MB row rounding drift
+# 2026-08-26 ~22:20 UTC — periodic label re-assert: Windows conhost overwrites pane -T titles on
+#                          reconnect even with allow-rename off (tmux 3.7c); refresh-client alone
+#                          does not fix it; re-apply all 13 labels + repaint every 60s via
+#                          nohup+disown loop so it survives closing the launching terminal
+# 2026-08-27 ~09:15 UTC — pre-launch cleanup: kill previous fleet session + taskkill status.exe on
+#                          all Windows hosts; 2>&1 on ssh captures PowerShell NativeCommandError;
+#                          LogLevel=ERROR suppresses post-quantum warnings in cleanup output
+# Paste your captured layout string between the quotes to lock it. Capture at the final window size.
+# Leave empty to use tmux's default tiled grid (recomputed for the live size each launch).
+#LAYOUT="b64c,313x141,0,0[313x41,0,0{77x41,0,0,50,77x41,78,0,51,77x41,156,0,52,79x41,234,0,53},313x40,0,42{77x40,0,42,54,77x40,78,42,55,77x40,156,42,56,79x40,234,42,57},313x35,0,83{77x35,0,83,58,77x35,78,83,59,77x35,156,83,60,79x35,234,83,61},313x22,0,119,62]"
+#LAYOUT="822c,313x141,0,0[313x41,0,0{77x41,0,0,50,77x41,78,0,51,77x41,156,0,52,79x41,234,0,53},313x40,0,42{77x40,0,42,54,77x40,78,42,55,77x40,156,42,56,79x40,234,42,57},313x38,0,83{77x38,0,83,58,77x38,78,83,59,77x38,156,83,60,79x38,234,83,61},313x19,0,122,62]"
+#LAYOUT="05ea,207x134,0,0[207x38,0,0{50x38,0,0,50,50x38,51,0,51,51x38,102,0,52,53x38,154,0,53},207x37,0,39{50x37,0,39,54,50x37,51,39,55,51x37,102,39,56,53x37,154,39,57},207x39,0,77{50x39,0,77,58,50x39,51,77,59,51x39,102,77,60,53x39,154,77,61},207x17,0,117,62]"
+# LAYOUT="acf0,207x134,0,0[207x40,0,0{50x40,0,0,50,50x40,51,0,51,51x40,102,0,52,53x40,154,0,53},207x35,0,41{50x35,0,41,54,50x35,51,41,55,51x35,102,41,56,53x35,154,41,57},207x39,0,77{50x39,0,77,58,50x39,51,77,59,51x39,102,77,60,53x39,154,77,61},207x17,0,117,62]"
+LAYOUT="f2c5,207x134,0,0[207x40,0,0{50x40,0,0,1,50x40,51,0,2,51x40,102,0,3,53x40,154,0,4},207x37,0,41{50x37,0,41,5,50x37,51,41,6,51x37,102,41,7,53x37,154,41,8},207x37,0,79{50x37,0,79,9,50x37,51,79,10,51x37,102,79,11,53x37,154,79,12},207x17,0,117,13]"
+
+# Pre-launch cleanup: kill any existing fleet session and orphaned status.exe on Windows hosts
+# before starting fresh. Makes wall idempotent — safe to run even if a previous wall is running.
+WINDOWS_HOSTS=(
+  amsterdamdesktop
+  chatworkhorse
+  imagebeast
+  travelbeast
+  remotews
+  surface3-gc
+  surfacegolaptopgc
+)
+
+echo "Cleaning up any previous fleet session..."
+tmux kill-session -t fleet 2>/dev/null && echo "  previous session killed" || echo "  no previous session"
+
+echo "Cleaning up orphaned status.exe on Windows hosts..."
+for host in "${WINDOWS_HOSTS[@]}"; do
+  result=$(ssh -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
+    -o LogLevel=ERROR "$host" "taskkill /IM status.exe /F 2>&1" 2>&1)
+  rc=$?
+  if [ $rc -ne 0 ] && ! echo "$result" | grep -qi "not found" && ! echo "$result" | grep -qi "success"; then
+    echo "  $host: unreachable"
+  elif echo "$result" | grep -qi "not found"; then
+    echo "  $host: nothing to clean"
+  elif echo "$result" | grep -qi "success"; then
+    echo "  $host: cleaned"
+  else
+    echo "  $host: unknown — $result"
+  fi
+done
+echo "Launching wall..."
+
+osascript <<EOF
+tell application "Terminal"
+    set fleetWin to do script "tmuxp load -d -y ~/repos/fleet-configs/fleet.yaml; tmux set -t fleet pane-border-status top; tmux set -t fleet pane-border-format ' #{pane_title} '; tmux set -t fleet allow-rename off; tmux select-pane -t fleet:wall.0 -T AMSTDT; tmux select-pane -t fleet:wall.1 -T CWH; tmux select-pane -t fleet:wall.2 -T IB; tmux select-pane -t fleet:wall.3 -T TB; tmux select-pane -t fleet:wall.4 -T RWS; tmux select-pane -t fleet:wall.5 -T S3G; tmux select-pane -t fleet:wall.6 -T SGC; tmux select-pane -t fleet:wall.7 -T WBU; tmux select-pane -t fleet:wall.8 -T CWHU; tmux select-pane -t fleet:wall.9 -T NAS; tmux select-pane -t fleet:wall.10 -T MMM; tmux select-pane -t fleet:wall.11 -T MB2; tmux select-pane -t fleet:wall.12 -T MB; tmux attach -t fleet"
+    set current settings of fleetWin to settings set "Fleet"
+    activate
+    delay 1.5
+end tell
+tell application "Terminal" to set bounds of front window to {-640, 25, 0, 1080}
+EOF
+
+# Apply the locked layout AFTER the window is at its final size.
+# A layout string only takes effect when the session is already at the size it was captured at.
+# We force the grid to 207x134 so the string applies regardless of resize timing, then apply twice
+# (the second pass snaps out attach-time rounding drift in the bottom MB row).
+if [ -n "$LAYOUT" ]; then
+  sleep 3
+  tmux set-window-option -t fleet:wall window-size manual 2>/dev/null || tmux set-option -g window-size manual
+  tmux resize-window -t fleet:wall -x 207 -y 134
+  tmux select-layout -t fleet:wall "$LAYOUT"
+  sleep 0.3
+  tmux select-layout -t fleet:wall "$LAYOUT"
+fi
+
+# Periodic label re-assert + repaint every 60s.
+# Windows conhost overwrites pane -T titles on reconnect even with allow-rename off (tmux 3.7c).
+# refresh-client alone does not restore them — must re-apply select-pane -T to tmux's state.
+# nohup+disown survives closing the launching terminal; self-exits when fleet session ends.
+nohup bash -c '
+while tmux has-session -t fleet 2>/dev/null; do
+  tmux select-pane -t fleet:wall.0  -T AMSTDT 2>/dev/null
+  tmux select-pane -t fleet:wall.1  -T CWH    2>/dev/null
+  tmux select-pane -t fleet:wall.2  -T IB     2>/dev/null
+  tmux select-pane -t fleet:wall.3  -T TB     2>/dev/null
+  tmux select-pane -t fleet:wall.4  -T RWS    2>/dev/null
+  tmux select-pane -t fleet:wall.5  -T S3G    2>/dev/null
+  tmux select-pane -t fleet:wall.6  -T SGC    2>/dev/null
+  tmux select-pane -t fleet:wall.7  -T WBU    2>/dev/null
+  tmux select-pane -t fleet:wall.8  -T CWHU   2>/dev/null
+  tmux select-pane -t fleet:wall.9  -T NAS    2>/dev/null
+  tmux select-pane -t fleet:wall.10 -T MMM    2>/dev/null
+  tmux select-pane -t fleet:wall.11 -T MB2    2>/dev/null
+  tmux select-pane -t fleet:wall.12 -T MB     2>/dev/null
+  tmux refresh-client -t fleet 2>/dev/null
+  sleep 60
+done
+' >/dev/null 2>&1 &
+disown
