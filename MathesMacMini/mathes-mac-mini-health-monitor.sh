@@ -16,6 +16,9 @@
 #
 # 2026-08-08: added NUT/UPS checks (this box's own upsmon client) — see the dated
 # comment further down for what and why.
+#
+# 2026-08-30: added TMDB Explorer (Flask app, launchd KeepAlive) and the fleet-status
+# pair, HEARTBEAT_WRITER + METRICS_SERVER — see their dated comments further down.
 
 HOST="mathes-mac-mini"
 TO="dennyrgood@yahoo.com"
@@ -32,6 +35,29 @@ PLEX_PROC_PATTERN="Plex Media Server.app/Contents/MacOS/Plex Media Server"
 PLEX_URL="http://127.0.0.1:32400/identity"
 SYNCTHING_PROC_PATTERN="Syncthing.app/Contents/MacOS/Syncthing"
 SYNCTHING_URL="http://127.0.0.1:8384/rest/noauth/health"
+# 2026-08-30: added TMDB Explorer (com.dennis.tmdb-explorer, launchd KeepAlive) — a
+# plain Flask app, not a GUI app like Plex/Syncthing, but the same missing-vs-down
+# split still applies: process gone (crashed) vs. process alive but its HTTP root
+# not answering (hung). No dedicated health route exists, so this just hits "/",
+# which tmdb_explorer.py serves unauthenticated (index()) — good enough as a liveness
+# probe.
+TMDB_PROC_PATTERN="tmdb_explorer.py"
+TMDB_URL="http://127.0.0.1:5035/"
+# 2026-08-30: added the fleet-status pair, com.dennis.heartbeat-writer (writes
+# heartbeat_/machine_info_/metrics_history_ files this box's own fleet status entry
+# is built from) and com.dennis.fleet-metrics-server (serves those files over
+# Tailscale to the checker). Missing either one silently blinds the fleet dashboard
+# to this box without anything ELSE here looking unhealthy — worth catching same as
+# any other service. HEARTBEAT_WRITER has no HTTP endpoint of its own (it just writes
+# files on a 30s/150s tick), so its "down" state comes from the freshness check below
+# instead of check_service's usual curl. METRICS_SERVER does serve HTTP, and
+# convenient proof it's serving correctly IS this box's own heartbeat file, so that
+# doubles as its liveness URL.
+HEARTBEAT_WRITER_PROC_PATTERN="onedrive_heartbeat_writer_all_macs.py"
+HEARTBEAT_FILE="$HOME/fleet_monitor/heartbeat_${HOST}.txt"
+HEARTBEAT_STALE_SECS=600   # writer heartbeats every 150s — 4x margin before alerting
+METRICS_SERVER_PROC_PATTERN="fleet_metrics_server.py"
+METRICS_SERVER_URL="http://127.0.0.1:9100/heartbeat_${HOST}.txt"
 # Reused from Status/config.py (SYNCTHING_CONFIG["mathes-mac-mini"]) — same key the
 # fleet status checker already uses against this box. Lets the monitor inspect actual
 # per-folder sync state (Status/checkers/syncthing_checker.py's approach), not just
@@ -77,7 +103,7 @@ DISK_LAST_ALERT=0; DISK_ACTIVE=0
 UPS_UNREADABLE_LAST_ALERT=0;      UPS_UNREADABLE_ACTIVE=0; UPS_UNREADABLE_STREAK=0
 UPS_REPLACE_BATTERY_LAST_ALERT=0; UPS_REPLACE_BATTERY_ACTIVE=0
 UPSMON_MISSING_LAST_ALERT=0;      UPSMON_MISSING_ACTIVE=0; UPSMON_MISSING_STREAK=0
-for svc in PLEX SYNCTHING; do
+for svc in PLEX SYNCTHING TMDB HEARTBEAT_WRITER METRICS_SERVER; do
     eval "MISSING_${svc}_LAST_ALERT=0; MISSING_${svc}_ACTIVE=0; MISSING_${svc}_STREAK=0"
     eval "DOWN_${svc}_LAST_ALERT=0;    DOWN_${svc}_ACTIVE=0;    DOWN_${svc}_STREAK=0"
 done
@@ -154,16 +180,26 @@ check_service() {
         DOWN_TRIGGERED[$svc]=0
     else
         MISSING_TRIGGERED[$svc]=0
-        CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>/dev/null)
-        if [ "$CODE" = "200" ]; then
+        if [ -z "$url" ]; then
+            # No HTTP endpoint for this one (e.g. HEARTBEAT_WRITER) — "down" is
+            # decided by a separate freshness/detail check layered on below,
+            # same shape as the Syncthing per-folder check further down.
             DOWN_TRIGGERED[$svc]=0
         else
-            DOWN_TRIGGERED[$svc]=1
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>/dev/null)
+            if [ "$CODE" = "200" ]; then
+                DOWN_TRIGGERED[$svc]=0
+            else
+                DOWN_TRIGGERED[$svc]=1
+            fi
         fi
     fi
 }
 check_service PLEX "$PLEX_PROC_PATTERN" "$PLEX_URL"
 check_service SYNCTHING "$SYNCTHING_PROC_PATTERN" "$SYNCTHING_URL"
+check_service TMDB "$TMDB_PROC_PATTERN" "$TMDB_URL"
+check_service HEARTBEAT_WRITER "$HEARTBEAT_WRITER_PROC_PATTERN" ""
+check_service METRICS_SERVER "$METRICS_SERVER_PROC_PATTERN" "$METRICS_SERVER_URL"
 
 # --- Check: Syncthing per-folder sync state (only meaningful if the basic check above
 # didn't already find it missing/down) — catches a folder stuck in "error" state or
@@ -196,6 +232,26 @@ if [ "${MISSING_TRIGGERED[SYNCTHING]}" -eq 0 ] && [ "${DOWN_TRIGGERED[SYNCTHING]
         elif [ "$ST_PULL_ERRS" -gt "$SYNCTHING_PULL_ERR_THRESHOLD" ]; then
             DOWN_TRIGGERED[SYNCTHING]=1
             DOWN_DETAIL_SYNCTHING+="${ST_PULL_ERRS} failed items across folders (threshold ${SYNCTHING_PULL_ERR_THRESHOLD}).\n"
+        fi
+    fi
+fi
+
+# --- Check: heartbeat-writer freshness (only meaningful if the basic check above
+# didn't already find it missing) — the writer has no HTTP endpoint to probe, so a
+# hang (process alive, stuck mid-syscall, no longer ticking) can only be caught by
+# checking whether HEARTBEAT_FILE is actually still being updated. Same shape as the
+# Syncthing per-folder check above: a basic process-alive check can't see this class
+# of failure on its own. ---
+DOWN_DETAIL_HEARTBEAT_WRITER=""
+if [ "${MISSING_TRIGGERED[HEARTBEAT_WRITER]}" -eq 0 ]; then
+    if [ ! -f "$HEARTBEAT_FILE" ]; then
+        DOWN_TRIGGERED[HEARTBEAT_WRITER]=1
+        DOWN_DETAIL_HEARTBEAT_WRITER="${HEARTBEAT_FILE} does not exist yet.\n"
+    else
+        HB_AGE=$(( NOW - $(stat -f %m "$HEARTBEAT_FILE") ))
+        if [ "$HB_AGE" -gt "$HEARTBEAT_STALE_SECS" ]; then
+            DOWN_TRIGGERED[HEARTBEAT_WRITER]=1
+            DOWN_DETAIL_HEARTBEAT_WRITER="${HEARTBEAT_FILE} last written $((HB_AGE / 60))m ago (threshold $((HEARTBEAT_STALE_SECS / 60))m).\n"
         fi
     fi
 fi
@@ -307,7 +363,7 @@ case "$verdict" in
 esac
 
 # Plex + Syncthing
-for svc in PLEX SYNCTHING; do
+for svc in PLEX SYNCTHING TMDB HEARTBEAT_WRITER METRICS_SERVER; do
     # Missing (process not found)
     trig=${MISSING_TRIGGERED[$svc]}
     last=$(eval echo \$MISSING_${svc}_LAST_ALERT)
@@ -340,6 +396,8 @@ for svc in PLEX SYNCTHING; do
             ALERT_BODY+="=== ${svc} NOT RESPONDING ===\n"
             if [ "$svc" = "SYNCTHING" ] && [ -n "$DOWN_DETAIL_SYNCTHING" ]; then
                 ALERT_BODY+="Present for ${new_streak} consecutive checks (~$((new_streak * 5)) min):\n$(echo -e "$DOWN_DETAIL_SYNCTHING")\n\n"
+            elif [ "$svc" = "HEARTBEAT_WRITER" ] && [ -n "$DOWN_DETAIL_HEARTBEAT_WRITER" ]; then
+                ALERT_BODY+="Present for ${new_streak} consecutive checks (~$((new_streak * 5)) min):\n$(echo -e "$DOWN_DETAIL_HEARTBEAT_WRITER")\n\n"
             else
                 ALERT_BODY+="Process is running but its HTTP API did not return 200 for ${new_streak} consecutive checks.\n\n"
             fi
@@ -364,22 +422,55 @@ What to do:
   1. df -h ${DISK_VOLUMES[*]}    -- confirm which volume and how full
   2. du -sh /Volumes/.../* | sort -h | tail -20   -- find what's using space
 
-PLEX / SYNCTHING MISSING:
+PLEX / SYNCTHING / TMDB MISSING:
 No process matching the app's binary was found — it quit or crashed.
 Requires ${FAIL_THRESHOLD} consecutive checks (~$((FAIL_THRESHOLD * 5)) min) before alerting, to ride
-out a normal app restart/update.
+out a normal app restart/update. (TMDB Explorer is launchd KeepAlive, so this
+firing at all usually means it's crash-looping faster than launchd can win.)
 
 What to do:
   1. open -a \"Plex Media Server\"   /   open -a \"Syncthing\"
-  2. Check Console.app for crash reports under the app's name
+  2. launchctl kickstart -k gui/\$(id -u)/com.dennis.tmdb-explorer
+  3. Check Console.app for crash reports under the app's name; tmdb_explorer.py's
+     own log is ~/Library/Logs/tmdb_explorer.log
 
-PLEX / SYNCTHING NOT RESPONDING:
-The process is running but its own HTTP API isn't answering (Plex:
-32400/identity, Syncthing: 8384/rest/noauth/health) — likely hung.
+PLEX / SYNCTHING / TMDB NOT RESPONDING:
+The process is running but its own HTTP endpoint isn't answering (Plex:
+32400/identity, Syncthing: 8384/rest/noauth/health, TMDB Explorer: 5035/) —
+likely hung.
 
 What to do:
-  1. curl http://127.0.0.1:32400/identity   /   curl http://127.0.0.1:8384/rest/noauth/health
-  2. If hung: quit and relaunch the app (or reboot if it won't quit)
+  1. curl http://127.0.0.1:32400/identity   /   curl http://127.0.0.1:8384/rest/noauth/health   /   curl http://127.0.0.1:5035/
+  2. If hung: quit and relaunch the app (TMDB Explorer: launchctl kickstart -k
+     gui/\$(id -u)/com.dennis.tmdb-explorer), or reboot if it won't quit
+
+HEARTBEAT_WRITER MISSING:
+No process matching '${HEARTBEAT_WRITER_PROC_PATTERN}' found — this box's own
+fleet-status heartbeat/machine_info/metrics_history files have stopped updating,
+which silently blinds the fleet dashboard to this box even though everything
+else here may be fine.
+
+What to do:
+  1. launchctl kickstart -k gui/\$(id -u)/com.dennis.heartbeat-writer
+  2. cat ~/Library/Logs/heartbeat_writer.log — look for why it exited
+
+HEARTBEAT_WRITER NOT RESPONDING:
+The process is running but ${HEARTBEAT_FILE} hasn't been updated within
+${HEARTBEAT_STALE_SECS}s (it should tick every 150s) — likely hung mid-loop.
+
+What to do:
+  1. ls -la ${HEARTBEAT_FILE}   -- confirm how stale
+  2. launchctl kickstart -k gui/\$(id -u)/com.dennis.heartbeat-writer
+
+METRICS_SERVER MISSING / NOT RESPONDING:
+No process matching '${METRICS_SERVER_PROC_PATTERN}', or it's running but not
+serving this box's own heartbeat file over HTTP (127.0.0.1:9100). The checker
+pulls from here over Tailscale — either failure mode means the fleet dashboard
+can't see this box, even if HEARTBEAT_WRITER itself is fine.
+
+What to do:
+  1. curl http://127.0.0.1:9100/heartbeat_${HOST}.txt
+  2. launchctl kickstart -k gui/\$(id -u)/com.dennis.fleet-metrics-server
 
 UPS UNREADABLE:
 ${UPSMON_LOG}'s most recent comms line for ${UPS_NAME}@${UPS_HOST} was a drop
@@ -433,7 +524,7 @@ What to do:
     echo "UPSMON_MISSING_LAST_ALERT=$UPSMON_MISSING_LAST_ALERT"
     echo "UPSMON_MISSING_ACTIVE=$UPSMON_MISSING_ACTIVE"
     echo "UPSMON_MISSING_STREAK=$UPSMON_MISSING_STREAK"
-    for svc in PLEX SYNCTHING; do
+    for svc in PLEX SYNCTHING TMDB HEARTBEAT_WRITER METRICS_SERVER; do
         for k in MISSING_${svc}_LAST_ALERT MISSING_${svc}_ACTIVE MISSING_${svc}_STREAK \
                  DOWN_${svc}_LAST_ALERT DOWN_${svc}_ACTIVE DOWN_${svc}_STREAK; do
             echo "$k=$(eval echo \$$k)"

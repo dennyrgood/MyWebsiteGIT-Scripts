@@ -11,6 +11,12 @@
 # Scope was Plex sync only per the 2026-08-04 decision; NUT/UPS was added 2026-08-08
 # once this box's own upsmon client was verified end to end. Extend here if/when more
 # jobs run on this box.
+#
+# 2026-08-30: TMDB Explorer and the fleet-status pair (HEARTBEAT_WRITER,
+# METRICS_SERVER) were added to mmm-health-monitor.sh's missing/down checks — no new
+# code needed here, since this script's existing "active alerts" line (below) already
+# greps _ACTIVE=1 out of the SAME monitor state file generically, and the full-dump
+# section at the end already includes their keys along with everything else.
 
 MSMTP="/opt/homebrew/bin/msmtp"
 TO="dennyrgood@yahoo.com"
