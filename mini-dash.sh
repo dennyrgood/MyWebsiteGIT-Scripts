@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mini-dash.sh — Mole terminal UI clone for Linux & UGOS NAS nodes
+# mini-dash.sh — Strict layout clone for Mole
 # 2026-08-30
 
 tput civis
@@ -9,7 +9,8 @@ trap 'tput cnorm; exit' INT TERM EXIT
 draw_bar() {
   local pct=${1%.*}
   [[ ! "$pct" =~ ^[0-9]+$ ]] && pct=0
-  local width=20
+  # Capped at 14 characters to prevent horizontal wrapping in narrow tmux split panes
+  local width=14
   local filled=$(( pct * width / 100 ))
   local empty=$(( width - filled ))
   
@@ -54,8 +55,12 @@ while true; do
   DISK_USED=$(df -h / | awk 'NR==2 {print $3}')
   DISK_TOTAL=$(df -h / | awk 'NR==2 {print $2}')
 
+  # Network Interface Active Detection
+  NET_IF=$(ip route show default 2>/dev/null | awk '/default/ {print $5}' | head -n1)
+  [ -z "$NET_IF" ] && NET_IF="eth0"
+
   # Dynamic Health Status Badge
-  HEALTH_STR="\033[1;32m100% Excellent\033[0m"
+  HEALTH_STR="\033[1;32m100%  Excellent\033[0m"
   if [ "$CPU_USE" -ge 85 ] || [ "$MEM_PCT" -ge 85 ] || [ "$DISK_PCT" -ge 90 ]; then
     HEALTH_STR="\033[1;31mElevated Resource Usage\033[0m"
   elif [ "$CPU_USE" -ge 70 ] || [ "$MEM_PCT" -ge 70 ] || [ "$DISK_PCT" -ge 75 ]; then
@@ -65,10 +70,10 @@ while true; do
   # --- MOLE DISPLAY OUTPUT ---
   echo -e "\033[1;35m🐹 Mole System Status 🐹\033[0m\033[K"
   printf "Health: %b\033[K\n" "$HEALTH_STR"
-  echo -e "\033[1;30m--------------------------------------------------\033[0m\033[K"
+  echo -e "\033[1;30m----------------------------------------\033[0m\033[K"
   
   echo -e "\033[1;33m📌 System\033[0m\033[K"
-  printf "Host: \033[1m%-14s\033[0m | OS: Linux %s\033[K\n" "$HOST" "$KERNEL"
+  printf "Host: \033[1m%-10s\033[0m | OS: Linux %s\033[K\n" "$HOST" "$KERNEL"
   printf "Uptime: %s\033[K\n" "$UPTIME"
   
   echo -e "\033[1;33m⚡ CPU\033[0m\033[K"
@@ -76,17 +81,20 @@ while true; do
   draw_bar "$CPU_USE"
   
   echo -e "\033[1;33m🧠 Memory\033[0m\033[K"
-  printf "RAM:  %sGB / %sGB (%2d%%) " "$MEM_USED_GB" "$MEM_TOTAL_GB" "$MEM_PCT"
+  printf "RAM:  %sG/%sG (%2d%%) " "$MEM_USED_GB" "$MEM_TOTAL_GB" "$MEM_PCT"
   draw_bar "$MEM_PCT"
   printf "Swap: %2d%% " "$SWAP_PCT"
   draw_bar "$SWAP_PCT"
   
   echo -e "\033[1;33m💾 Disks\033[0m\033[K"
-  printf "/:    %s / %s (%2d%%) " "$DISK_USED" "$DISK_TOTAL" "$DISK_PCT"
+  printf "/: %s/%s (%2d%%) " "$DISK_USED" "$DISK_TOTAL" "$DISK_PCT"
   draw_bar "$DISK_PCT"
 
   echo -e "\033[1;33m🔥 Top Processes\033[0m\033[K"
-  ps -eo pid,user,%cpu,%mem,comm --sort=-%cpu | head -n 5 | tail -n 4 | awk '{printf " [\033[36m%s\033[0m] %-12s \033[90m(CPU: %s%%, Mem: %s%%)\033[0m\033[K\n", $1, $5, $3, $4}'
+  ps -eo pid,user,%cpu,%mem,comm --sort=-%cpu | head -n 5 | tail -n 4 | awk '{printf " [\033[36m%.5s\033[0m] %-9.9s \033[90m(C:%s%% M:%s%%)\033[0m\033[K\n", $1, $5, $3, $4}'
+
+  echo -e "\033[1;33m🌐 Network\033[0m\033[K"
+  printf "%-10s Active\033[K\n" "$NET_IF"
 
   sleep 4
 done
