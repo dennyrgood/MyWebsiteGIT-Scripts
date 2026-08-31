@@ -34,6 +34,7 @@ $staleThresholdMinutes = 10   # writer updates heartbeat every ~150s; 10 min = 4
 # Same hostname resolution as onedrive_heartbeat_writer_server.ps1 - keep in sync
 $hostnameMap = @{
     "amsterdamdeskto" = "amsterdamdesktop"
+    "surfacegolaptop" = "surfacegolaptopgc"
 }
 $rawHost = $env:COMPUTERNAME.ToLower()
 $checkerHost = if ($hostnameMap.ContainsKey($rawHost)) { $hostnameMap[$rawHost] } else { $rawHost }

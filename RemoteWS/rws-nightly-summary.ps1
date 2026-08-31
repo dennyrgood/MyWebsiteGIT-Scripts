@@ -61,20 +61,51 @@ try {
 }
 
 # --- Watchdog logs (FleetMetrics, JumpConnect, Tailscale) ---
+# JumpConnect Watchdog and Tailscale Watchdog each have their OWN per-component log
+# file, but confirmed 2026-08-31 those can sit 3+ days stale even while genuinely
+# healthy -- both watchdogs ALSO write tagged "[JumpConnect]"/"[Tailscale]" lines into
+# the SHARED watchdog_remotews.log (the same file FleetMetricsWatchdog's untagged
+# lines go into), and that shared log updates daily and is the more reliable signal
+# (same file rws-health-monitor.ps1 would ideally use too, but it uses the .alive
+# marker files instead, which is equally valid and doesn't need this tag-parsing).
+if (Test-Path $WatchdogLog) {
+    $age = Format-Age (Get-Item $WatchdogLog).LastWriteTime
+    $Tldr += "  watchdog log: [$age ago] $(Get-Content $WatchdogLog -Tail 1)`r`n"
+    $Body += "=== watchdog log (last 10 lines) ===`r`n"
+    $Body += (Get-Content $WatchdogLog -Tail 10 | Out-String)
+    $Body += "`r`n"
+
+    $lastJc = Get-Content $WatchdogLog | Where-Object { $_ -match "^\S+ \[JumpConnect\]" } | Select-Object -Last 1
+    if ($lastJc -and $lastJc -match '^(\S+)') {
+        $jcAge = Format-Age ([datetime]$Matches[1])
+        $Tldr += "  jumpconnect watchdog: [$jcAge ago, via shared log] $lastJc`r`n"
+    } else {
+        $Tldr += "$Warn  jumpconnect watchdog: no tagged line found in shared watchdog log`r`n"
+        if ($Reason -eq "all healthy") { $Reason = "jumpconnect watchdog silent" }
+    }
+    $lastTs = Get-Content $WatchdogLog | Where-Object { $_ -match "^\S+ \[Tailscale\]" } | Select-Object -Last 1
+    if ($lastTs -and $lastTs -match '^(\S+)') {
+        $tsAge = Format-Age ([datetime]$Matches[1])
+        $Tldr += "  tailscale watchdog: [$tsAge ago, via shared log] $lastTs`r`n"
+    } else {
+        $Tldr += "$Warn  tailscale watchdog: no tagged line found in shared watchdog log`r`n"
+        if ($Reason -eq "all healthy") { $Reason = "tailscale watchdog silent" }
+    }
+} else {
+    $Tldr += "$Warn  watchdog log: not found at $WatchdogLog`r`n"
+    if ($Reason -eq "all healthy") { $Reason = "watchdog log missing" }
+}
+# Per-component log files still dumped in the body for reference (restart/incident
+# detail lives there, e.g. the wedged-connection restart sequence), just not used to
+# judge staleness in the TLDR.
 foreach ($pair in @(
-    @{ Label = "watchdog log";           Path = $WatchdogLog },
-    @{ Label = "jumpconnect watchdog log"; Path = $JcWatchdogLog },
-    @{ Label = "tailscale watchdog log";   Path = $TsWatchdogLog }
+    @{ Label = "jumpconnect watchdog log (own file)"; Path = $JcWatchdogLog },
+    @{ Label = "tailscale watchdog log (own file)";   Path = $TsWatchdogLog }
 )) {
     if (Test-Path $pair.Path) {
-        $age = Format-Age (Get-Item $pair.Path).LastWriteTime
-        $Tldr += "  $($pair.Label): [$age ago] $(Get-Content $pair.Path -Tail 1)`r`n"
-        $Body += "=== $($pair.Label) (last 10 lines) ===`r`n"
+        $Body += "=== $($pair.Label), last 10 lines ===`r`n"
         $Body += (Get-Content $pair.Path -Tail 10 | Out-String)
         $Body += "`r`n"
-    } else {
-        $Tldr += "$Warn  $($pair.Label): not found at $($pair.Path)`r`n"
-        if ($Reason -eq "all healthy") { $Reason = "$($pair.Label) missing" }
     }
 }
 
@@ -93,8 +124,13 @@ if ($latestCsv) {
 # --- Health monitor state ---
 if (Test-Path $MonitorStateFile) {
     $stateAge = (New-TimeSpan -Start (Get-Item $MonitorStateFile).LastWriteTime -End (Get-Date)).TotalMinutes
-    if ($stateAge -gt 10) {
-        $Tldr += "$Warn  rws-health-monitor: stale (last-run $([int]$stateAge)m ago; threshold 10m)`r`n"
+    if ($stateAge -gt 12) {
+        # 12, not 10 -- the health-monitor runs every 5 min, so a nightly-summary run
+        # that happens to land 10-11 min after the last tick is a normal timing
+        # coincidence, not staleness (confirmed 2026-08-31: a real false-positive at
+        # 11m). 12 gives slack without hiding a genuinely stalled monitor (which would
+        # show 15m, 20m, etc., not just barely over a 2x-interval boundary).
+        $Tldr += "$Warn  rws-health-monitor: stale (last-run $([int]$stateAge)m ago; threshold 12m)`r`n"
         if ($Reason -eq "all healthy") { $Reason = "health monitor stale/missing" }
     } else {
         $Tldr += "  rws-health-monitor: last-run $([int]$stateAge)m ago $Check`r`n"
