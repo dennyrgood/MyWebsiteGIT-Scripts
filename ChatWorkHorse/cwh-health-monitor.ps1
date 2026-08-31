@@ -137,9 +137,18 @@ try {
     $UpsWatchTriggered = 1
     $UpsWatchDetail = "Task 'ups-watch-task-fixed' not found or not queryable: $_"
 }
-$UpsLogPath = "C:\repos\scripts\ups-watch.log"
+$UpsLogPath = Join-Path $env:ProgramData "ups-watch\ups-watch.log"   # confirmed via ups-watch.ps1's own $StateDir/$LogFile, not guessed
 if (Test-Path $UpsLogPath) {
-    $recentWarn = Get-Content $UpsLogPath -Tail 20 | Where-Object { $_ -match "WARN:" -and $_ -notmatch "not armed" }
+    # Filter by actual timestamp, not just "last N lines" -- on a quiet box, tailing
+    # a fixed line count can surface a WARN from days ago that never ages out because
+    # too few lines have been appended since (caught 2026-08-31 on ib's equivalent
+    # check). Only count WARNs from within this check's own recent window.
+    $cutoff = (Get-Date).AddMinutes(-15)
+    $recentWarn = Get-Content $UpsLogPath -Tail 100 | Where-Object {
+        $_ -match "WARN:" -and $_ -notmatch "not armed" -and
+        $_ -match '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})Z' -and
+        [datetime]::Parse($Matches[1]) -gt $cutoff
+    }
     if ($recentWarn) {
         $UpsWatchTriggered = 1
         $UpsWatchDetail += " Recent WARN lines: $(($recentWarn | Select-Object -Last 3) -join ' | ')"
