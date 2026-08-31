@@ -1,32 +1,31 @@
-# ChatWorkHorse\cwh-health-monitor.ps1
-# 2026-08-31 UTC -- created, modeled on AmsterdamDesktop/amsdt-health-monitor.ps1
-# (which was itself modeled on Denniss2ndMacBookAir/mb2-health-monitor.sh). Same
+# ImageBeast\ib-health-monitor.ps1
+# 2026-08-31 UTC -- created, modeled on ChatWorkHorse/cwh-health-monitor.ps1 (which was
+# modeled on AmsterdamDesktop/amsdt-health-monitor.ps1 / mb2-health-monitor.sh). Same
 # shape: missing/down per service, streak-based anti-flap, alert on first detection +
 # every 30 min while active, all-clear on resolution, silent when healthy.
 #
-# Services checked here are cwh's REAL scheduled tasks/processes, confirmed 2026-08-31
-# via Get-ScheduledTask + Get-NetTCPConnection + Win32_Process CommandLine (not assumed
-# -- amsdt taught us Flask ports especially are not to be guessed):
-#   Fleet Checker      -> checker.py                    (no HTTP endpoint)
-#   Fleet Status        -> fleet_api.py                  :5010
-#   OpenWebUI            -> run_openwebui_cw.bat -> open-webui.exe serve :8080
-#   ComfyUI              -> ComfyUI\main.py (python_embeded) :8188
-#   Ollama                -> ollama.exe serve             :11434
-#   Cloudflared Tunnel    -> cloudflared tunnel run imageTunnel   (no local HTTP)
+# Services checked here are ib's REAL scheduled tasks/processes, confirmed 2026-08-31
+# via Get-ScheduledTask + Get-NetTCPConnection + Win32_Process CommandLine:
+#   ComfyUI               -> python_embeded\...\ComfyUI\main.py   :8188
+#   Ollama                 -> ollama.exe serve                     :11434
+#   Cloudflared Tunnel      -> cloudflared tunnel run beastTunnel   (no local HTTP)
 #
 # NOT re-checked here (deliberately -- each already has its own auto-healing or
 # logging elsewhere; this script's job is to alert when THAT mechanism is failing,
 # not duplicate it):
-#   Fleet Metrics Server (:9100) / Hearbeat Writer OneDrive -- self-healed every 5 min
-#     by Status\FleetMetricsWatchdog.ps1, which never emails. Checked below via its
-#     own last-task-result + staleness only.
-#   ups-watch-task-fixed -- polls the NUT server on WorkBenchUnix and shuts this box
-#     (and the CWHU VM) down after a sustained outage; only logs to ups-watch.log,
-#     never emails. Checked below via its own last-task-result + a log tail for
-#     recent WARN lines, same "watch the watchdog" pattern as FleetMetricsWatchdog.
-#   ChatWorkhorseUnix VM -- this box hosts the CWHU VirtualBox VM (see cwhu-is-a-vm.md).
-#     "Start CWHU VM" only fires at boot; if the VM dies mid-session nothing restarts
-#     it and nothing alerts. Checked below via VBoxManage list runningvms.
+#   Fleet Metrics Server (:9100) / Heartbeat Writer -- self-healed every 5 min by
+#     Status\FleetMetricsWatchdog.ps1, which never emails. Checked below via its own
+#     last-task-result + staleness only.
+#   UPS-Watch-ImageBeast -- polls the NUT server on WorkBenchUnix and shuts this box
+#     down after a sustained outage; only logs to ups-watch.log (C:\ProgramData\
+#     ups-watch\ups-watch.log, confirmed via ups-watch.ps1's own $StateDir/$LogFile --
+#     NOT C:\repos\scripts\ups-watch.log, a wrong-path bug caught and fixed on cwh's
+#     version of this script), never emails. Checked below via its own
+#     last-task-result + a log tail for recent WARN lines.
+#
+# ib has no Fleet Checker / Fleet Status API / OpenWebUI tasks (unlike amsdt/cwh) and
+# does not host a VirtualBox VM (unlike cwh/CWHU) -- confirmed via Get-ScheduledTask,
+# not assumed from cwh's script.
 #
 # Requires this task to run with highest privileges (Win32_Process's CommandLine
 # comes back blank for other-session processes otherwise).
@@ -36,20 +35,16 @@
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\Send-FleetMail.ps1"
 
-$HostName = "chatworkhorse"
+$HostName = "imagebeast"
 $StateFile = Join-Path $env:TEMP "$HostName-monitor-state.tmp"
 $Now = [int][double]::Parse((Get-Date -UFormat %s))
 $AlertIntervalSec = 30 * 60
 $FailThreshold = 2   # consecutive 5-min samples before alerting (anti-flap on restarts)
-$VBoxManage = "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe"
 
 $Services = @(
-    @{ Name = "FleetChecker";      Pattern = "checker\.py";                       Url = $null },
-    @{ Name = "FleetStatusAPI";    Pattern = "fleet_api\.py";                     Url = "http://127.0.0.1:5010/" },
-    @{ Name = "OpenWebUI";         Pattern = "open-webui\.exe|run_openwebui_cw";  Url = "http://127.0.0.1:8080/" },
-    @{ Name = "ComfyUI";           Pattern = "ComfyUI\\main\.py";                 Url = "http://127.0.0.1:8188/system_stats" },
-    @{ Name = "Ollama";            Pattern = "ollama\.exe serve";                 Url = "http://127.0.0.1:11434/api/tags" },
-    @{ Name = "CloudflaredTunnel"; Pattern = "cloudflared.*imageTunnel";          Url = $null }
+    @{ Name = "ComfyUI";           Pattern = "ComfyUI\\main\.py";          Url = "http://127.0.0.1:8188/system_stats" },
+    @{ Name = "Ollama";            Pattern = "ollama\.exe serve";          Url = "http://127.0.0.1:11434/api/tags" },
+    @{ Name = "CloudflaredTunnel"; Pattern = "cloudflared.*beastTunnel";   Url = $null }
 )
 
 # --- Load state ---
@@ -62,7 +57,7 @@ foreach ($svc in $Services) {
     $State["DOWN_$($svc.Name)_ACTIVE"] = 0
     $State["DOWN_$($svc.Name)_STREAK"] = 0
 }
-foreach ($k in @("WATCHDOG", "UPSWATCH", "CWHUVM")) {
+foreach ($k in @("WATCHDOG", "UPSWATCH")) {
     $State["${k}_LAST_ALERT"] = 0
     $State["${k}_ACTIVE"] = 0
 }
@@ -121,11 +116,11 @@ try {
     $WatchdogDetail = "Task 'Fleet Metrics Watchdog' not found or not queryable: $_"
 }
 
-# --- Check: ups-watch-task-fixed itself (last-run result + recent WARN lines), read-only ---
+# --- Check: UPS-Watch-ImageBeast itself (last-run result + recent WARN lines), read-only ---
 $UpsWatchTriggered = 0
 $UpsWatchDetail = ""
 try {
-    $uwInfo = Get-ScheduledTaskInfo -TaskName "ups-watch-task-fixed" -ErrorAction Stop
+    $uwInfo = Get-ScheduledTaskInfo -TaskName "UPS-Watch-ImageBeast" -ErrorAction Stop
     if ($uwInfo.LastTaskResult -ne 0) {
         $UpsWatchTriggered = 1
         $UpsWatchDetail = "Last result: $($uwInfo.LastTaskResult). Last run: $($uwInfo.LastRunTime)."
@@ -135,14 +130,15 @@ try {
     }
 } catch {
     $UpsWatchTriggered = 1
-    $UpsWatchDetail = "Task 'ups-watch-task-fixed' not found or not queryable: $_"
+    $UpsWatchDetail = "Task 'UPS-Watch-ImageBeast' not found or not queryable: $_"
 }
-$UpsLogPath = Join-Path $env:ProgramData "ups-watch\ups-watch.log"   # confirmed via ups-watch.ps1's own $StateDir/$LogFile, not guessed
+$UpsLogPath = Join-Path $env:ProgramData "ups-watch\ups-watch.log"
 if (Test-Path $UpsLogPath) {
     # Filter by actual timestamp, not just "last N lines" -- on a quiet box, tailing
     # a fixed line count can surface a WARN from days ago that never ages out because
-    # too few lines have been appended since (caught 2026-08-31 on ib's equivalent
-    # check). Only count WARNs from within this check's own recent window.
+    # too few lines have been appended since (caught 2026-08-31 on ib's first real
+    # run: a 2-day-old WARN falsely triggered UPSWATCH_ACTIVE). Only count WARNs from
+    # within this check's own ~5-min window (with slack for the task's own interval).
     $cutoff = (Get-Date).AddMinutes(-15)
     $recentWarn = Get-Content $UpsLogPath -Tail 100 | Where-Object {
         $_ -match "WARN:" -and $_ -notmatch "not armed" -and
@@ -153,17 +149,6 @@ if (Test-Path $UpsLogPath) {
         $UpsWatchTriggered = 1
         $UpsWatchDetail += " Recent WARN lines: $(($recentWarn | Select-Object -Last 3) -join ' | ')"
     }
-}
-
-# --- Check: ChatWorkhorseUnix VM actually running ---
-$CwhuVmTriggered = 0
-try {
-    $running = & $VBoxManage list runningvms 2>$null
-    if (-not ($running -match "ChatWorkhorseUnix")) {
-        $CwhuVmTriggered = 1
-    }
-} catch {
-    $CwhuVmTriggered = 1
 }
 
 # --- Evaluate: streak-aware alert/suppress/clear/ok ---
@@ -217,8 +202,6 @@ foreach ($svc in $Services) {
     }
 }
 
-# Watchdog / ups-watch / VM checks -- no streak, sticky-fault reasoning (same as WBU's
-# UPS replace-battery and amsdt's watchdog check): one bad sample is meaningful.
 function Test-StickyAlert($triggered, $key, $detail, $header, [ref]$alertBody, [ref]$clearBody) {
     if ($triggered -eq 1) {
         if ($State["${key}_ACTIVE"] -eq 0 -or ($Now - $State["${key}_LAST_ALERT"]) -ge $AlertIntervalSec) {
@@ -234,7 +217,6 @@ function Test-StickyAlert($triggered, $key, $detail, $header, [ref]$alertBody, [
 }
 Test-StickyAlert $WatchdogTriggered "WATCHDOG" $WatchdogDetail "FLEET METRICS WATCHDOG TROUBLE" ([ref]$AlertBody) ([ref]$ClearBody)
 Test-StickyAlert $UpsWatchTriggered "UPSWATCH" $UpsWatchDetail "UPS WATCH TASK TROUBLE" ([ref]$AlertBody) ([ref]$ClearBody)
-Test-StickyAlert $CwhuVmTriggered "CWHUVM" "VBoxManage list runningvms does not include ChatWorkhorseUnix -- the VM is stopped/crashed. Its own health-monitor/nightly-summary and any service inside it are unreachable." "CHATWORKHORSEUNIX VM NOT RUNNING" ([ref]$AlertBody) ([ref]$ClearBody)
 
 # --- Educational footer ---
 $Footer = @"
@@ -243,7 +225,7 @@ WHAT THESE ALERTS MEAN AND WHAT TO DO
 ------------------------------------------------------------------------
 
 <SVC> MISSING / NOT RESPONDING:
-Same pattern as amsdt-health-monitor.ps1 -- process gone, or running but its
+Same pattern as amsdt/cwh's health-monitor -- process gone, or running but its
 HTTP endpoint isn't answering. Requires $FailThreshold consecutive checks
 (~$($FailThreshold * 5) min) before alerting.
 
@@ -252,24 +234,15 @@ What to do:
   2. schtasks /Run /TN "<task name>"
 
 FLEET METRICS WATCHDOG TROUBLE / UPS WATCH TASK TROUBLE:
-Both of these are self-healing/self-acting scripts on their own 5-min Task
-Scheduler trigger that never send mail themselves -- this alert means their
-own last run failed, went stale, or (ups-watch) logged a WARN it couldn't
-resolve.
+Both are self-healing/self-acting scripts on their own Task Scheduler trigger
+that never send mail themselves -- this alert means their own last run failed,
+went stale, or (UPS watch) logged a WARN it couldn't resolve.
 
 What to do:
   1. Get-Content C:\fleet_monitor\watchdog_$HostName.log -Tail 50
-  2. Get-Content C:\repos\scripts\ups-watch.log -Tail 50
+  2. Get-Content C:\ProgramData\ups-watch\ups-watch.log -Tail 50
   3. schtasks /Query /TN "Fleet Metrics Watchdog" /V /FO LIST
-  4. schtasks /Query /TN "ups-watch-task-fixed" /V /FO LIST
-
-CHATWORKHORSEUNIX VM NOT RUNNING:
-This box hosts the ChatWorkhorseUnix VirtualBox VM. "Start CWHU VM" only
-fires at boot -- nothing restarts the VM if it dies mid-session.
-
-What to do:
-  1. & "$VBoxManage" list runningvms
-  2. & "$VBoxManage" startvm "ChatWorkhorseUnix" --type headless
+  4. schtasks /Query /TN "UPS-Watch-ImageBeast" /V /FO LIST
 ------------------------------------------------------------------------
 "@
 

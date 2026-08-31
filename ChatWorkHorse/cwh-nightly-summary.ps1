@@ -22,7 +22,7 @@ $CheckerHost = "chatworkhorse"   # not truncated on this box -- see header note
 $MonitorStateFile = Join-Path $env:TEMP "$HostName-monitor-state.tmp"
 $FleetMonitorDir = "C:\fleet_monitor"
 $WatchdogLog = Join-Path $FleetMonitorDir "watchdog_$HostName.log"
-$UpsWatchLog = "C:\repos\scripts\ups-watch.log"
+$UpsWatchLog = Join-Path $env:ProgramData "ups-watch\ups-watch.log"   # confirmed via ups-watch.ps1's own $StateDir/$LogFile, not guessed
 $AllStatusFile = Join-Path (Join-Path $FleetMonitorDir $CheckerHost) "server_status_all.json"
 $VBoxManage = "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe"
 

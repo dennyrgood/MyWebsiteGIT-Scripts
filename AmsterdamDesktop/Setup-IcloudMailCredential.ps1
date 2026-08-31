@@ -35,6 +35,19 @@ Write-Host "Password: an APP-SPECIFIC password from appleid.apple.com -- NOT you
 Write-Host ""
 
 $cred = Get-Credential -Message "iCloud SMTP credential (app-specific password)"
+
+# 2026-08-31 UTC -- added after a 2-hour false-alarm investigation into a "Windows-box-
+# specific SMTP rejection" that turned out to be a typo'd "dennis.mathes@icloud.net"
+# entered here instead of ".com". Get-Credential's username field has no domain
+# validation, so a typo saves silently and only shows up later as a confusing SMTP
+# auth failure. Echo it back in plain text so a typo is visible immediately, before
+# it costs another debugging session. (Password is intentionally never echoed.)
+Write-Host ""
+Write-Host "You entered username: $($cred.UserName)"
+if ($cred.UserName -notmatch '@icloud\.com$') {
+    Write-Warning "That does not end in @icloud.com -- iCloud SMTP usernames MUST use .com, never .net. Re-run this script if that's not what you meant to type."
+}
+
 $cred | Export-Clixml -Path $credPath
 
 Write-Host ""
