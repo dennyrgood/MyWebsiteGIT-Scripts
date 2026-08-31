@@ -134,6 +134,11 @@ SUBJECT="${EMOJI} MacBook Air nightly $(date '+%Y-%m-%d') — ${REASON}"
 
 {
     echo "Subject: $SUBJECT"
+    # 2026-08-31 UTC — Cc self (dennis.mathes@icloud.com), nightly-summary only, never
+    # the health-monitor alerts. That CC'd copy lands in the account's own INBOX
+    # (confirmed via IMAP — iCloud doesn't auto-file SMTP-submitted mail to Sent), which
+    # a separate daily digest script reads to report missing/not-ok boxes in one email.
+    echo "Cc: dennis.mathes@icloud.com"
     echo ""
     echo -e "$BODY"
-} | "$MSMTP" -a icloud "$TO"
+} | "$MSMTP" -a icloud "$TO" dennis.mathes@icloud.com

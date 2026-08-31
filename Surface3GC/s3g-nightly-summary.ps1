@@ -112,5 +112,5 @@ $Body = $Tldr + $Body
 if ($Reason -eq "all healthy") { $Emoji = "$Check" } else { $Emoji = "$Warn" }
 $Subject = "$Emoji Surface3GC nightly $(Get-Date -Format 'yyyy-MM-dd') -- $Reason"
 
-Send-FleetMail -Subject $Subject -Body $Body | Out-Null
+Send-FleetMail -Subject $Subject -Body $Body -Cc "dennis.mathes@icloud.com" | Out-Null
 Write-Output "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') nightly summary sent -- $Reason"

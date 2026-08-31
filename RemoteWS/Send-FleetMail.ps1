@@ -36,7 +36,14 @@ $Script:FleetMailCredPath = Join-Path $env:LOCALAPPDATA "fleet-scripts\icloud-ma
 function Send-FleetMail {
     param(
         [Parameter(Mandatory = $true)][string]$Subject,
-        [Parameter(Mandatory = $true)][string]$Body
+        [Parameter(Mandatory = $true)][string]$Body,
+        # 2026-08-31 UTC -- optional Cc, used ONLY by nightly-summary scripts (never
+        # health-monitor alerts) to self-CC dennis.mathes@icloud.com. That CC'd copy
+        # lands in that account's own INBOX (confirmed via IMAP -- iCloud doesn't
+        # auto-file SMTP-submitted mail to Sent, so this is the only way a copy ends
+        # up anywhere readable), which a separate daily digest script reads to report
+        # missing/not-ok boxes in one email instead of 13.
+        [string]$Cc = $null
     )
 
     if (-not (Test-Path $Script:FleetMailCredPath)) {
@@ -56,17 +63,20 @@ function Send-FleetMail {
         # mangles non-ASCII characters (confirmed 2026-08-31 -- the checkmark/warning
         # glyphs in amsdt-nightly-summary.ps1's subject/body arrived as "??" at the
         # recipient until this was added).
-        Send-MailMessage `
-            -From $Script:FleetMailFrom `
-            -To $Script:FleetMailTo `
-            -Subject $Subject `
-            -Body $Body `
-            -Encoding ([System.Text.Encoding]::UTF8) `
-            -SmtpServer $Script:FleetMailSmtpServer `
-            -Port $Script:FleetMailSmtpPort `
-            -UseSsl `
-            -Credential $cred `
-            -ErrorAction Stop
+        $mailParams = @{
+            From        = $Script:FleetMailFrom
+            To          = $Script:FleetMailTo
+            Subject     = $Subject
+            Body        = $Body
+            Encoding    = [System.Text.Encoding]::UTF8
+            SmtpServer  = $Script:FleetMailSmtpServer
+            Port        = $Script:FleetMailSmtpPort
+            UseSsl      = $true
+            Credential  = $cred
+            ErrorAction = "Stop"
+        }
+        if ($Cc) { $mailParams["Cc"] = $Cc }
+        Send-MailMessage @mailParams
         return $true
     } catch {
         Write-Warning "Send-MailMessage failed: $_. Alert NOT sent: $Subject"

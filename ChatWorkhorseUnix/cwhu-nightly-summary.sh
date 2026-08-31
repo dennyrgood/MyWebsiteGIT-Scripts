@@ -194,6 +194,9 @@ SUBJECT="${EMOJI} ChatWorkhorseUnix nightly $(date '+%Y-%m-%d') — ${REASON}"
 {
     echo "To: $TO"
     echo "Subject: $SUBJECT"
+    # 2026-08-31 UTC — Cc self, nightly-summary only — see DennissMacBookAir's version
+    # for the full rationale (feeds a separate daily digest script).
+    echo "Cc: dennis.mathes@icloud.com"
     echo ""
     echo -e "$BODY"
-} | msmtp --account=icloud "$TO"
+} | msmtp --account=icloud "$TO" dennis.mathes@icloud.com

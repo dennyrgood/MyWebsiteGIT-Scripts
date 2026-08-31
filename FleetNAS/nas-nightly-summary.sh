@@ -354,6 +354,11 @@ fi
 {
     echo "To: $TO"
     echo "Subject: $SUBJECT"
+    # 2026-08-31 UTC — Cc self, nightly-summary only — see DennissMacBookAir's version
+    # for the full rationale (feeds a separate daily digest script). Note this relays
+    # through WBU's own msmtp via SSH, so the second recipient goes on the same
+    # remote command line as $TO, not as a separate local arg.
+    echo "Cc: dennis.mathes@icloud.com"
     echo ""
     echo -e "$BODY"
-} | ssh -o BatchMode=yes "$WBU" "sudo msmtp --account=icloud $TO"
+} | ssh -o BatchMode=yes "$WBU" "sudo msmtp --account=icloud $TO dennis.mathes@icloud.com"
