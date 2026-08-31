@@ -4,14 +4,19 @@
 # THIS box: no comfy-fleet-scan/-http here (mb-only), so there's no scheduled-job
 # freshness section — just the health-monitor TLDR + full state dump.
 #
-# Sends via msmtp (iCloud SMTP, ~/.msmtprc, Keychain service "msmtp-denniss-2nd-macbook-air",
-# account dennis.mathes@icloud.com — passwordeval, not plaintext). 2026-08-30 setup note:
-# the first passwordeval call after the Keychain item was created hung indefinitely
-# waiting on a Secure-Input confirmation dialog — invisible over a Jump Desktop remote
-# session even with "Allow all applications" ACL set, so it looked unfixable remotely.
-# It resolved once the dialog was answered from the actual console at the right moment;
-# every kickstart since (fully unattended) has returned EX_OK, so the grant is cached as
-# expected for this Keychain item — this is one-time setup friction, not a per-run cost.
+# Sends via msmtp (iCloud SMTP, ~/.msmtprc). Credential storage: plaintext app-specific
+# password in ~/.msmtprc, chmod 600 — same approach as WorkBenchUnix/ChatWorkhorseUnix
+# (see WorkBenchUnix/RUNBOOK_msmtp-credential-rotation.md).
+#
+# 2026-08-30/31 history: Keychain passwordeval was tried first. It appeared to work
+# (two unattended kickstarts in a row returned EX_OK the evening it was set up), but the
+# 2026-08-31 07:00 scheduled run hung for 3h44m — the login keychain's grant hadn't
+# survived overnight (screen lock/sleep), and with nobody at the console to answer the
+# Secure-Input prompt, the job just sat there forever with no email sent and no error
+# logged. That silent-hang failure mode is worse than a bounced send, so this was
+# switched to plaintext, which makes no Keychain/security call at all and structurally
+# cannot hang this way. Rotate the password via the same runbook steps.
+#
 # Run via launchd, which gets a minimal PATH, so msmtp is called by full Homebrew path
 # throughout.
 
