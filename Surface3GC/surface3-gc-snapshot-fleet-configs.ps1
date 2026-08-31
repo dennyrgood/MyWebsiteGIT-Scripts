@@ -26,8 +26,14 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 $wanted = [System.Collections.Generic.List[string]]::new()
 Get-ChildItem $dest -Filter *.xml -ErrorAction SilentlyContinue | ForEach-Object { $wanted.Add($_.BaseName) }
 Get-ScheduledTask | Where-Object {
-    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat|run[-_ ]?hidden|watchdog|bekah|gc_'
+    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat|run[-_ ]?hidden|watchdog|bekah|gc_|syncthing|stctl|restic'
 } | ForEach-Object { $wanted.Add($_.TaskName) }
+# Health Monitor / Nightly Summary (added 2026-08-31, same 2 names across the whole
+# Windows fleet) don't match the action-regex above -- their command line is just
+# "...-File <box>-health-monitor.ps1", no fleet/heartbeat/watchdog keyword in it. Add
+# them by literal name instead of trying to extend the regex.
+Get-ScheduledTask | Where-Object { $_.TaskName -in @("Health Monitor", "Nightly Summary") } |
+    ForEach-Object { $wanted.Add($_.TaskName) }
 $wanted = @($wanted | Select-Object -Unique)
 
 Write-Host "Tasks to export:"; $wanted | ForEach-Object { Write-Host "  [$_]" }; Write-Host ""
