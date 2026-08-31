@@ -1,13 +1,107 @@
 # Fleet watchdog for macOS and Ubuntu — design notes for future rollout
 
-Not implemented. This captures everything learned building/deploying
+**STATUS (updated 2026-08-31): mostly superseded on macOS, still open on Ubuntu.**
+The note below ("could be added to/extended in the health check monitor") is
+what actually happened, on the Macs, on 2026-08-30 — most of this document
+now describes work that is done. Read the status section immediately below
+before acting on anything further down, or you will re-derive and re-build
+detection that already exists. Sections that have been overtaken are marked
+inline with a **DONE** / **NOT DONE** annotation.
+
+Original framing: this captured everything learned building/deploying
 `Status/FleetMetricsWatchdog.ps1` on all 6 Windows boxes (2026-07-22 through
-2026-07-29), translated to what a Mac/Ubuntu equivalent would need. Written
-so a future session (or you) can pick this up without re-deriving any of it.
+2026-07-29), translated to what a Mac/Ubuntu equivalent would need, so a
+future session could pick it up without re-deriving any of it.
 
 Note, the ubuntu machines and the mac mini have a health check monitor that this could be added to/extended in.
 
+## What is actually built, as of 2026-08-31
+
+The Mac side was implemented not as a standalone watchdog but by extending
+the existing per-box health monitors (`DennissMacBookAir/mb-health-monitor.sh`,
+`Denniss2ndMacBookAir/mb2-health-monitor.sh`,
+`MathesMacMini/mathes-mac-mini-health-monitor.sh`) on 2026-08-30 — exactly the
+route the one-line note above proposed.
+
+Coverage against the three failure classes this document defines:
+
+| Failure class | macOS (mb, mb2, mmm) | Ubuntu (wbu, cwhu, nas) |
+|---|---|---|
+| 1. Alive but hung (no HTTP response) | **DONE** | **NOT DONE** |
+| 2. Stale heartbeat (server up, writer dead) | **DONE** | **NOT DONE** |
+| 3. Duplicate processes | **NOT DONE** (still unverified whether the class exists here) | **NOT DONE** (writer is cron one-shot; only the systemd server is a candidate) |
+
+**macOS, class 1 (hang):** each monitor checks
+`METRICS_SERVER_URL="http://127.0.0.1:9100/heartbeat_${HOST}.txt"` — the exact
+URL this document proposed — with a missing-vs-down distinction: `pgrep` says
+the process is running but curl doesn't answer = hung, which is precisely the
+original travelbeast bug class that `KeepAlive`/`Restart=always` cannot catch.
+
+**macOS, class 2 (stale heartbeat):** `HEARTBEAT_STALE_SECS=600`, this
+document's proposed 10-minute threshold. The open caveat below ("check the
+Mac/Linux writer's actual tick interval before reusing 10 min verbatim") is
+**resolved**: the Mac writer ticks every 150s, so 600s is a deliberate 4x
+margin, documented in the constant's own comment.
+
+**macOS, class 3 (duplicates):** not built. `pgrep -f "$pattern"` is used only
+as a boolean presence test — no PID count, no keep-newest-kill-the-rest. This
+document already flagged the class as unverified outside Windows, so this is a
+deferred decision, not an oversight. The "go look before you build" advice
+under *What to check before writing any code* still stands unchanged.
+
+**Ubuntu: none of it.** `WorkBenchUnix/wbu-health-monitor.sh`,
+`ChatWorkhorseUnix/cwhu-health-monitor.sh` and `FleetNAS/nas-health-monitor.sh`
+cover iowait, D-state, disk, mounts, Docker/Immich, UPS/NUT, SMART/RAID — and
+contain no reference to port 9100, `fleet_metrics_server`, or heartbeat
+freshness. This is the real remaining gap: per this document's own analysis,
+systemd's `Restart=always` covers crash but not hang, so the Ubuntu metrics
+server is the one genuine hang candidate on those boxes and it is currently
+unwatched.
+
+### Two ways the built thing differs in kind from what was designed here
+
+1. **It detects and emails; it does not self-heal.** The Windows watchdog
+   restarts the offending process. The Mac monitors send an alert containing a
+   runbook (`launchctl kickstart -k gui/$(id -u)/com.dennis.<label>`) and leave
+   the human in the loop. One deliberate exception exists where the ROI was
+   proven by a real incident: `comfy-fleet-http` auto-kickstarts and only
+   alerts if the kickstart itself fails to fix it. Whether the fleet-critical
+   pair (heartbeat-writer, fleet-metrics-server) should follow that same
+   auto-heal pattern is an open decision.
+2. **The dashboard integration was never done.** Nothing on Mac writes a
+   `watchdog_<host>.log`, and `Status/Web/ST/tiles.html`'s `WATCHDOG_HOSTS`
+   array still lists only the 6 Windows boxes. So the tiles' watchdog badge
+   remains Windows-only even though Mac detection now exists — the detection
+   reaches you by email instead. See the `WATCHDOG_HOSTS` section below, which
+   is still accurate and still outstanding.
+
+   Related: this document's "daily alive ping, so silence isn't ambiguous
+   between healthy and watchdog-died" convention *was* effectively achieved,
+   by a different route. The nightly summaries check the monitor's own state
+   file for staleness (`MONITOR_STALE_SECS=600` in
+   `MathesMacMini/nightly_summary.sh`), which proves the monitor is alive on a
+   daily cadence over a separate channel.
+
+### Remaining work, ranked
+
+1. Port the two macOS checks (9100 hang check + heartbeat freshness) into the
+   three Ubuntu monitors — roughly 15 lines each, copied from the Mac version.
+   Note the Ubuntu restart mechanism differs (`systemctl restart
+   fleet_metrics_server`) and the writer needs no restart at all, being cron
+   one-shot.
+2. Decide explicitly whether heartbeat-writer / fleet-metrics-server should
+   auto-heal on Mac the way `comfy-fleet-http` does, or stay alert-only.
+3. Duplicate-process detection: still genuinely unverified outside Windows.
+   Go look first (`ps aux | grep` over a day) before building anything.
+4. Optional, lowest value: emit `watchdog_<host>.log` lines from the Mac
+   monitors and add the Mac/Ubuntu hosts to `WATCHDOG_HOSTS` so the tiles badge
+   covers the whole fleet rather than just Windows.
+
 ## Why this wasn't just "port the .ps1"
+
+*(Analysis below remains correct and is what the 2026-08-30 macOS
+implementation was built on. Classes 1 and 2 are now DONE on macOS, still
+open on Ubuntu; class 3 is open everywhere.)*
 
 The Windows watchdog exists because Task Scheduler has **no native
 restart-on-hang** — a `BootTrigger`-only task that crashes or hangs just sits
@@ -74,6 +168,10 @@ Windows before testing.
 
 ### Health check (same on both OSes, same as Windows)
 
+**DONE on macOS** (2026-08-30, inside the per-box health monitors, same URL
+and same 10-min threshold — see the status section above). **Still open on
+Ubuntu**, and this is the highest-value remaining item.
+
 ```bash
 curl -sf --max-time 5 "http://127.0.0.1:9100/heartbeat_${HOST}.txt"
 ```
@@ -84,6 +182,9 @@ curl -sf --max-time 5 "http://127.0.0.1:9100/heartbeat_${HOST}.txt"
   before reusing 10 min verbatim) → writer dead/stuck → restart writer.
 
 ### Duplicate-process detection (macOS + persistent Linux daemons only)
+
+**NOT DONE anywhere outside Windows.** Deliberately deferred — the class is
+still unverified on Mac/Ubuntu. Verify before building.
 
 ```bash
 pgrep -fa "onedrive_heartbeat_writer_all_macs.py"   # or the relevant script name
@@ -99,6 +200,11 @@ persistent.
 
 ### Restart mechanism
 
+**NOT DONE for the fleet-critical pair** — the Mac monitors emit these
+commands as runbook text in the alert email rather than executing them.
+`comfy-fleet-http` is the one service that does auto-`kickstart`. See "differs
+in kind" above.
+
 - **macOS:** `launchctl kickstart -k gui/$(id -u)/com.dennis.<label>` — note
   the exit-status caveat already documented in `launchagents/README.md`
   (`-k` sends SIGTERM, so status briefly shows `-15` even on success; use
@@ -107,6 +213,13 @@ persistent.
   restart mechanism, cron just runs it again in ≤2 min naturally).
 
 ### Scheduling the watchdog itself
+
+**Superseded on macOS.** No separate `com.dennis.fleet-watchdog.plist` was
+created; the checks ride the existing 5-minute health-monitor LaunchAgents
+(`launchagents/com.dennis.mb-health-monitor.plist` and siblings), which already
+run at the cadence this section specifies. Ubuntu equivalent still open — same
+logic applies, extend the existing 5-minute cron health monitor rather than
+adding a systemd timer.
 
 - **macOS:** a new LaunchAgent, `com.dennis.fleet-watchdog.plist`, using
   `StartInterval: 300` (NOT `KeepAlive` — this should run, finish, exit every
@@ -117,6 +230,10 @@ persistent.
   simpler given the writer's already cron-based there.
 
 ### Logging — reuse the exact same convention, unchanged
+
+**NOT DONE.** No `watchdog_<host>.log` is written on Mac or Ubuntu; detection
+reaches you by email instead of via the tiles badge. Everything below is still
+accurate if/when you want the dashboard to cover non-Windows hosts.
 
 Write to `~/fleet_monitor/watchdog_<host>.log` (Mac) or the Ubuntu
 equivalent's `fleet_monitor` dir, in the **same line format** the Windows
@@ -149,6 +266,11 @@ watchdog running (`denniss-macbook-air`, `denniss-2nd-macbook-air`,
 required frontend change, nothing else.
 
 ## Rollout checklist (mirrors what worked for Windows)
+
+*(Written for a standalone watchdog. For the Ubuntu port — the actual
+remaining work — steps 1-3 collapse into "add the checks to the existing
+health monitor," since it is already deployed and already scheduled. Steps 4
+and 6 apply only if you also do the optional logging/dashboard item.)*
 
 1. Write the watchdog script (bash, probably — no reason for Python here).
 2. Deploy to one box first, run it **manually** to confirm behavior before
