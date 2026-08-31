@@ -48,18 +48,46 @@ if (Test-Path $AllStatusFile) {
     try {
         $status = Get-Content $AllStatusFile -Raw | ConvertFrom-Json
         $s = $status.summary
+
+        $downMachines = @($status.machines | Where-Object { $_.host.status -ne "up" })
+        $downServices = @()
+        foreach ($m in $status.machines) {
+            foreach ($svc in $m.services) {
+                $tsDown = $svc.tailscale_check.status -ne "up"
+                $pubDown = $svc.public_check -and $svc.public_check.status -ne "up"
+                if ($tsDown -or $pubDown) {
+                    $tsStatus = $svc.tailscale_check.status
+                    $pubStatus = if ($svc.public_check) { $svc.public_check.status } else { "n/a" }
+                    $detailMsg = if ($tsDown) { $svc.tailscale_check.detail } else { $svc.public_check.detail }
+                    $downServices += [PSCustomObject]@{
+                        Name   = "$($m.machine.display_name)/$($svc.name)"
+                        Detail = "$($m.machine.display_name)/$($svc.name): tailscale=$tsStatus public=$pubStatus detail=$detailMsg"
+                    }
+                }
+            }
+        }
+
         $line = "  fleet-checker: [$ageStr ago] machines $($s.machines_up)/$($s.machines_total) up, services $($s.services_up)/$($s.services_total) up, public $($s.public_endpoints_up)/$($s.public_endpoints_total) up"
         if ($s.machines_down -gt 0 -or $s.services_down -gt 0 -or $s.public_endpoints_down -gt 0) {
             $Tldr += "$Warn$line`r`n"
-            if ($Reason -eq "all healthy") { $Reason = "fleet checker sees $($s.machines_down) machine(s)/$($s.services_down) service(s) down" }
+            if ($Reason -eq "all healthy") {
+                $namedDown = @($downMachines | ForEach-Object { $_.machine.display_name }) + @($downServices | ForEach-Object { $_.Name })
+                if ($namedDown.Count -gt 0 -and $namedDown.Count -le 4) {
+                    $Reason = "down: $($namedDown -join ', ')"
+                } else {
+                    $Reason = "fleet checker sees $($s.machines_down) machine(s)/$($s.services_down) service(s) down"
+                }
+            }
         } else {
             $Tldr += "$line $Check`r`n"
         }
         $Body += "=== FLEET CHECKER SUMMARY (this box's instance) ===`r`n"
         $Body += "$($status.meta | ConvertTo-Json -Compress)`r`n$($s | ConvertTo-Json -Compress)`r`n`r`n"
-        if ($s.machines_down -gt 0 -or $s.services_down -gt 0) {
-            $downMachines = $status.machines | Where-Object { $_.host.status -ne "up" }
+        if ($downMachines.Count -gt 0) {
             $Body += "Machines not up: $(($downMachines | ForEach-Object { $_.machine.display_name }) -join ', ')`r`n`r`n"
+        }
+        if ($downServices.Count -gt 0) {
+            $Body += "Services not up:`r`n$(($downServices | ForEach-Object { $_.Detail }) -join "`r`n")`r`n`r`n"
         }
     } catch {
         $Tldr += "$Warn  fleet-checker: [$ageStr ago] could not parse server_status_all.json: $_`r`n"

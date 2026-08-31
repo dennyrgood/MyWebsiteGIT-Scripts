@@ -1,23 +1,25 @@
-# travelbeast-snapshot-fleet-configs.ps1
-# Created 2026-07-21; hardened 2026-07-21.
+# surfacegolaptopgc-snapshot-fleet-configs.ps1
+# Created 2026-08-31, when this box was first brought into the fleet (Fleet Metrics
+# Server / Heartbeat Write OneDrive / Fleet Metrics Watchdog + Health Monitor /
+# Nightly Summary all set up the same day -- see Status/README_MOVE_AWAY_ONEDRIVE.md's
+# "Adding / redoing a box" section and HOWTO_WINDOWS_HEALTH_MONITOR_ROLLOUT.md).
+# Modeled on Surface3GC's snapshot script (closest sibling -- sgc may eventually
+# replace s3g), minus the Syncthing/restic-specific capture block, since sgc doesn't
+# run either of those (yet -- add that block back, copied from Surface3GC's version,
+# if/when it does).
+#
 # Exports this box's fleet Task Scheduler tasks into the fleet-configs repo snapshot.
 # Manual-run; review `git diff` and commit.
 #
 # Task list = existing TaskSched\*.xml + any task DISCOVERED by its action running the
-# fleet writer/metrics/heartbeat (matched on the action, so a display name with spaces
-# like "Fleet Metrics Server" is found fine). wifi_watchdog.ps1 already lives in the
-# scripts repo, so it is not copied.
-#
-# 2026-08-19: added 'power[-_ ]?heartbeat' to the match regex so the "Power Heartbeat
-# Logger" task (runs power-heartbeat.ps1, see that file's header for why it exists) is
-# picked up automatically rather than relying on an XML already sitting in TaskSched\
-# from a prior manual export.
+# fleet writer/metrics/heartbeat/watchdog, PLUS Health Monitor/Nightly Summary by their
+# literal names (their command line doesn't contain a matching keyword).
 #
 # Hardened: one stale or protected task never aborts the run. Do NOT set
 # $ErrorActionPreference='Stop' (it turns schtasks' stderr into a terminating error);
 # each export checks $LASTEXITCODE and is wrapped.
 
-$Machine = "TravelBeast"         # fleet-configs folder name for this box
+$Machine = "SurfaceGoLaptopGC"   # fleet-configs folder name for this box
 
 $repoRoot = @("D:\repos", "C:\repos", "$env:USERPROFILE\repos") |
             Where-Object { Test-Path "$_\fleet-configs" } | Select-Object -First 1
@@ -29,12 +31,12 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 $wanted = [System.Collections.Generic.List[string]]::new()
 Get-ChildItem $dest -Filter *.xml -ErrorAction SilentlyContinue | ForEach-Object { $wanted.Add($_.BaseName) }
 Get-ScheduledTask | Where-Object {
-    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat[-_ ]?writer|power[-_ ]?heartbeat|run[-_ ]?hidden|watchdog'
+    ($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -match 'fleet[-_ ]?metrics[-_ ]?server|fleet[-_ ]?monitor|heartbeat|run[-_ ]?hidden|watchdog|ups[-_]?watch|syncthing|stctl|restic'
 } | ForEach-Object { $wanted.Add($_.TaskName) }
-# Health Monitor / Nightly Summary (added 2026-08-31, same 2 names across the whole
-# Windows fleet) don't match the action-regex above -- their command line is just
-# "...-File <box>-health-monitor.ps1", no fleet/heartbeat/watchdog keyword in it. Add
-# them by literal name instead of trying to extend the regex.
+# Health Monitor / Nightly Summary (same 2 names across the whole Windows fleet) don't
+# match the action-regex above -- their command line is just "...-File
+# sgc-health-monitor.ps1", no fleet/heartbeat/watchdog keyword in it. Add them by
+# literal name instead of trying to extend the regex.
 Get-ScheduledTask | Where-Object { $_.TaskName -in @("Health Monitor", "Nightly Summary") } |
     ForEach-Object { $wanted.Add($_.TaskName) }
 $wanted = @($wanted | Select-Object -Unique)
@@ -56,10 +58,9 @@ foreach ($t in $wanted) {
     }
 }
 
-# Some boxes have multiple local accounts, and the
-# real PSProfile content can live under an account other than the one running this
-# script -- so search all user profiles on the box before falling back to $PROFILE
-# (which covers boxes like ImageBeast that never adopted the PSProfile indirection).
+# Some boxes have multiple local accounts, and the real PSProfile content can live
+# under an account other than the one running this script -- so search all user
+# profiles on the box before falling back to $PROFILE.
 $psProfileCandidates = @("$env:USERPROFILE\PSProfile\Microsoft.PowerShell_profile.ps1")
 $psProfileCandidates += Get-ChildItem C:\Users -Directory -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -ne "Public" } |
