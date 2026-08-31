@@ -100,6 +100,27 @@ check_service() {
     fi
 }
 check_service COMFY_HTTP "$COMFY_HTTP_PROC_PATTERN" "$COMFY_HTTP_URL"
+
+# 2026-08-31: auto-heal COMFY_HTTP instead of just alerting on it. Confirmed twice
+# in <24h (both times: process present, HTTP down for hours straight, `ls` on the
+# served directory works fine interactively the whole time) that this doesn't
+# self-heal, but a plain `launchctl kickstart -k` fixes it instantly every time --
+# a mechanical, known-safe fix (a bare http.server, not a stateful service), so it's
+# worth doing automatically rather than paging for something with a known one-line
+# cure. Only alert if the kickstart itself doesn't fix it -- COMFY_HTTP_AUTOHEALED
+# is surfaced in the all-clear/heartbeat log line so a recurring pattern stays
+# visible even though it stops emailing.
+COMFY_HTTP_AUTOHEALED=0
+if [ "${DOWN_TRIGGERED[COMFY_HTTP]}" -eq 1 ]; then
+    launchctl kickstart -k "gui/$(id -u)/com.dennis.comfy-fleet-http" >/dev/null 2>&1
+    sleep 3
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$COMFY_HTTP_URL" 2>/dev/null)
+    if [ "$CODE" = "200" ]; then
+        DOWN_TRIGGERED[COMFY_HTTP]=0
+        COMFY_HTTP_AUTOHEALED=1
+    fi
+fi
+
 check_service METRICS_SERVER "$METRICS_SERVER_PROC_PATTERN" "$METRICS_SERVER_URL"
 check_service HEARTBEAT_WRITER "$HEARTBEAT_WRITER_PROC_PATTERN" ""
 check_service SEARCH_ADV "$SEARCH_ADV_PROC_PATTERN" "$SEARCH_ADV_URL"
@@ -285,4 +306,6 @@ fi
 # gives positive proof the job ran vs. silently broke.
 ACTIVE_COUNT=$(grep -c "_ACTIVE=1" "$STATE_FILE" 2>/dev/null || true)
 ACTIVE_COUNT=${ACTIVE_COUNT:-0}
-echo "$(date '+%Y-%m-%d %H:%M:%S') check complete — ${ACTIVE_COUNT} active alert(s)"
+AUTOHEAL_NOTE=""
+[ "$COMFY_HTTP_AUTOHEALED" -eq 1 ] && AUTOHEAL_NOTE=" (auto-healed comfy-fleet-http)"
+echo "$(date '+%Y-%m-%d %H:%M:%S') check complete — ${ACTIVE_COUNT} active alert(s)${AUTOHEAL_NOTE}"
