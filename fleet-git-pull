@@ -19,6 +19,7 @@ FLEET_HOSTS=(
   "denniss-macbook-air:mac"
   "denniss-2nd-macbook-air:mac"
   "surface3-gc:win"
+  "surfacegolaptopgc:win"
   "mathes-mac-mini:mac"
   "remotews:win"
   "workbenchunix:ubuntu"
