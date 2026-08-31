@@ -104,7 +104,10 @@ $WatchdogTriggered = 0
 $WatchdogDetail = ""
 try {
     $wdInfo = Get-ScheduledTaskInfo -TaskName "Fleet Metrics Watchdog" -ErrorAction Stop
-    if ($wdInfo.LastTaskResult -ne 0) {
+    if ($wdInfo.LastTaskResult -ne 0 -and $wdInfo.LastTaskResult -ne 267009) {
+        # 267009 (SCHED_S_TASK_RUNNING) means this health-monitor's own poll happened to
+        # land while the watchdog was still mid-execution -- transient, not a failure
+        # (confirmed 2026-08-31 on sgc: a real false alert from this exact race).
         $WatchdogTriggered = 1
         $WatchdogDetail = "Last result: $($wdInfo.LastTaskResult) (nonzero = a restart attempt failed). Last run: $($wdInfo.LastRunTime)."
     } elseif (((Get-Date) - $wdInfo.LastRunTime).TotalMinutes -gt 15) {
@@ -121,7 +124,9 @@ $UpsWatchTriggered = 0
 $UpsWatchDetail = ""
 try {
     $uwInfo = Get-ScheduledTaskInfo -TaskName "UPS-Watch-ImageBeast" -ErrorAction Stop
-    if ($uwInfo.LastTaskResult -ne 0) {
+    if ($uwInfo.LastTaskResult -ne 0 -and $uwInfo.LastTaskResult -ne 267009) {
+        # 267009 (SCHED_S_TASK_RUNNING) -- same transient-race exception as the watchdog
+        # check above, not a real failure.
         $UpsWatchTriggered = 1
         $UpsWatchDetail = "Last result: $($uwInfo.LastTaskResult). Last run: $($uwInfo.LastRunTime)."
     } elseif (((Get-Date) - $uwInfo.LastRunTime).TotalMinutes -gt 15) {

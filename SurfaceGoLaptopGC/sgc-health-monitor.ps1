@@ -58,7 +58,10 @@ $WatchdogTriggered = 0
 $WatchdogDetail = ""
 try {
     $wdInfo = Get-ScheduledTaskInfo -TaskName "Fleet Metrics Watchdog" -ErrorAction Stop
-    if ($wdInfo.LastTaskResult -ne 0) {
+    if ($wdInfo.LastTaskResult -ne 0 -and $wdInfo.LastTaskResult -ne 267009) {
+        # 267009 (SCHED_S_TASK_RUNNING) means this health-monitor's own poll happened to
+        # land while the watchdog was still mid-execution -- transient, not a failure.
+        # This is the exact false alert that hit sgc on 2026-08-31 22:05.
         $WatchdogTriggered = 1
         $WatchdogDetail = "Last result: $($wdInfo.LastTaskResult) (nonzero = a restart attempt failed). Last run: $($wdInfo.LastRunTime)."
     } elseif (((Get-Date) - $wdInfo.LastRunTime).TotalMinutes -gt 15) {
