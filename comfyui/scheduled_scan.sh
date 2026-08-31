@@ -12,6 +12,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPORTS_DIR="$HOME/OneDrive/DropBoxReplacement/MathesDropBox/0ComfyUI/Work/comfy-reports"
 OUTPUT_DIR="$REPORTS_DIR/fleet-output"
+# 2026-08-31: comfy-fleet-http serves LOCAL_OUTPUT_DIR, NOT $OUTPUT_DIR directly.
+# $OUTPUT_DIR lives inside OneDrive's live-syncing tree, and a long-running
+# `python3 -m http.server` process holding that as its launchd WorkingDirectory
+# was found (twice in <24h) to get its cached cwd handle invalidated by an
+# OneDrive sync operation -- `ls` on the directory worked fine the whole time,
+# but the server's own directory listing returned "No permission to list
+# directory" for hours until manually restarted. Rather than keep auto-healing
+# around that (see mb-health-monitor.sh's matching 2026-08-31 comment, which
+# stays in place as a safety net), the server now points at a plain local
+# directory that OneDrive never touches, refreshed from $OUTPUT_DIR at the end
+# of every scan below -- same-day fresh, but immune to OneDrive's sync churn.
+LOCAL_OUTPUT_DIR="$SCRIPT_DIR/fleet-output-local"
 
 echo "=== $(date) -- scheduled fleet scan starting ==="
 
@@ -33,5 +45,12 @@ latest_explorer=$(ls -t "$OUTPUT_DIR"/fleet_explorer_*.html 2>/dev/null | head -
 # is first on an interactive shell's PATH) but crashed every night under launchd
 # with "TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'".
 /opt/homebrew/bin/python3 "$SCRIPT_DIR/comfy_fleet.py" --config "$REPORTS_DIR/fleet_config.json" --prune-output --confirm-prune --keep-runs 3
+
+# Mirror the (now-pruned) output out of OneDrive to the plain local dir
+# comfy-fleet-http actually serves. --delete so removed/pruned files don't
+# linger in the local copy; run after pruning so the mirror reflects the same
+# retention window as $OUTPUT_DIR itself.
+mkdir -p "$LOCAL_OUTPUT_DIR"
+rsync -a --delete "$OUTPUT_DIR/" "$LOCAL_OUTPUT_DIR/"
 
 echo "=== $(date) -- scheduled fleet scan complete ==="

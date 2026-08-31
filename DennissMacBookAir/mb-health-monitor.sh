@@ -107,9 +107,9 @@ check_service COMFY_HTTP "$COMFY_HTTP_PROC_PATTERN" "$COMFY_HTTP_URL"
 # self-heal, but a plain `launchctl kickstart -k` fixes it instantly every time --
 # a mechanical, known-safe fix (a bare http.server, not a stateful service), so it's
 # worth doing automatically rather than paging for something with a known one-line
-# cure. Only alert if the kickstart itself doesn't fix it -- COMFY_HTTP_AUTOHEALED
-# is surfaced in the all-clear/heartbeat log line so a recurring pattern stays
-# visible even though it stops emailing.
+# cure. Only alert (the real HEALTH ALERT path) if the kickstart itself doesn't fix
+# it. Per Dennis: notify on every single occurrence, no rate-limiting/suppression --
+# not styled as urgent (no action needed), but every auto-heal gets its own email.
 COMFY_HTTP_AUTOHEALED=0
 if [ "${DOWN_TRIGGERED[COMFY_HTTP]}" -eq 1 ]; then
     launchctl kickstart -k "gui/$(id -u)/com.dennis.comfy-fleet-http" >/dev/null 2>&1
@@ -118,6 +118,17 @@ if [ "${DOWN_TRIGGERED[COMFY_HTTP]}" -eq 1 ]; then
     if [ "$CODE" = "200" ]; then
         DOWN_TRIGGERED[COMFY_HTTP]=0
         COMFY_HTTP_AUTOHEALED=1
+        {
+            echo "Subject: [${HOST}] auto-healed comfy-fleet-http -- $(date '+%Y-%m-%d %H:%M')"
+            echo ""
+            echo "comfy-fleet-http's HTTP endpoint wasn't responding (process was up, but"
+            echo "the OneDrive-cwd issue documented in this script's 2026-08-31 comment)."
+            echo "Ran 'launchctl kickstart -k com.dennis.comfy-fleet-http' automatically and"
+            echo "it's back to 200 now -- no action needed."
+            echo ""
+            echo "FYI only: if this shows up often, it's worth revisiting the underlying"
+            echo "OneDrive/WorkingDirectory issue rather than continuing to auto-heal around it."
+        } | "$MSMTP" -a icloud "$TO"
     fi
 fi
 

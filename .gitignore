@@ -18,3 +18,8 @@ __pycache__/
 # by 2026-08-25 were byte-identical to commits already in the log.
 *.bak
 *.bak.*
+
+# Generated fleet-scan output mirrored out of OneDrive by scheduled_scan.sh
+# (comfy-fleet-http serves this local copy instead of the live-syncing OneDrive
+# dir -- see that script's 2026-08-31 comment). Regenerated daily; not source.
+comfyui/fleet-output-local/

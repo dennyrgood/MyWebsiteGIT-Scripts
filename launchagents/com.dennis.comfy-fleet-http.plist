@@ -15,8 +15,13 @@
         <string>0.0.0.0</string>
     </array>
 
+    <!-- 2026-08-31: switched off the live OneDrive-synced dir to a local mirror
+         (comfyui/fleet-output-local/, refreshed daily by scheduled_scan.sh) --
+         a long-running process holding OneDrive's fleet-output/ as its cwd was
+         getting its directory handle invalidated by OneDrive's own sync churn,
+         wedging this server's directory listing for hours at a time. -->
     <key>WorkingDirectory</key>
-    <string>/Users/dennishmathes/OneDrive/DropBoxReplacement/MathesDropBox/0ComfyUI/Work/comfy-reports/fleet-output</string>
+    <string>/Users/dennishmathes/repos/scripts/comfyui/fleet-output-local</string>
 
     <key>RunAtLoad</key>
     <true/>
