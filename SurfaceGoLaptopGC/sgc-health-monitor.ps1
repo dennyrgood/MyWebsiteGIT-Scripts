@@ -58,10 +58,17 @@ $WatchdogTriggered = 0
 $WatchdogDetail = ""
 try {
     $wdInfo = Get-ScheduledTaskInfo -TaskName "Fleet Metrics Watchdog" -ErrorAction Stop
-    if ($wdInfo.LastTaskResult -ne 0 -and $wdInfo.LastTaskResult -ne 267009) {
+    if ($wdInfo.LastTaskResult -ne 0 -and $wdInfo.LastTaskResult -ne 267009 -and $wdInfo.LastTaskResult -ne 2147946720) {
         # 267009 (SCHED_S_TASK_RUNNING) means this health-monitor's own poll happened to
         # land while the watchdog was still mid-execution -- transient, not a failure.
         # This is the exact false alert that hit sgc on 2026-08-31 22:05.
+        # 2147946720 / 0x800710E0 ("the operator or administrator has refused the
+        # request") is Task Scheduler declining to start the watchdog's next 5-min
+        # trigger because the previous run was still in progress -- same benign
+        # overlap race as 267009, just the code Task Scheduler gives the *refused*
+        # side of that race instead of the *already running* side. Confirmed
+        # self-healed (Last Result back to 0, heartbeat/machine_info fresh) on the
+        # very next run when this hit sgc on 2026-09-01 23:15.
         $WatchdogTriggered = 1
         $WatchdogDetail = "Last result: $($wdInfo.LastTaskResult) (nonzero = a restart attempt failed). Last run: $($wdInfo.LastRunTime)."
     } elseif (((Get-Date) - $wdInfo.LastRunTime).TotalMinutes -gt 15) {
