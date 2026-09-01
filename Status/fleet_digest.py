@@ -172,15 +172,18 @@ def send_report(user, password, to_addr, subject, body):
     import smtplib
     from email.mime.text import MIMEText
 
+    # Self-CC, same as every nightly-summary already does -- gives the digest its
+    # own copy/record in the icloud account too, not just the Yahoo inbox.
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = user
     msg["To"] = to_addr
+    msg["Cc"] = user
 
     with smtplib.SMTP("smtp.mail.me.com", 587) as s:
         s.starttls()
         s.login(user, password)
-        s.sendmail(user, [to_addr], msg.as_bytes())
+        s.sendmail(user, [to_addr, user], msg.as_bytes())
 
 
 FLEET_DIGEST_TO = "dennyrgood@yahoo.com"
