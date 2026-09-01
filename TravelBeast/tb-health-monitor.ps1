@@ -128,6 +128,14 @@ try {
 # broken. Checking the CSV's own freshness (like RemoteWS's equivalent check) measures
 # the thing that actually matters -- is data still being written -- not how long ago
 # the task process happened to start.
+#
+# 2026-09-02 UTC -- second fix, same day: the first version looked for TODAY's file
+# by exact date-matched filename, which false-fired again at midnight -- the logger
+# hadn't rolled over to the new day's CSV in the first seconds after 00:00 yet, so
+# "today's" exact-named file didn't exist even though yesterday's was still getting
+# written moments earlier. RemoteWS's equivalent check already avoided this (find the
+# MOST RECENT CSV by write time, not by exact filename) -- should have copied that
+# pattern the first time instead of the fragile exact-match version.
 $PowerHbTriggered = 0
 $PowerHbDetail = ""
 try {
@@ -136,16 +144,18 @@ try {
         $PowerHbTriggered = 1
         $PowerHbDetail = "Task state is '$($phTask.State)', expected 'Running' (this is a continuous loop task)."
     } else {
-        $todayCsv = Join-Path "C:\fleet_monitor\power_heartbeat_travelbeast" ("power_heartbeat_v3_travelbeast_{0:yyyy-MM-dd}.csv" -f (Get-Date))
-        if (Test-Path $todayCsv) {
-            $csvAgeMin = (New-TimeSpan -Start (Get-Item $todayCsv).LastWriteTime -End (Get-Date)).TotalMinutes
+        $phDir = "C:\fleet_monitor\power_heartbeat_travelbeast"
+        $latestCsv = Get-ChildItem $phDir -Filter "power_heartbeat_v3_travelbeast_*.csv" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($latestCsv) {
+            $csvAgeMin = (New-TimeSpan -Start $latestCsv.LastWriteTime -End (Get-Date)).TotalMinutes
             if ($csvAgeMin -gt 20) {
                 $PowerHbTriggered = 1
-                $PowerHbDetail = "Today's CSV hasn't been written to in $([int]$csvAgeMin) min (expected every ~16s). File: $todayCsv"
+                $PowerHbDetail = "Most recent CSV ($($latestCsv.Name)) hasn't been written to in $([int]$csvAgeMin) min (expected every ~16s)."
             }
         } else {
             $PowerHbTriggered = 1
-            $PowerHbDetail = "No CSV for today found at $todayCsv"
+            $PowerHbDetail = "No power_heartbeat_v3_travelbeast_*.csv found in $phDir"
         }
     }
 } catch {
@@ -247,12 +257,13 @@ POWER HEARTBEAT LOGGER TROUBLE:
 TravelBeast\power-heartbeat.ps1 is this box's own WiFi-flap diagnostic --
 losing it silently means a future WiFi investigation has no trend line to
 correlate against, the same way a dead heartbeat writer blinds the fleet
-dashboard. It's a long-running logging loop, not a run-once task, so this
-only fires if it (re)started >25h ago or its last exit was a real error.
+dashboard. This fires if the task itself isn't Running, or if the most
+recent CSV sample is more than 20 min old (expected every ~16s while active).
 
 What to do:
   1. schtasks /Query /TN "Power Heartbeat Logger" /V /FO LIST
-  2. schtasks /Run /TN "Power Heartbeat Logger"
+  2. Get-ChildItem C:\fleet_monitor\power_heartbeat_travelbeast | Sort-Object LastWriteTime -Descending | Select -First 1
+  3. schtasks /Run /TN "Power Heartbeat Logger"
 ------------------------------------------------------------------------
 "@
 
