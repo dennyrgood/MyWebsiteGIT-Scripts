@@ -117,21 +117,36 @@ try {
     $WatchdogDetail = "Task 'Fleet Metrics Watchdog' not found or not queryable: $_"
 }
 
-# --- Check: Power Heartbeat Logger itself (last-run result + staleness), read-only ---
+# --- Check: Power Heartbeat Logger itself (task state + CSV freshness), read-only ---
+# 2026-09-02 UTC -- fixed a false-positive: this task is a long-lived loop that's
+# meant to just keep running for days without restarting, so "LastRunTime" (which
+# only advances on an actual restart) is the WRONG signal for "is it still working" --
+# confirmed on 2026-09-01/02 that a healthy, continuously-running instance (State
+# still Running, CSV still getting fresh ~16s writes the whole time) tripped the old
+# ">25h since last restart" check purely because uptime crossed 25h, firing real
+# HEALTH ALERT emails every 30 min for hours over something that was never actually
+# broken. Checking the CSV's own freshness (like RemoteWS's equivalent check) measures
+# the thing that actually matters -- is data still being written -- not how long ago
+# the task process happened to start.
 $PowerHbTriggered = 0
 $PowerHbDetail = ""
 try {
-    $phInfo = Get-ScheduledTaskInfo -TaskName "Power Heartbeat Logger" -ErrorAction Stop
-    if ($phInfo.LastTaskResult -ne 0 -and $phInfo.LastTaskResult -ne 267009) {
-        # 267009 (0x41301, SCHED_S_TASK_RUNNING) is expected here -- this task runs
-        # continuously (a long-lived logging loop), not once-and-exit like the others.
+    $phTask = Get-ScheduledTask -TaskName "Power Heartbeat Logger" -ErrorAction Stop
+    if ($phTask.State -ne "Running") {
         $PowerHbTriggered = 1
-        $PowerHbDetail = "Last result: $($phInfo.LastTaskResult). Last run: $($phInfo.LastRunTime)."
-    } elseif (((Get-Date) - $phInfo.LastRunTime).TotalHours -gt 25) {
-        # This task starts once (at logon/boot) and runs continuously -- LastRunTime
-        # only advances if it restarts. 25h gives slack over a daily reboot cycle.
-        $PowerHbTriggered = 1
-        $PowerHbDetail = "Task has not (re)started in $([int]((Get-Date) - $phInfo.LastRunTime).TotalHours)h. Last run: $($phInfo.LastRunTime)."
+        $PowerHbDetail = "Task state is '$($phTask.State)', expected 'Running' (this is a continuous loop task)."
+    } else {
+        $todayCsv = Join-Path "C:\fleet_monitor\power_heartbeat_travelbeast" ("power_heartbeat_v3_travelbeast_{0:yyyy-MM-dd}.csv" -f (Get-Date))
+        if (Test-Path $todayCsv) {
+            $csvAgeMin = (New-TimeSpan -Start (Get-Item $todayCsv).LastWriteTime -End (Get-Date)).TotalMinutes
+            if ($csvAgeMin -gt 20) {
+                $PowerHbTriggered = 1
+                $PowerHbDetail = "Today's CSV hasn't been written to in $([int]$csvAgeMin) min (expected every ~16s). File: $todayCsv"
+            }
+        } else {
+            $PowerHbTriggered = 1
+            $PowerHbDetail = "No CSV for today found at $todayCsv"
+        }
     }
 } catch {
     $PowerHbTriggered = 1
