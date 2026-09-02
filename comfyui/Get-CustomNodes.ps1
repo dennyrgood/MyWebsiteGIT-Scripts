@@ -42,7 +42,13 @@ $lines += ""
 
 $i = 1
 foreach ($node in $nodes) {
-    $line = "{0,3}. {1}" -f $i, $node.Name
+    # Folder LastWriteTime as a cheap recency proxy -- same signal class as
+    # workflow file mtimes elsewhere in this pipeline. Not a git-commit date
+    # (see comfy_fleet.py's disabled-node comment for why version/commit
+    # tracking is deliberately out of scope for now), just "when was this
+    # node's own folder last touched" (install, update, or a manual edit).
+    $modDate = $node.LastWriteTime.ToString("yyyy-MM-dd")
+    $line = "{0,3}. {1} || {2}" -f $i, $node.Name, $modDate
     Write-Host $line
     $lines += $line
     $i++
