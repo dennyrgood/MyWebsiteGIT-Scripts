@@ -124,6 +124,36 @@ $modelKeys = @(
     'clip_name2', 'ipadapter_file', 'weight_name', 'file'
 )
 
+# "Background" node types -- nodes that load a model internally (often
+# hardcoded to a fixed folder, e.g. JoyCaption/RMBG/insightface-style nodes
+# resolve their own model path in Python rather than exposing a filename
+# widget) rather than through one of the $modelKeys widgets above. A
+# workflow using only these would previously be silently skipped entirely
+# (zero resolvable model refs), so background-model usage never showed up
+# in any report -- confirmed missing multiple real JoyCaption/RMBG/
+# insightface workflows on 2026-09-01. Matched by node type/class_type
+# substring, case-insensitive. Not meant to resolve to a specific on-disk
+# file (these often aren't in $modelKeys at all) -- just to record "this
+# workflow uses this feature" so it's visible in full_map instead of
+# invisible.
+$backgroundNodeKeywords = @(
+    'rmbg', 'birefnet', 'insightface', 'reactor',
+    'faceanalysis', 'pulid', 'samloader', 'sammodelloader', 'facexlib',
+    'facerestore', 'faceparsing'
+)
+
+# Exact-match node type names -- for cases where the real class_type is a
+# short code that doesn't contain a recognizable keyword as a substring
+# (ComfyUI-JoyCaption registers "JC"/"JC_adv"/"JC_GGUF"/etc, not anything
+# containing "joycaption" -- confirmed by reading the actual workflow JSON
+# node types directly on 2026-09-02, since the substring approach above
+# missed it entirely). "JC" alone is too short/generic to safely
+# substring-match (would hit unrelated class names), so these need an
+# exact (case-insensitive) match instead.
+$backgroundNodeExactTypes = @(
+    'jc', 'jc_adv', 'jc_gguf', 'jc_gguf_adv', 'jc_extraoptions'
+)
+
 # ---------------------------------------------------------------------------
 # Helper: extract model refs from parsed workflow JSON
 # ---------------------------------------------------------------------------
@@ -152,12 +182,15 @@ function Get-RefsFromWorkflow {
         if (!$nodeTitle) { $nodeTitle = $classType }
         $label = if ($nodeTitle -and $nodeTitle -ne $classType) { "$nodeTitle ($classType)" } else { $classType }
 
+        $foundFileRef = $false
+
         if ($node.PSObject.Properties['widgets_values']) {
             $wv = $node.widgets_values
             if ($wv -is [System.Collections.IEnumerable]) {
                 foreach ($v in $wv) {
                     if ($v -is [string] -and $v -match '\.(safetensors|ckpt|pt|pth|bin|gguf)$') {
-                        $refs.Add([PSCustomObject]@{ node_label = $label; model_ref = $v })
+                        $refs.Add([PSCustomObject]@{ node_label = $label; model_ref = $v; is_background = $false })
+                        $foundFileRef = $true
                     }
                 }
             }
@@ -169,9 +202,28 @@ function Get-RefsFromWorkflow {
                 if ($inputs.PSObject.Properties[$key]) {
                     $v = $inputs.$key
                     if ($v -is [string] -and $v -match '\.(safetensors|ckpt|pt|pth|bin|gguf)$') {
-                        $refs.Add([PSCustomObject]@{ node_label = $label; model_ref = $v })
+                        $refs.Add([PSCustomObject]@{ node_label = $label; model_ref = $v; is_background = $false })
+                        $foundFileRef = $true
                     }
                 }
+            }
+        }
+
+        # Background-model node: no resolvable filename widget was found on
+        # this node, but its type matches a known "loads a model internally"
+        # node (JoyCaption/RMBG/insightface-style). Record it as a distinct
+        # "feature used" reference rather than skipping the node silently --
+        # model_ref is a synthetic marker, not a real filename to resolve.
+        if (!$foundFileRef -and $classType) {
+            $ctLower = $classType.ToLower()
+            $isBgNode = $backgroundNodeExactTypes -contains $ctLower
+            if (!$isBgNode) {
+                foreach ($kw in $backgroundNodeKeywords) {
+                    if ($ctLower.Contains($kw)) { $isBgNode = $true; break }
+                }
+            }
+            if ($isBgNode) {
+                $refs.Add([PSCustomObject]@{ node_label = $label; model_ref = "[background-model:$classType]"; is_background = $true })
             }
         }
     }
@@ -263,9 +315,17 @@ function Get-WorkflowFromPng {
 
 # ---------------------------------------------------------------------------
 # Helper: process a single file (json or png) and add rows to $mapRows
+#
+# $rootDir is the scan root this file came from (WorkflowDir/PngDir/
+# StartingPrimesDir) -- used to compute workflow_file as the FULL relative
+# path from that root, not just "sourceLabel\bare filename". The old
+# bare-filename form silently dropped any subfolder (e.g. an output PNG in
+# output\one-node-flux-2-klein\FK_00011_.png showed up as just
+# "png-outputs\FK_00011_.png", losing the real subfolder -- confirmed wrong
+# 2026-09-02 when hand-verifying a test file against this exact bug).
 # ---------------------------------------------------------------------------
 function Process-WorkflowFile {
-    param($wf, [string]$sourceLabel)
+    param($wf, [string]$sourceLabel, [string]$rootDir)
 
     $workflow = $null
 
@@ -285,9 +345,34 @@ function Process-WorkflowFile {
     $refs = Get-RefsFromWorkflow -workflow $workflow
     if ($refs.Count -eq 0) { return $false }
 
-    $wfRel = "$sourceLabel\$($wf.Name)"
+    $relFromRoot = if ($rootDir -and $wf.FullName.StartsWith($rootDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $wf.FullName.Substring($rootDir.Length).TrimStart('\','/')
+    } else {
+        $wf.Name
+    }
+    $wfRel = "$sourceLabel\$relFromRoot"
 
     foreach ($r in $refs) {
+        if ($r.is_background) {
+            # Not a real filename -- don't resolve it and don't feed it into
+            # allModelRefs (that set drives unused-model detection by
+            # filename match, which this synthetic marker would corrupt).
+            $script:mapRows.Add([PSCustomObject]@{
+                source            = $sourceLabel
+                workflow_file     = $wfRel
+                workflow_dir      = $wf.DirectoryName
+                workflow_modified = $wf.LastWriteTime.ToString("yyyy-MM-dd HH:mm")
+                node_label        = $r.node_label
+                model_ref         = $r.model_ref
+                model_filename    = "(background model -- see node_label, not a resolvable file)"
+                model_category    = "background-model"
+                model_path        = ""
+                model_size_gb     = ""
+                on_disk           = "N/A"
+            })
+            continue
+        }
+
         $resolved      = Resolve-ModelRef -Ref $r.model_ref
         $normalizedRef = $r.model_ref.ToLower() -replace '\\','/'
         [void]$script:allModelRefs.Add($normalizedRef)
@@ -325,7 +410,7 @@ $processed    = 0
 $skipped      = 0
 
 foreach ($wf in $jsonFiles) {
-    $ok = Process-WorkflowFile -wf $wf -sourceLabel "workflows"
+    $ok = Process-WorkflowFile -wf $wf -sourceLabel "workflows" -rootDir $WorkflowDir
     if ($ok) { $processed++ } else { $skipped++ }
 }
 
@@ -339,7 +424,7 @@ $pngDirsToScan = @()
 # PNGs inside the workflow folder
 $wfPngs = @(Get-ChildItem -Path $WorkflowDir -File -Recurse -ErrorAction SilentlyContinue |
     Where-Object { $_.Extension -eq '.png' })
-if ($wfPngs.Count -gt 0) { $pngDirsToScan += [PSCustomObject]@{ files = $wfPngs; label = "workflows-png" } }
+if ($wfPngs.Count -gt 0) { $pngDirsToScan += [PSCustomObject]@{ files = $wfPngs; label = "workflows-png"; root = $WorkflowDir } }
 
 # Dedicated output/PNG folder
 if ($PngDir) {
@@ -348,7 +433,7 @@ if ($PngDir) {
     $outputPngs = @(Get-ChildItem -Path $PngDir -File -Recurse -ErrorAction SilentlyContinue |
         Where-Object { $_.Extension -eq '.png' })
     Write-Host "  Found $($outputPngs.Count) PNG file(s)" -ForegroundColor Green
-    if ($outputPngs.Count -gt 0) { $pngDirsToScan += [PSCustomObject]@{ files = $outputPngs; label = "png-outputs" } }
+    if ($outputPngs.Count -gt 0) { $pngDirsToScan += [PSCustomObject]@{ files = $outputPngs; label = "png-outputs"; root = $PngDir } }
 }
 
 $pngProcessed = 0
@@ -356,7 +441,7 @@ $pngSkipped   = 0
 
 foreach ($batch in $pngDirsToScan) {
     foreach ($wf in $batch.files) {
-        $ok = Process-WorkflowFile -wf $wf -sourceLabel $batch.label
+        $ok = Process-WorkflowFile -wf $wf -sourceLabel $batch.label -rootDir $batch.root
         if ($ok) { $pngProcessed++ } else { $pngSkipped++ }
     }
 }
@@ -375,7 +460,7 @@ if ($StartingPrimesDir) {
     $primeProcessed = 0
     $primeSkipped   = 0
     foreach ($wf in $primePngs) {
-        $ok = Process-WorkflowFile -wf $wf -sourceLabel "starting_images"
+        $ok = Process-WorkflowFile -wf $wf -sourceLabel "starting_images" -rootDir $StartingPrimesDir
         if ($ok) { $primeProcessed++ } else {
             $primeSkipped++
             Write-Host "  SKIPPED (no workflow data): $($wf.Name)" -ForegroundColor Yellow
