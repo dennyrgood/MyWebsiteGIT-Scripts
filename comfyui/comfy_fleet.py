@@ -132,6 +132,7 @@ def load_machine_files(reports_dir: Path, hostname: str) -> dict:
         "usage":    "WorkflowMap-*-model_usage.csv",
         "unused":   "WorkflowMap-*-unused_models.csv",
         "missing":  "WorkflowMap-*-missing_models.csv",
+        "node_types": "WorkflowMap-*-node_types.csv",
         "nodes":    "CustomNodes-*.txt",
     }
     for key, pattern in patterns.items():
@@ -150,22 +151,33 @@ def load_csv(path: Path) -> list[dict]:
 
 DISABLED_SUFFIX = ".disabled"
 
-def load_nodes(path: Path) -> tuple[set[str], set[str]]:
-    """Returns (all_node_names, disabled_node_names), both lowercased.
+def load_nodes(path: Path) -> tuple[set[str], set[str], dict[str, str]]:
+    """Returns (all_node_names, disabled_node_names, last_modified), all
+    keyed/valued by lowercased node name.
 
     ComfyUI Manager disables a node by renaming its folder to
     '<name>.disabled' -- left unhandled, that shows up in the fleet matrix
     as a distinct, permanently-"missing" node instead of the same node in a
     disabled state. Strip the suffix and track disabled status separately
     instead.
+
+    last_modified is the node folder's mtime (yyyy-mm-dd), a cheap recency
+    proxy -- not a git-commit date. Older scan files predate this column
+    and simply won't populate it (dict stays empty for those entries).
     """
     nodes    = set()
     disabled = set()
+    modified = {}
     with open(path) as f:
         for line in f:
             line = line.strip()
             if line and line[0].isdigit():
-                name = line.split(". ", 1)[-1].strip().lower()
+                rest = line.split(". ", 1)[-1].strip()
+                if " || " in rest:
+                    name, date = rest.rsplit(" || ", 1)
+                    name, date = name.strip().lower(), date.strip()
+                else:
+                    name, date = rest.lower(), ""
                 if name == "__pycache__":
                     continue
                 if name.endswith(DISABLED_SUFFIX):
@@ -174,7 +186,9 @@ def load_nodes(path: Path) -> tuple[set[str], set[str]]:
                         continue
                     disabled.add(name)
                 nodes.add(name)
-    return nodes, disabled
+                if date:
+                    modified[name] = date
+    return nodes, disabled, modified
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +220,9 @@ def load_all_machines(config: dict) -> dict:
             "models":   {},   # filename.lower() -> row
             "nodes":    set(),
             "nodes_disabled": set(),
+            "nodes_modified": {},
             "full_map": [],
+            "node_types": [],
             "scan_age_days": scan_age_days,
         }
 
@@ -217,7 +233,7 @@ def load_all_machines(config: dict) -> dict:
             print(f"  {len(entry['models'])} models")
 
         if "nodes" in files:
-            entry["nodes"], entry["nodes_disabled"] = load_nodes(files["nodes"])
+            entry["nodes"], entry["nodes_disabled"], entry["nodes_modified"] = load_nodes(files["nodes"])
             n_disabled = len(entry["nodes_disabled"])
             suffix = f" ({n_disabled} disabled)" if n_disabled else ""
             print(f"  {len(entry['nodes'])} custom nodes{suffix}")
@@ -225,6 +241,9 @@ def load_all_machines(config: dict) -> dict:
         if "full_map" in files:
             entry["full_map"] = load_csv(files["full_map"])
             print(f"  {len(entry['full_map'])} full_map rows")
+
+        if "node_types" in files:
+            entry["node_types"] = load_csv(files["node_types"])
 
         if "unused" in files:
             entry["unused"] = load_csv(files["unused"])
@@ -435,8 +454,16 @@ def analyze_nodes(data: dict, wf_model_data: dict) -> dict:
 
     hostnames = list(data.keys())
     matrix    = {}
+    modified  = {}
     for node in sorted(all_nodes):
         matrix[node] = {h: node_status(data[h], node) for h in hostnames}
+        # Recency isn't per-host in the UI (unlike models/workflows) -- take
+        # the most recent folder mtime seen anywhere on the fleet as the
+        # node's overall "last touched" signal.
+        dates = [data[h].get("nodes_modified", {}).get(node) for h in hostnames]
+        dates = [d for d in dates if d]
+        if dates:
+            modified[node] = max(dates)
 
     # "on all machines" means actually enabled everywhere, not just present
     # in some state -- a disabled copy doesn't give you the node's function.
@@ -455,9 +482,163 @@ def analyze_nodes(data: dict, wf_model_data: dict) -> dict:
         "all_nodes":    sorted(all_nodes),
         "on_all":       sorted(on_all),
         "matrix":       matrix,
+        "modified":     modified,
         "missing":      missing_per_machine,
         "hostnames":    hostnames,
     }
+
+
+def fetch_object_info(host: str, port: int = 8188, timeout: float = 5.0) -> dict | None:
+    """Live GET of ComfyUI's /object_info -- the same registry the web UI
+    itself checks for its 'Missing Node Types' warning: every class_type
+    currently loaded, with a python_module field ('custom_nodes.<package>'
+    for a custom node, or 'nodes'/'comfy_extras.*' for a built-in one).
+    Returns None on any failure (offline, timeout, ComfyUI not running,
+    unreachable host) -- never raises, since this must not take down a
+    scan over one machine being asleep."""
+    import urllib.request
+    url = f"http://{host}:{port}/object_info"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def scan_object_info(config: dict, reports_dir: Path) -> dict:
+    """
+    Per machine: {"object_info": {...}, "fetched_at": "yyyy-mm-dd HH:MM" or
+    None, "live": bool}. Live-fetches on every run; if a machine is
+    unreachable (offline, ComfyUI not running -- reportedly rare but not
+    guaranteed at 5am), falls back to the last successfully cached
+    snapshot instead of silently reporting nothing, and every consumer
+    gets fetched_at/live so the report can show "as of" per machine rather
+    than presenting stale or missing data as current.
+    """
+    results = {}
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    for hostname, mcfg in config.get("machines", {}).items():
+        host = mcfg.get("tailscale_host", hostname.lower())
+        port = mcfg.get("comfy_port", 8188)
+        cache_path = reports_dir / f"{hostname}-ObjectInfo-cache.json"
+
+        info = fetch_object_info(host, port)
+        if info is not None:
+            try:
+                cache_path.write_text(json.dumps({"fetched_at": now, "object_info": info}))
+            except Exception:
+                pass
+            results[hostname] = {"object_info": info, "fetched_at": now, "live": True}
+            continue
+
+        if cache_path.exists():
+            try:
+                cached = json.loads(cache_path.read_text())
+                results[hostname] = {
+                    "object_info": cached.get("object_info", {}),
+                    "fetched_at":  cached.get("fetched_at"),
+                    "live": False,
+                }
+                continue
+            except Exception:
+                pass
+
+        results[hostname] = {"object_info": {}, "fetched_at": None, "live": False}
+    return results
+
+
+def build_classtype_package_map(object_info_by_host: dict) -> dict[str, str]:
+    """class_type.lower() -> package folder name (lowercase), merged across
+    every machine's live object_info -- a class_type belonging to a custom
+    node package (python_module starts with 'custom_nodes.') rather than a
+    built-in ComfyUI node. Package identity shouldn't differ by machine, so
+    any host that has it loaded is enough; first-seen wins on conflict."""
+    mapping = {}
+    for host_data in object_info_by_host.values():
+        info = host_data.get("object_info", {})
+        for class_type, meta in info.items():
+            mod = (meta or {}).get("python_module", "")
+            if not mod.startswith("custom_nodes."):
+                continue
+            pkg = mod[len("custom_nodes."):].split(".")[0].lower()
+            mapping.setdefault(class_type.lower(), pkg)
+    return mapping
+
+
+def analyze_node_usage_evidence(data: dict, classtype_pkg_map: dict[str, str]) -> dict:
+    """
+    Real per-package usage evidence: for every node_types row seen in an
+    actual output (OUTPUT_EVIDENCE_SOURCES -- the same PNG-timestamp
+    standard already used for model usage, not a workflow-file edit date
+    or a folder mtime), map its class_type back to the package that
+    provides it and track the latest date + a count. A package with no
+    entry here has zero evidence of ever running in a produced output,
+    fleet-wide, regardless of whether it's merely installed somewhere.
+    """
+    usage = defaultdict(lambda: {"last_used": "", "used_count": 0})
+    for machine in data.values():
+        for row in machine.get("node_types", []):
+            if row.get("source", "") not in OUTPUT_EVIDENCE_SOURCES:
+                continue
+            ct = row.get("class_type", "").lower()
+            pkg = classtype_pkg_map.get(ct)
+            if not pkg:
+                continue
+            date = row.get("workflow_modified", "")[:10]
+            entry = usage[pkg]
+            entry["used_count"] += 1
+            if date > entry["last_used"]:
+                entry["last_used"] = date
+    return dict(usage)
+
+
+def analyze_node_gaps(nodes_data: dict, source_host: str, node_usage: dict,
+                       recent_days: int = 90) -> dict:
+    """
+    For each non-source machine: which custom nodes are enabled on the
+    source machine (ImageBeast) but not fully enabled there -- the gap
+    worth closing before relying on that machine standalone (e.g.
+    TravelBeast offline, away from ImageBeast). Split by real usage
+    evidence (output-PNG timestamps, via node_usage) rather than a
+    hand-curated priority list: a package actually seen running in an
+    output within `recent_days` is worth chasing; one with no usage
+    evidence anywhere on the fleet is probably an ImageBeast-only
+    experiment, not worth packing before a trip.
+    """
+    hostnames = nodes_data.get("hostnames", [])
+    matrix    = nodes_data.get("matrix", {})
+    modified  = nodes_data.get("modified", {})
+    results = {}
+    if source_host not in hostnames:
+        return results
+
+    cutoff = (datetime.now() - timedelta(days=recent_days)).strftime("%Y-%m-%d")
+    on_source = [n for n in nodes_data.get("all_nodes", [])
+                 if matrix.get(n, {}).get(source_host) == "on"]
+
+    def is_recent(n):
+        last_used = node_usage.get(n, {}).get("last_used", "")
+        return bool(last_used) and last_used >= cutoff
+
+    for h in hostnames:
+        if h == source_host:
+            continue
+        gap = [n for n in on_source if matrix.get(n, {}).get(h) != "on"]
+        recent_gap = sorted((n for n in gap if is_recent(n)),
+                             key=lambda n: node_usage.get(n, {}).get("last_used", ""), reverse=True)
+        other_gap  = sorted(n for n in gap if not is_recent(n))
+        def entry(n):
+            return {
+                "name": n, "status": matrix[n][h], "modified": modified.get(n, ""),
+                "last_used": node_usage.get(n, {}).get("last_used", ""),
+                "used_count": node_usage.get(n, {}).get("used_count", 0),
+            }
+        results[h] = {
+            "priority_gap":    [entry(n) for n in recent_gap],
+            "other_gap":       [entry(n) for n in other_gap],
+            "on_source_count": len(on_source),
+        }
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -530,6 +711,9 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
     si_coverage       = report_data.get("si_coverage", {})
     si_scan           = report_data.get("si_scan", {})
     output_usage      = report_data.get("output_usage", {})
+    node_gaps         = report_data.get("node_gaps", {})
+    source_host       = report_data.get("source_host", "")
+    object_info_status = report_data.get("object_info_status", {})
 
     hostnames = list(machines.keys())
 
@@ -768,6 +952,56 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
     else:
         si_html = '<p>No Starting Images PNGs found. Add test output PNGs to the 000 Starting Images folder.</p>'
 
+    # --- CUSTOM NODE GAPS (vs source machine) ---
+    # "Which nodes does ImageBeast have that this machine doesn't" -- the
+    # pre-travel/offline checklist. Split by real usage evidence -- has this
+    # package's node(s) actually shown up in an output PNG anywhere on the
+    # fleet (analyze_node_usage_evidence, via live ComfyUI /object_info +
+    # node_types.csv) -- rather than a hand-curated config list. A gap with
+    # no usage evidence is probably an ImageBeast-only experiment, not
+    # something worth chasing before a trip.
+    if node_gaps:
+        node_gaps_html = f'<p>Nodes enabled on <strong>{source_host}</strong> (source), compared against each other machine.</p>'
+        if object_info_status:
+            node_gaps_html += '<p style="color:#888;font-size:0.9em">'
+            node_gaps_html += ' &nbsp;|&nbsp; '.join(
+                f'{h}: node data {"live" if s["live"] else ("cached from " + (s["fetched_at"] or "?") + " -- ComfyUI unreachable at scan time") if s["fetched_at"] else "unavailable -- ComfyUI unreachable, no prior cache"}'
+                for h, s in object_info_status.items()
+            )
+            node_gaps_html += '</p>'
+        for hostname, g in node_gaps.items():
+            pri   = g["priority_gap"]
+            other = g["other_gap"]
+            src_n = g["on_source_count"]
+            node_gaps_html += f'<h4>{hostname}</h4><p>'
+            if pri:
+                node_gaps_html += f'<span style="color:#e74c3c">&#10007; {len(pri)} recently-used gap(s)</span> &nbsp;|&nbsp; '
+            else:
+                node_gaps_html += '<span style="color:#2ecc71">&#10003; no recently-used gaps</span> &nbsp;|&nbsp; '
+            node_gaps_html += f'<span style="color:#888">{len(other)} other gap(s) &nbsp;|&nbsp; {src_n} enabled on {source_host}</span></p>'
+            if pri:
+                node_gaps_html += '<table><tr><th style="background:#e74c3c">Recently used elsewhere — install/enable before relying on this machine</th><th>Status here</th><th>Last used (evidence)</th><th>Seen in</th></tr>'
+                for n in pri:
+                    node_gaps_html += (
+                        f'<tr style="background:#fff0f0"><td style="font-family:monospace">★ {n["name"]}</td>'
+                        f'<td>{"disabled" if n["status"]=="disabled" else "not installed"}</td>'
+                        f'<td>{n["last_used"] or "?"}</td>'
+                        f'<td>{n["used_count"]} output(s)</td></tr>'
+                    )
+                node_gaps_html += '</table>'
+            if other:
+                node_gaps_html += f'<details><summary style="cursor:pointer;color:#888">{len(other)} other gap(s), no usage evidence (click to expand)</summary>'
+                node_gaps_html += '<table><tr><th>Node</th><th>Status here</th><th>Folder last touched</th></tr>'
+                for n in other:
+                    node_gaps_html += (
+                        f'<tr><td style="font-family:monospace">{n["name"]}</td>'
+                        f'<td>{"disabled" if n["status"]=="disabled" else "not installed"}</td>'
+                        f'<td>{n["modified"] or "?"}</td></tr>'
+                    )
+                node_gaps_html += '</table></details>'
+    else:
+        node_gaps_html = '<p>No source machine configured, or no gaps to report.</p>'
+
     # --- OUTPUT-BASED MODEL USAGE ---
     # Based on actual output PNG evidence (not workflow-JSON edit dates, which
     # can go stale while a workflow is still run regularly).
@@ -906,6 +1140,9 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
 
 <h2>Starting Images — Travel Readiness</h2>
 <div class="card">{si_html}</div>
+
+<h2>Custom Node Gaps — Travel Readiness</h2>
+<div class="card">{node_gaps_html}</div>
 
 <h2>Model Gaps</h2>
 <div class="card">{gaps_html}</div>
@@ -1504,7 +1741,8 @@ def prune_outputs(output_dir: Path, history_dir: Path, reports_dir: Path, keep: 
 # Next actions builder
 # ---------------------------------------------------------------------------
 
-def build_actions(gaps: list, readiness: dict, drift: dict, nodes_data: dict, config: dict, data: dict) -> list:
+def build_actions(gaps: list, readiness: dict, drift: dict, nodes_data: dict, config: dict, data: dict,
+                   node_gaps: dict = None) -> list:
     actions = []
 
     # Stale scans - flag before anything else so drift/gaps aren't trusted blindly
@@ -1543,16 +1781,18 @@ def build_actions(gaps: list, readiness: dict, drift: dict, nodes_data: dict, co
                 "detail":   f"{r['can_run']}/{r['total']} workflows runnable. Blocked workflows require large models only suited for ImageBeast.",
             })
 
-    # Missing nodes on TravelBeast
-    travel_missing_nodes = nodes_data["missing"].get("TRAVELBEAST", [])
-    priority_nodes = set(config.get("priority_custom_nodes", []))
-    high_value = [n for n in travel_missing_nodes if n in priority_nodes]
-    if high_value:
-        actions.append({
-            "priority": "medium",
-            "title":    "Install missing nodes on TravelBeast via ComfyUI Manager",
-            "detail":   "Priority: " + ", ".join(high_value[:5]),
-        })
+    # Missing nodes on TravelBeast, ranked by real usage evidence (output-PNG
+    # timestamps via node_gaps) rather than a hand-curated list -- see
+    # analyze_node_gaps()/analyze_node_usage_evidence().
+    if node_gaps:
+        recent_gap = node_gaps.get("TRAVELBEAST", {}).get("priority_gap", [])
+        if recent_gap:
+            names = [g["name"] for g in recent_gap]
+            actions.append({
+                "priority": "medium",
+                "title":    "Install missing nodes on TravelBeast via ComfyUI Manager",
+                "detail":   "Recently used elsewhere on the fleet: " + ", ".join(names[:5]),
+            })
 
     # Drift
     for h, d in drift.items():
@@ -1580,7 +1820,8 @@ def build_actions(gaps: list, readiness: dict, drift: dict, nodes_data: dict, co
 # ---------------------------------------------------------------------------
 
 def generate_explorer_html(data: dict, timestamp: str, year_filter: str,
-                            nodes_data: dict = None, priority_nodes: set = None) -> str:
+                            nodes_data: dict = None, node_usage: dict = None,
+                            classtype_pkg_map: dict = None, output_evidence: set = None) -> str:
     """Generate interactive fleet explorer HTML with workflow/model cross-reference."""
     import json as _json
 
@@ -1624,6 +1865,46 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str,
             if row.get("source", "") == "starting_images":
                 starting_image_basenames.add(row["workflow_file"].split("\\")[-1])
 
+    # Shared workflow-identity logic -- the same (source, display-path) pair
+    # both the model cross-reference below and the node cross-reference use
+    # as their join key, so a workflow built from full_map rows and one
+    # built from node_types rows land on the identical wf_data entry.
+    def wf_key_parts(row):
+        src      = row.get("source", "workflows")
+        wf_fname = row["workflow_file"].split("\\")[-1]
+        wf_dir   = row.get("workflow_dir", "").replace("\\", "/")
+        src_type = row.get("source", "workflows")
+        if src == "workflows-png" and wf_fname in starting_image_basenames:
+            src = "starting_images"  # fold the duplicate scan into the one entry
+        if src_type == "png-outputs":
+            # Show the path relative to the actual output/ folder, not a
+            # fixed "last 2 segments" guess -- that heuristic only worked
+            # for root-level files; anything in a subfolder (e.g.
+            # output/Dennis/Disney65/...) lost its real prefix and showed
+            # the wrong-looking "Dennis/Disney65/..." with no context.
+            # Every row here is already known to live under output/, so
+            # that redundant segment is dropped entirely rather than
+            # re-added everywhere -- root files show as a bare filename,
+            # nested ones show their true subpath.
+            _oi = wf_dir.lower().rfind("/output")
+            _sub = wf_dir[_oi + len("/output"):].strip("/") if _oi >= 0 else ""
+            wf_file = (_sub + "/" + wf_fname) if _sub else wf_fname
+        else:
+            _ri = wf_dir.lower().find("/workflows/")
+            _sub = wf_dir[_ri + len("/workflows/"):] if _ri >= 0 else ""
+            wf_file  = _sub + "/" + wf_fname if _sub else wf_fname
+        return src, wf_file
+
+    def ensure_wf_entry(wk, src, wf_file, wf_mod, wf_year):
+        if wk not in wf_data:
+            wf_data[wk] = {
+                "name": wf_file, "source": src,
+                "modified": wf_mod, "year": wf_year,
+                "models": set(), "nodes": set(),
+                "per_host": {h: {"present": 0, "renamed": 0, "missing": 0} for h in hostnames}
+            }
+        return wf_data[wk]
+
     # Build workflow and model data structures
     wf_data    = {}
     model_data = {}
@@ -1639,29 +1920,7 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str,
             # builds. (They still fully appear in the raw full_map CSV.)
             if row.get("model_category", "") == "background-model":
                 continue
-            src     = row.get("source", "workflows")
-            wf_fname = row["workflow_file"].split("\\")[-1]
-            wf_dir   = row.get("workflow_dir", "").replace("\\", "/")
-            src_type = row.get("source", "workflows")
-            if src == "workflows-png" and wf_fname in starting_image_basenames:
-                src = "starting_images"  # fold the duplicate scan into the one entry
-            if src_type == "png-outputs":
-                # Show the path relative to the actual output/ folder, not a
-                # fixed "last 2 segments" guess -- that heuristic only worked
-                # for root-level files; anything in a subfolder (e.g.
-                # output/Dennis/Disney65/...) lost its real prefix and showed
-                # the wrong-looking "Dennis/Disney65/..." with no context.
-                # Every row here is already known to live under output/, so
-                # that redundant segment is dropped entirely rather than
-                # re-added everywhere -- root files show as a bare filename,
-                # nested ones show their true subpath.
-                _oi = wf_dir.lower().rfind("/output")
-                _sub = wf_dir[_oi + len("/output"):].strip("/") if _oi >= 0 else ""
-                wf_file = (_sub + "/" + wf_fname) if _sub else wf_fname
-            else:
-                _ri = wf_dir.lower().find("/workflows/")
-                _sub = wf_dir[_ri + len("/workflows/"):] if _ri >= 0 else ""
-                wf_file  = _sub + "/" + wf_fname if _sub else wf_fname
+            src, wf_file = wf_key_parts(row)
             wf_mod  = row.get("workflow_modified", "")[:10]
             wf_year = wf_mod[:4] if wf_mod else ""
             fn      = row.get("model_filename", "")
@@ -1677,13 +1936,7 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str,
             rename_hit = None if on_disk else fuzzy_match(hostname, mk)
 
             wk = f"{src}||{wf_file}"
-            if wk not in wf_data:
-                wf_data[wk] = {
-                    "name": wf_file, "source": src,
-                    "modified": wf_mod, "year": wf_year,
-                    "models": set(),
-                    "per_host": {h: {"present": 0, "renamed": 0, "missing": 0} for h in hostnames}
-                }
+            ensure_wf_entry(wk, src, wf_file, wf_mod, wf_year)
             wf_data[wk]["models"].add(mk)
             if on_disk:
                 wf_data[wk]["per_host"][hostname]["present"] += 1
@@ -1709,9 +1962,30 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str,
                 model_data[mk]["size_gb"] = size_gb
             model_data[mk]["workflows"].add(wf_file)
 
+    # Node <-> workflow cross-reference -- every class_type in every
+    # workflow (node_types.csv), mapped back to its installed package via
+    # the live ComfyUI /object_info registry (classtype_pkg_map). Unlike
+    # the model loop above, this covers node types with no model reference
+    # at all -- most installed custom nodes.
+    classtype_pkg_map = classtype_pkg_map or {}
+    pkg_workflows = defaultdict(set)  # package -> set of wf_file display names
+    for hostname, machine in data.items():
+        for row in machine.get("node_types", []):
+            pkg = classtype_pkg_map.get(row.get("class_type", "").lower())
+            if not pkg:
+                continue  # built-in ComfyUI node, or unreachable machine with no mapping
+            src, wf_file = wf_key_parts(row)
+            wf_mod  = row.get("workflow_modified", "")[:10]
+            wf_year = wf_mod[:4] if wf_mod else ""
+            wk = f"{src}||{wf_file}"
+            entry = ensure_wf_entry(wk, src, wf_file, wf_mod, wf_year)
+            entry["nodes"].add(pkg)
+            pkg_workflows[pkg].add(wf_file)
+
     # Convert sets to lists
     for wk in wf_data:
         wf_data[wk]["models"] = sorted(wf_data[wk]["models"])
+        wf_data[wk]["nodes"]  = sorted(wf_data[wk]["nodes"])
     for mk in model_data:
         model_data[mk]["workflows"] = sorted(model_data[mk]["workflows"])
 
@@ -1738,8 +2012,10 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str,
                     hs[h] = "P"
             out.append({"key": wk, "name": wv["name"], "source": wv["source"],
                         "modified": wv["modified"], "year": wv["year"],
-                        "models": wv["models"], "hs": hs})
+                        "models": wv["models"], "nodes": wv["nodes"], "hs": hs})
         return sorted(out, key=lambda x: x["name"].lower())
+
+    evidence_set = output_evidence or set()
 
     def model_list():
         out = []
@@ -1747,7 +2023,13 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str,
             out.append({"key": mk, "filename": mv["filename"], "size_gb": mv["size_gb"],
                         "category": mv["category"], "on_hosts": mv["on_hosts"],
                         "rename_hint": mv.get("rename_hint", {}),
-                        "workflows": mv["workflows"], "wf_count": len(mv["workflows"])})
+                        "workflows": mv["workflows"], "wf_count": len(mv["workflows"]),
+                        # Real evidence -- this filename/ref showed up in an
+                        # actual output PNG somewhere on the fleet (same
+                        # standard as the prime-coverage "Missing (evidenced)"
+                        # report), not just referenced by a template that may
+                        # never have been run.
+                        "evidenced": mk in evidence_set})
         return sorted(out, key=lambda x: x["filename"].lower())
 
     si_wfs    = wf_list(source_filter=["starting_images"])
@@ -1757,16 +2039,25 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str,
 
     # Custom node fleet comparison -- same on/disabled/off matrix the static
     # HTML report and summary.txt use, just made searchable/filterable like
-    # the models panel instead of a flat table.
+    # the models panel instead of a flat table. "priority"/★ here means real
+    # usage evidence (this package's nodes showed up in an actual output PNG
+    # somewhere on the fleet), not a hand-curated config list -- see
+    # analyze_node_usage_evidence().
     nodes_data = nodes_data or {"all_nodes": [], "matrix": {}, "hostnames": hostnames}
-    priority_nodes = priority_nodes or set()
+    node_usage = node_usage or {}
     node_list = []
     for node in nodes_data.get("all_nodes", []):
         row = nodes_data["matrix"].get(node, {})
+        usage = node_usage.get(node, {})
+        wfs = sorted(pkg_workflows.get(node, set()))
         node_list.append({
-            "name":     node,
-            "status":   {h: row.get(h, "off") for h in hostnames},
-            "priority": node in priority_nodes,
+            "name":       node,
+            "status":     {h: row.get(h, "off") for h in hostnames},
+            "priority":   bool(usage.get("last_used")),
+            "modified":   nodes_data.get("modified", {}).get(node, ""),
+            "last_used":  usage.get("last_used", ""),
+            "used_count": usage.get("used_count", 0),
+            "workflows":  wfs,
         })
     node_list.sort(key=lambda x: x["name"])
 
@@ -1851,13 +2142,14 @@ const ALL_WF   = {js(all_wfs)};
 const MODELS  = {js(ml)};
 const NODES   = {js(node_list)};
 
-let wfTab='all', modelTab='all', nodeFilter='all';
+let wfTab='all', modelTab='all', nodeFilter='all', nodeRecency='all', nodeSort='name';
+let evidenceOnly=false;
 let wfFilter='all', modelFilter='all', statusFilter='all', wfShowFilter='all';
 let locFilter='all', recentFilter='all';
 let wfSort='name';
-let selectedWf=null, selectedModel=null, searchTerm='';
-let highlightedModels=new Set(), highlightedWfs=new Set();
-let showOnlyWf=false, showOnlyModel=false;
+let selectedWf=null, selectedModel=null, selectedNode=null, searchTerm='';
+let highlightedModels=new Set(), highlightedWfs=new Set(), highlightedNodes=new Set();
+let showOnlyWf=false, showOnlyModel=false, showOnlyNode=false;
 
 // Which physical machine(s) a workflow's (tb)/(c)/(ib)/(bare) tag is
 // actually meant to run on -- built by matching hostnames rather than
@@ -1908,16 +2200,49 @@ function switchModelTab(t) {{
 
 function setNodeFilter(f) {{
   nodeFilter=f;
-  ['all','priority','onall','disabled','missing'].forEach(id=>{{const el=document.getElementById('fnode-'+id);if(el)el.classList.toggle('active',id===f)}});
+  ['all','selwf','priority','onall','disabled','missing',
+   'onib','missingib','onc','missingc','ontb','missingtb'].forEach(id=>{{const el=document.getElementById('fnode-'+id);if(el)el.classList.toggle('active',id===f)}});
+  renderNodes();
+}}
+
+function setNodeRecency(f) {{
+  nodeRecency=f;
+  ['all','recent','older'].forEach(id=>{{const el=document.getElementById('fnoderec-'+id);if(el)el.classList.toggle('active',id===f)}});
+  renderNodes();
+}}
+
+function setNodeSort(s) {{
+  nodeSort=s;
+  ['name','date'].forEach(id=>{{const el=document.getElementById('fnodesort-'+id);if(el)el.classList.toggle('active',id===s)}});
   renderNodes();
 }}
 
 function nodeMatchesFilter(n) {{
   const states=Object.values(n.status);
+  const hasIB=n.status['IMAGEBEAST']==='on', hasC=n.status['CHATWORKHORSE']==='on', hasT=n.status['TRAVELBEAST']==='on';
+  if(nodeFilter==='selwf' && !highlightedNodes.has(n.name)) return false;
   if(nodeFilter==='priority' && !n.priority) return false;
   if(nodeFilter==='onall' && !states.every(s=>s==='on')) return false;
   if(nodeFilter==='disabled' && !states.some(s=>s==='disabled')) return false;
   if(nodeFilter==='missing' && !states.some(s=>s==='off')) return false;
+  // Same "on X but not Y" pairing the Models panel already has -- "missing"
+  // here specifically means "present on ImageBeast (source) but not on
+  // this machine," the pre-travel checklist shape, not just "absent."
+  if(nodeFilter==='onib' && !hasIB) return false;
+  if(nodeFilter==='missingib' && (hasIB||(!hasC&&!hasT))) return false;
+  if(nodeFilter==='onc' && !hasC) return false;
+  if(nodeFilter==='missingc' && (!hasIB||hasC)) return false;
+  if(nodeFilter==='ontb' && !hasT) return false;
+  if(nodeFilter==='missingtb' && (!hasIB||hasT)) return false;
+  // Same RECENT_CUTOFF (90 days) the workflow panel uses, for a consistent
+  // meaning of "recent" across the whole explorer. Real usage evidence
+  // (last_used, an output-PNG timestamp) beats folder mtime when we have
+  // it -- mtime only means "touched," not "used." A node with neither
+  // signal is excluded from both buckets rather than silently landing in
+  // one.
+  const recencyDate = n.last_used || n.modified;
+  if(nodeRecency==='recent' && !(recencyDate && recencyDate>=RECENT_CUTOFF)) return false;
+  if(nodeRecency==='older' && !(recencyDate && recencyDate<RECENT_CUTOFF)) return false;
   return true;
 }}
 
@@ -1930,22 +2255,69 @@ function nodeDots(status) {{
   }}).join('');
 }}
 
-function renderNodes() {{
-  const container=document.getElementById('node-list');
+function getVisibleNodeList() {{
   const filtered=NODES.filter(n=>{{
     if(!nodeMatchesFilter(n)) return false;
     if(searchTerm && !n.name.toLowerCase().includes(searchTerm)) return false;
     return true;
   }});
+  const sortedAll = nodeSort==='date'
+    ? [...filtered].sort((a,b)=>((b.last_used||b.modified||'').localeCompare(a.last_used||a.modified||''))||a.name.localeCompare(b.name))
+    : filtered; // already name-sorted from the server
+  const hasSel=highlightedNodes.size>0;
+  return showOnlyNode&&hasSel?sortedAll.filter(n=>highlightedNodes.has(n.name)||selectedNode===n.name):sortedAll;
+}}
+
+function handleNodeClick(el) {{
+  const idx=parseInt(el.dataset.idx);
+  const visible=getVisibleNodeList();
+  if(idx<visible.length) selectNode(visible[idx].name);
+}}
+
+function selectNode(name) {{
+  if(selectedNode===name){{clearSelection();return;}}
+  selectedNode=name; selectedWf=null; selectedModel=null;
+  const node=NODES.find(n=>n.name===name);
+  if(!node) return;
+  highlightedWfs=new Set(node.workflows||[]);
+  highlightedModels.clear(); highlightedNodes.clear();
+  document.getElementById('node-info') && (document.getElementById('node-info').textContent='"'+name+'" — '+(node.workflows||[]).length+' workflow(s)');
+  document.getElementById('wf-info').textContent='Showing workflows using node: '+name;
+  document.getElementById('model-info').textContent='Click a model to see its workflows';
+  renderWf(); renderModels(); renderNodes();
+}}
+
+function toggleShowOnlyNode() {{
+  showOnlyNode=!showOnlyNode;
+  const btn=document.getElementById('toggleNode');
+  if(btn) btn.classList.toggle('active',showOnlyNode);
+  renderNodes();
+}}
+
+function renderNodes() {{
+  const container=document.getElementById('node-list');
+  const sorted=getVisibleNodeList();
   document.getElementById('cnt-nodes').textContent='('+NODES.length+')';
-  if(!filtered.length){{
-    container.innerHTML='<div class="empty">No custom nodes match</div>';
+  if(!sorted.length){{
+    const msg = (nodeFilter==='selwf' && !selectedWf) ? 'Select a workflow to see its nodes' : 'No custom nodes match';
+    container.innerHTML='<div class="empty">'+msg+'</div>';
     return;
   }}
-  container.innerHTML=filtered.map(n=>{{
+  const hasSel=highlightedNodes.size>0;
+  container.innerHTML=sorted.map((n,i)=>{{
+    const isSel=selectedNode===n.name;
+    const isHi=highlightedNodes.has(n.name);
+    const isDim=hasSel&&!isHi&&!isSel&&!showOnlyNode;
+    let cls='item'+(isSel?' selected':isHi?' highlighted':isDim?' dimmed':'');
     const dots='<div class="host-dots">'+nodeDots(n.status)+'</div>';
-    const pri=n.priority?'<span class="cat-tag" title="priority custom node">★</span>':'';
-    return '<div class="item">'+dots+pri+'<span class="item-name" title="'+n.name+'">'+n.name+'</span></div>';
+    const priTitle=n.priority?('seen in '+n.used_count+' output(s), last '+n.last_used):'no output evidence found';
+    const pri=n.priority?'<span class="cat-tag" title="'+priTitle+'">★</span>':'';
+    // Real usage evidence (output-PNG timestamp) beats folder mtime when we
+    // have it -- "touched" (installed/updated) isn't "used".
+    const meta=n.last_used?'<span class="item-meta" title="last seen in an output">used '+n.last_used+'</span>'
+             :n.modified?'<span class="item-meta" title="folder last touched -- no usage evidence">touched '+n.modified+'</span>':'';
+    const wfc='<span class="item-meta">'+(n.workflows||[]).length+'wf</span>';
+    return '<div class="'+cls+'" data-idx="'+i+'" onclick="handleNodeClick(this)">'+dots+pri+'<span class="item-name" title="'+n.name+'">'+n.name+'</span>'+wfc+meta+'</div>';
   }}).join('');
 }}
 
@@ -1996,6 +2368,13 @@ function setModelFilter(f) {{
   renderModels();
 }}
 
+function toggleEvidenceOnly() {{
+  evidenceOnly=!evidenceOnly;
+  const el=document.getElementById('fmod-evidenced');
+  if(el) el.classList.toggle('active',evidenceOnly);
+  renderModels();
+}}
+
 function applySearch() {{
   searchTerm=document.getElementById('globalSearch').value.toLowerCase();
   renderWf(); renderModels(); renderNodes();
@@ -2028,14 +2407,16 @@ function toggleShowOnlyModel() {{
   renderModels();
 }}
 function clearSelection() {{
-  selectedWf=null; selectedModel=null;
-  highlightedModels.clear(); highlightedWfs.clear();
-  showOnlyWf=false; showOnlyModel=false;
+  selectedWf=null; selectedModel=null; selectedNode=null;
+  highlightedModels.clear(); highlightedWfs.clear(); highlightedNodes.clear();
+  showOnlyWf=false; showOnlyModel=false; showOnlyNode=false;
   const twf=document.getElementById('toggleWf'); if(twf) twf.classList.remove('active');
   const tmod=document.getElementById('toggleModel'); if(tmod) tmod.classList.remove('active');
-  renderWf(); renderModels();
-  document.getElementById('wf-info').textContent='Click a workflow to see its models';
+  const tnode=document.getElementById('toggleNode'); if(tnode) tnode.classList.remove('active');
+  renderWf(); renderModels(); renderNodes();
+  document.getElementById('wf-info').textContent='Click a workflow to see its models and nodes';
   document.getElementById('model-info').textContent='Click a model to see its workflows';
+  const ninfo=document.getElementById('node-info'); if(ninfo) ninfo.textContent='Click a node to see its workflows';
 }}
 
 function getWfSource() {{
@@ -2086,6 +2467,12 @@ function modelMatchesFilter(m) {{
   if(modelFilter==='missingchat' && (!hasIB||hasC)) return false;
   if(modelFilter==='travel' && !hasT) return false;
   if(modelFilter==='missing' && (!hasIB||hasT)) return false;
+  // Composable with any filter above (not a separate set of buttons) --
+  // "evidenced" means this filename/ref showed up in a real output PNG
+  // somewhere on the fleet, the same standard the static report's
+  // "Missing (evidenced)" table uses, vs. a model only ever referenced by
+  // a template that may never have actually been run.
+  if(evidenceOnly && !m.evidenced) return false;
   return true;
 }}
 
@@ -2216,20 +2603,23 @@ function renderModels() {{
 
 function selectWf(wfKey,wfName) {{
   if(selectedWf===wfKey){{clearSelection();return;}}
-  selectedWf=wfKey; selectedModel=null;
+  selectedWf=wfKey; selectedModel=null; selectedNode=null;
   const all=ALL_WF;
   const wf=all.find(w=>w.key===wfKey);
   if(!wf) return;
   highlightedModels=new Set(wf.models||[]);
+  highlightedNodes=new Set(wf.nodes||[]);
   highlightedWfs.clear();
-  document.getElementById('wf-info').textContent='"'+wfName+'" — '+(wf.models||[]).length+' model refs';
+  document.getElementById('wf-info').textContent='"'+wfName+'" — '+(wf.models||[]).length+' model ref(s), '+(wf.nodes||[]).length+' custom node package(s)';
   document.getElementById('model-info').textContent='Showing models for: '+wfName;
-  renderWf(); renderModels();
+  const ninfo=document.getElementById('node-info'); if(ninfo) ninfo.textContent='Showing nodes for: '+wfName;
+  renderWf(); renderModels(); renderNodes();
 }}
 
 function selectModel(mk,filename) {{
   if(selectedModel===mk){{clearSelection();return;}}
-  selectedModel=mk; selectedWf=null;
+  selectedModel=mk; selectedWf=null; selectedNode=null;
+  highlightedNodes.clear();
   const model=MODELS.find(m=>m.key===mk);
   if(!model) return;
   highlightedWfs=new Set(model.workflows||[]);
@@ -2237,7 +2627,8 @@ function selectModel(mk,filename) {{
   const onCount=Object.values(model.on_hosts).filter(Boolean).length;
   document.getElementById('model-info').textContent='"'+filename+'" — '+onCount+'/'+HN.length+' machines, '+(model.workflows||[]).length+' workflows';
   document.getElementById('wf-info').textContent='Showing workflows using: '+filename;
-  renderWf(); renderModels();
+  const ninfo=document.getElementById('node-info'); if(ninfo) ninfo.textContent='Click a node to see its workflows';
+  renderWf(); renderModels(); renderNodes();
 }}
 
 renderWf(); renderModels(); renderNodes();
@@ -2270,7 +2661,7 @@ renderWf(); renderModels(); renderNodes();
     <div class="filters">
       <span class="filter-label">Show:</span>
       <button class="filter-chip active" id="fwfshow-all" onclick="setWfShowFilter('all')">All</button>
-      <button class="filter-chip" id="fwfshow-selmodel" onclick="setWfShowFilter('selmodel')">Selected Model</button>
+      <button class="filter-chip" id="fwfshow-selmodel" onclick="setWfShowFilter('selmodel')">Selected Model/Node</button>
     </div>
     <div class="filters">
       <span class="filter-label">Status:</span>
@@ -2321,6 +2712,8 @@ renderWf(); renderModels(); renderNodes();
       <button class="filter-chip" id="fmod-missingchat" onclick="setModelFilter('missingchat')">Missing c</button>
       <button class="filter-chip" id="fmod-travel" onclick="setModelFilter('travel')">On tb</button>
       <button class="filter-chip" id="fmod-missing" onclick="setModelFilter('missing')">Missing tb</button>
+      <span class="filter-label" style="margin-left:14px">+</span>
+      <button class="filter-chip" id="fmod-evidenced" onclick="toggleEvidenceOnly()" title="Only models confirmed by a real output PNG somewhere on the fleet -- combine with any filter above">Evidenced Only</button>
     </div>
     <div class="list-container" id="model-list"></div>
     <div class="info-bar" style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span id="model-info">Click a model to see its workflows</span><button id="toggleModel" class="filter-chip" onclick="toggleShowOnlyModel()">Show Only</button></div>
@@ -2332,13 +2725,34 @@ renderWf(); renderModels(); renderNodes();
     <div class="filters">
       <span class="filter-label">Show:</span>
       <button class="filter-chip active" id="fnode-all" onclick="setNodeFilter('all')">All</button>
-      <button class="filter-chip" id="fnode-priority" onclick="setNodeFilter('priority')">Priority ★</button>
+      <button class="filter-chip" id="fnode-selwf" onclick="setNodeFilter('selwf')">Selected Workflow</button>
+      <button class="filter-chip" id="fnode-priority" onclick="setNodeFilter('priority')">Used ★ (evidence)</button>
       <button class="filter-chip" id="fnode-onall" onclick="setNodeFilter('onall')">On All</button>
       <button class="filter-chip" id="fnode-disabled" onclick="setNodeFilter('disabled')">Disabled Anywhere</button>
       <button class="filter-chip" id="fnode-missing" onclick="setNodeFilter('missing')">Missing Anywhere</button>
     </div>
+    <div class="filters">
+      <button class="filter-chip" id="fnode-onib" onclick="setNodeFilter('onib')">On ib</button>
+      <button class="filter-chip" id="fnode-missingib" onclick="setNodeFilter('missingib')">Missing ib</button>
+      <button class="filter-chip" id="fnode-onc" onclick="setNodeFilter('onc')">On c</button>
+      <button class="filter-chip" id="fnode-missingc" onclick="setNodeFilter('missingc')">Missing c</button>
+      <button class="filter-chip" id="fnode-ontb" onclick="setNodeFilter('ontb')">On tb</button>
+      <button class="filter-chip" id="fnode-missingtb" onclick="setNodeFilter('missingtb')">Missing tb</button>
+    </div>
+    <div class="filters">
+      <span class="filter-label">Recency:</span>
+      <button class="filter-chip active" id="fnoderec-all" onclick="setNodeRecency('all')">All</button>
+      <button class="filter-chip" id="fnoderec-recent" onclick="setNodeRecency('recent')">Last 3 Months</button>
+      <button class="filter-chip" id="fnoderec-older" onclick="setNodeRecency('older')">Older</button>
+      <span class="filter-label" style="margin-left:14px">Sort:</span>
+      <button class="filter-chip active" id="fnodesort-name" onclick="setNodeSort('name')">Name</button>
+      <button class="filter-chip" id="fnodesort-date" onclick="setNodeSort('date')">Date</button>
+    </div>
     <div class="list-container" id="node-list"></div>
-    <div class="info-bar">Green = enabled &nbsp;|&nbsp; Orange = installed but disabled &nbsp;|&nbsp; Red = not installed</div>
+    <div class="info-bar" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span id="node-info">Click a node to see its workflows &nbsp;|&nbsp; green=enabled, orange=disabled, red=not installed</span>
+      <button id="toggleNode" class="filter-chip" onclick="toggleShowOnlyNode()">Show Only</button>
+    </div>
   </div>
 </div>
 <script>{JS}</script>
@@ -2430,6 +2844,18 @@ def main():
 
     # Node analysis
     nodes_data = analyze_nodes(data, wf_data)
+
+    # Live per-machine ComfyUI /object_info -- real class_type -> package
+    # registry, straight from ComfyUI itself, used to turn "this class_type
+    # showed up in an output PNG" into genuine per-package usage evidence
+    # (replaces the old hand-curated, unrecalled priority_custom_nodes list).
+    object_info = scan_object_info(config, reports_dir)
+    for hostname, oi in object_info.items():
+        status = "live" if oi["live"] else (f"cached from {oi['fetched_at']}" if oi["fetched_at"] else "unavailable")
+        print(f"  {hostname}: object_info {status} ({len(oi.get('object_info', {}))} node types)")
+    classtype_pkg_map = build_classtype_package_map(object_info)
+    node_usage = analyze_node_usage_evidence(data, classtype_pkg_map)
+    node_gaps  = analyze_node_gaps(nodes_data, source_host, node_usage)
 
     # Model gaps
     vram_ok    = config["vram_thresholds"]["ok"]
@@ -2572,6 +2998,9 @@ def main():
         "drift":            drift,
         "readiness":        readiness,
         "nodes":            nodes_data,
+        "node_gaps":        node_gaps,
+        "object_info_status": object_info,
+        "source_host":      source_host,
         "gaps":             gaps,
         "universe":         universe,
         "actions":          [],
@@ -2582,7 +3011,7 @@ def main():
         "si_scan":          si_scan,
         "output_usage":     output_usage,
     }
-    report_data["actions"] = build_actions(gaps, readiness, drift, nodes_data, config, data)
+    report_data["actions"] = build_actions(gaps, readiness, drift, nodes_data, config, data, node_gaps)
 
     # --- Write outputs ---
 
@@ -2646,7 +3075,9 @@ def main():
     explorer_html = generate_explorer_html(
         data, timestamp, year_filter,
         nodes_data=nodes_data,
-        priority_nodes=set(config.get("priority_custom_nodes", [])),
+        node_usage=node_usage,
+        classtype_pkg_map=classtype_pkg_map,
+        output_evidence=output_evidence,
     )
     explorer_path = output_dir / f"fleet_explorer_{timestamp}.html"
     explorer_path.write_text(explorer_html)
@@ -2712,6 +3143,30 @@ def main():
             summary_lines.append(f"  {hostname}: {status}  ({len(confirmed)} present, {len(missing)} missing, {len(beyond)} beyond/{total_beyond_gb:.2f}GB)")
             for m in missing:
                 summary_lines.append(f"    !! MISSING: {m}")
+
+    if node_gaps:
+        summary_lines.append("")
+        summary_lines.append("CUSTOM NODE GAPS — TRAVEL READINESS")
+        summary_lines.append("-" * 60)
+        summary_lines.append(f"  Nodes enabled on {source_host} (source), compared per machine")
+        summary_lines.append("  Node data freshness:")
+        for h, s in object_info.items():
+            if s["live"]:
+                status = "live"
+            elif s["fetched_at"]:
+                status = f"cached from {s['fetched_at']} -- ComfyUI unreachable at scan time"
+            else:
+                status = "unavailable -- ComfyUI unreachable, no prior cache"
+            summary_lines.append(f"    {h}: {status}")
+        for hostname, g in node_gaps.items():
+            pri, other, src_n = g["priority_gap"], g["other_gap"], g["on_source_count"]
+            summary_lines.append(f"  {hostname}: {len(pri)} recently-used gap(s), {len(other)} other gap(s)  ({src_n} enabled on {source_host})")
+            for n in pri:
+                where = "disabled" if n["status"] == "disabled" else "not installed"
+                summary_lines.append(f"    !! USED ★ {n['name']}  ({where}, last used {n['last_used'] or '?'}, seen in {n['used_count']} output(s))")
+            for n in other:
+                where = "disabled" if n["status"] == "disabled" else "not installed"
+                summary_lines.append(f"    ?? {n['name']}  ({where}, no usage evidence -- folder last touched {n['modified'] or '?'})")
 
     if output_usage:
         summary_lines.append("")
