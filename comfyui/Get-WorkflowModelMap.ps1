@@ -231,42 +231,6 @@ function Get-RefsFromWorkflow {
 }
 
 # ---------------------------------------------------------------------------
-# Helper: every node class_type in a workflow, regardless of whether it
-# references a model file. Get-RefsFromWorkflow above only records nodes
-# that touch a model (real or background) -- most installed custom nodes
-# (image processing, string ops, compositing, etc.) never appear there at
-# all, so there's no way to tell "was this package actually used" for the
-# majority of the fleet's custom_nodes. This is the raw material for that:
-# paired with a live ComfyUI /object_info snapshot (class_type -> package),
-# Python-side can turn "this class_type showed up in an output PNG" into
-# real per-package usage evidence, the same standard already used for
-# models (output timestamps, not file/folder mtimes).
-# ---------------------------------------------------------------------------
-function Get-AllNodeTypes {
-    param($workflow)
-    $types = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    if ($null -eq $workflow) { return $types }
-
-    $nodesList = $null
-    if ($workflow.PSObject.Properties['nodes']) {
-        $nodesList = $workflow.nodes
-    } else {
-        $nodesList = $workflow.PSObject.Properties.Value |
-            Where-Object { $_ -is [PSCustomObject] -and $_.PSObject.Properties['class_type'] }
-    }
-    if ($null -eq $nodesList) { return $types }
-
-    foreach ($node in $nodesList) {
-        if ($null -eq $node) { continue }
-        $classType = ""
-        if ($node.PSObject.Properties['class_type']) { $classType = $node.class_type }
-        if ($node.PSObject.Properties['type'])        { $classType = $node.type }
-        if ($classType) { [void]$types.Add($classType) }
-    }
-    return $types
-}
-
-# ---------------------------------------------------------------------------
 # Helper: parse PNG tEXt chunks to extract ComfyUI workflow JSON
 #
 # Your ComfyUI output PNGs store JSON directly in tEXt chunks with NO keyword
@@ -378,31 +342,15 @@ function Process-WorkflowFile {
         if (!$workflow) { return $false }
     }
 
+    $refs = Get-RefsFromWorkflow -workflow $workflow
+    if ($refs.Count -eq 0) { return $false }
+
     $relFromRoot = if ($rootDir -and $wf.FullName.StartsWith($rootDir, [System.StringComparison]::OrdinalIgnoreCase)) {
         $wf.FullName.Substring($rootDir.Length).TrimStart('\','/')
     } else {
         $wf.Name
     }
     $wfRel = "$sourceLabel\$relFromRoot"
-
-    # Every node class_type in this workflow -- recorded unconditionally,
-    # even for a workflow with zero model refs, since most custom nodes
-    # never touch a model file at all. Kept separate from the
-    # processed/skipped counters below, which track model-ref coverage
-    # specifically and shouldn't change meaning because of this addition.
-    $nodeTypes = Get-AllNodeTypes -workflow $workflow
-    foreach ($ct in $nodeTypes) {
-        $script:nodeTypeRows.Add([PSCustomObject]@{
-            source            = $sourceLabel
-            workflow_file     = $wfRel
-            workflow_dir      = $wf.DirectoryName
-            workflow_modified = $wf.LastWriteTime.ToString("yyyy-MM-dd HH:mm")
-            class_type        = $ct
-        })
-    }
-
-    $refs = Get-RefsFromWorkflow -workflow $workflow
-    if ($refs.Count -eq 0) { return $false }
 
     foreach ($r in $refs) {
         if ($r.is_background) {
@@ -457,7 +405,6 @@ $jsonFiles = @(Get-ChildItem -Path $WorkflowDir -File -Recurse -ErrorAction Sile
 Write-Host "  Found $($jsonFiles.Count) JSON file(s)" -ForegroundColor Green
 
 $mapRows      = [System.Collections.Generic.List[PSObject]]::new()
-$nodeTypeRows = [System.Collections.Generic.List[PSObject]]::new()
 $allModelRefs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $processed    = 0
 $skipped      = 0
@@ -591,7 +538,6 @@ if (!$NoFile) {
     $usageSummary  | Export-Csv "$prefix-model_usage.csv"    -NoTypeInformation -Encoding UTF8
     $unusedModels  | Export-Csv "$prefix-unused_models.csv"  -NoTypeInformation -Encoding UTF8
     $missingModels | Export-Csv "$prefix-missing_models.csv" -NoTypeInformation -Encoding UTF8
-    $nodeTypeRows  | Export-Csv "$prefix-node_types.csv"     -NoTypeInformation -Encoding UTF8
 
     $div1 = "============================================================"
     $div2 = "------------------------------------------------------------"
@@ -657,7 +603,6 @@ if (!$NoFile) {
     Write-Host "  $prefix-model_usage.csv"
     Write-Host "  $prefix-unused_models.csv"
     Write-Host "  $prefix-missing_models.csv"
-    Write-Host "  $prefix-node_types.csv"
     Write-Host "  $prefix-summary.txt"
     Write-Host ""
     Write-Host "Done!" -ForegroundColor Green

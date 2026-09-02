@@ -1,5 +1,12 @@
 #!/bin/bash
 # ~/repos/scripts/FleetNAS/nas-nightly-summary.sh
+# 2026-09-02 08:00 UTC: added SPARES=(sdd) for the UGOS hot spare, reported
+#             separately from DRIVES. UGOS parks the spare and manages it in its
+#             own layer, so it never appears in `mdadm --detail` (Spare Devices
+#             stays 0) and polling it like an array member would either wake it
+#             constantly or flag it as unreadable. read_smart() gained a 'nowake'
+#             mode using smartctl -n standby so a parked spare reports as STANDBY
+#             rather than as an unreadable drive. A missing spare device is crit.
 # 2026-08-07: FIXED: smartctl was called as a bare command but lives in /sbin,
 #             which is not on root's cron PATH. Every drive therefore reported
 #             health= realloc=0 pending=0 temp=0, and the empty health string
@@ -31,6 +38,11 @@ HOST="FleetNAS"
 TO="dennyrgood@yahoo.com"
 WBU="dhm@192.168.178.242"
 DRIVES=(sda sdb sdc)
+# Hot spare(s). Kept deliberately OUT of DRIVES: UGOS parks the spare and manages
+# it in its own layer, so it never appears in `mdadm --detail` (Spare Devices
+# stays 0 even when a spare is assigned and healthy). Read once nightly in
+# standby-aware mode instead of being polled like an array member.
+SPARES=(sdd)
 # Absolute paths: root's cron PATH is /usr/bin:/bin and both live in /sbin.
 MDADM=/sbin/mdadm
 SMARTCTL=/sbin/smartctl
@@ -59,7 +71,7 @@ add_issue() {
 # A failed read is never defaulted to 0 — that is what made every drive look
 # both healthy and broken at the same time.
 read_smart() {
-    local d=$1 out rc
+    local d=$1 nowake=$2 out rc
     SM_STATE="unreadable"; SM_REASON=""
     SM_HEALTH=""; SM_REALLOC=""; SM_PENDING=""; SM_TEMP=""
     SM_MODEL=""; SM_SERIAL=""; SM_HOURS=""
@@ -69,7 +81,18 @@ read_smart() {
         return
     fi
 
-    out=$("$SMARTCTL" -i -H -A "/dev/$d" 2>&1); rc=$?
+    if [ "$nowake" = "nowake" ]; then
+        # -n standby exits 2 WITHOUT spinning the drive up. That exit code
+        # collides with the "device open failed" bit below, so detect standby by
+        # matching the message rather than the code.
+        out=$("$SMARTCTL" -n standby -i -H -A "/dev/$d" 2>&1); rc=$?
+        if printf '%s\n' "$out" | grep -q "STANDBY mode"; then
+            SM_STATE="standby"
+            return
+        fi
+    else
+        out=$("$SMARTCTL" -i -H -A "/dev/$d" 2>&1); rc=$?
+    fi
     # smartctl exit bits: 1=usage, 2=device open failed, 4=ATA/SMART command
     # failed OR bad checksum in a SMART structure. These WD80EFPX drives ALWAYS
     # set bit 4 ("invalid SMART checksum" on the thresholds table) while serving
@@ -120,6 +143,45 @@ for d in "${DRIVES[@]}"; do
         BODY+="${LINE}  ⚠️\n"
     else
         SMART_TLDR+="  /dev/${d}: health=${SM_HEALTH} realloc=${SM_REALLOC} pending=${SM_PENDING} temp=${SM_TEMP}°C ✓\n"
+        BODY+="${LINE}  ✓\n"
+    fi
+    BODY+="      $(printf '%-22s %-14s %s' "${SM_MODEL:-unknown model}" "${SM_SERIAL:-no serial}" "power-on ${SM_HOURS:-?}h ($(( ${SM_HOURS:-0} / 24 ))d)")\n"
+done
+
+# --- Hot spare ---
+# STANDBY is the normal, healthy state for a parked spare, not an error. Feeds
+# the same counters as the array drives so a genuinely sick spare still raises.
+for d in "${SPARES[@]}"; do
+    if [ ! -b "/dev/$d" ]; then
+        SMART_FAILING_N=$(( SMART_FAILING_N + 1 ))
+        SMART_TLDR+="  ⚠️ /dev/${d} (hot spare): DEVICE MISSING\n"
+        BODY+="  /dev/${d} (hot spare): DEVICE MISSING  ⚠️\n"
+        continue
+    fi
+
+    read_smart "$d" nowake
+
+    if [ "$SM_STATE" = "standby" ]; then
+        SMART_TLDR+="  /dev/${d} (hot spare): present, parked ✓\n"
+        BODY+="  /dev/${d} (hot spare): STANDBY — parked by UGOS, SMART not read  ✓\n"
+        continue
+    fi
+
+    if [ "$SM_STATE" != "ok" ]; then
+        SMART_UNREADABLE_N=$(( SMART_UNREADABLE_N + 1 ))
+        SMART_TLDR+="  ❓ /dev/${d} (hot spare): SMART UNREADABLE — condition unknown\n"
+        BODY+="  /dev/${d} (hot spare): SMART UNREADABLE  ❓\n"
+        BODY+="      ${SM_REASON}\n"
+        continue
+    fi
+
+    LINE="  /dev/${d} (hot spare): health=${SM_HEALTH} realloc=${SM_REALLOC} pending=${SM_PENDING} temp=${SM_TEMP}°C"
+    if [ "$SM_REALLOC" -gt 0 ] || [ "$SM_PENDING" -gt 0 ] || [ "$SM_HEALTH" != "PASSED" ]; then
+        SMART_FAILING_N=$(( SMART_FAILING_N + 1 ))
+        SMART_TLDR+="  ⚠️ /dev/${d} (hot spare): health=${SM_HEALTH} realloc=${SM_REALLOC} pending=${SM_PENDING} temp=${SM_TEMP}°C\n"
+        BODY+="${LINE}  ⚠️\n"
+    else
+        SMART_TLDR+="  /dev/${d} (hot spare): health=${SM_HEALTH} realloc=${SM_REALLOC} pending=${SM_PENDING} temp=${SM_TEMP}°C ✓\n"
         BODY+="${LINE}  ✓\n"
     fi
     BODY+="      $(printf '%-22s %-14s %s' "${SM_MODEL:-unknown model}" "${SM_SERIAL:-no serial}" "power-on ${SM_HOURS:-?}h ($(( ${SM_HOURS:-0} / 24 ))d)")\n"

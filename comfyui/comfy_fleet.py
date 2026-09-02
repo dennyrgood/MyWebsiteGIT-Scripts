@@ -93,6 +93,8 @@ def build_output_evidence_set(data: dict) -> set:
         for row in machine.get("full_map", []):
             if row.get("source", "") not in OUTPUT_EVIDENCE_SOURCES:
                 continue
+            if row.get("model_category", "") == "background-model":
+                continue
             ref = row.get("model_ref", "").replace("\\", "/").split("/")[-1]
             if ref:
                 evidence.add(ref.lower())
@@ -146,16 +148,33 @@ def load_csv(path: Path) -> list[dict]:
         return list(csv.DictReader(f))
 
 
-def load_nodes(path: Path) -> set[str]:
-    nodes = set()
+DISABLED_SUFFIX = ".disabled"
+
+def load_nodes(path: Path) -> tuple[set[str], set[str]]:
+    """Returns (all_node_names, disabled_node_names), both lowercased.
+
+    ComfyUI Manager disables a node by renaming its folder to
+    '<name>.disabled' -- left unhandled, that shows up in the fleet matrix
+    as a distinct, permanently-"missing" node instead of the same node in a
+    disabled state. Strip the suffix and track disabled status separately
+    instead.
+    """
+    nodes    = set()
+    disabled = set()
     with open(path) as f:
         for line in f:
             line = line.strip()
             if line and line[0].isdigit():
                 name = line.split(". ", 1)[-1].strip().lower()
-                if name not in (".disabled", "__pycache__"):
-                    nodes.add(name)
-    return nodes
+                if name == "__pycache__":
+                    continue
+                if name.endswith(DISABLED_SUFFIX):
+                    name = name[:-len(DISABLED_SUFFIX)]
+                    if not name:
+                        continue
+                    disabled.add(name)
+                nodes.add(name)
+    return nodes, disabled
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +205,7 @@ def load_all_machines(config: dict) -> dict:
             "files":    files,
             "models":   {},   # filename.lower() -> row
             "nodes":    set(),
+            "nodes_disabled": set(),
             "full_map": [],
             "scan_age_days": scan_age_days,
         }
@@ -197,8 +217,10 @@ def load_all_machines(config: dict) -> dict:
             print(f"  {len(entry['models'])} models")
 
         if "nodes" in files:
-            entry["nodes"] = load_nodes(files["nodes"])
-            print(f"  {len(entry['nodes'])} custom nodes")
+            entry["nodes"], entry["nodes_disabled"] = load_nodes(files["nodes"])
+            n_disabled = len(entry["nodes_disabled"])
+            suffix = f" ({n_disabled} disabled)" if n_disabled else ""
+            print(f"  {len(entry['nodes'])} custom nodes{suffix}")
 
         if "full_map" in files:
             entry["full_map"] = load_csv(files["full_map"])
@@ -262,6 +284,8 @@ def build_workflow_model_data(data: dict, year_filter: str) -> dict:
             # 999 Other = experiments, tutorials, Pixaroma reference material —
             # not production workflows, exclude from prime/gap analysis.
             if "999 Other" in row.get("workflow_dir", ""):
+                continue
+            if row.get("model_category", "") == "background-model":
                 continue
             fn   = row["model_filename"]
             ref  = row["model_ref"]
@@ -394,20 +418,38 @@ def compute_readiness(data: dict, wf_model_data: dict, hostname: str, year_filte
 # Custom node analysis
 # ---------------------------------------------------------------------------
 
+def node_status(hostname_data: dict, node: str) -> str:
+    """'on' (installed+enabled), 'disabled' (folder present but Manager-
+    disabled), or 'off' (not installed) for one node on one machine."""
+    if node in hostname_data.get("nodes_disabled", set()):
+        return "disabled"
+    if node in hostname_data.get("nodes", set()):
+        return "on"
+    return "off"
+
+
 def analyze_nodes(data: dict, wf_model_data: dict) -> dict:
     all_nodes   = set()
     for machine in data.values():
         all_nodes |= machine["nodes"]
 
     hostnames = list(data.keys())
-    on_all    = {n for n in all_nodes if all(n in data[h]["nodes"] for h in hostnames)}
     matrix    = {}
     for node in sorted(all_nodes):
-        matrix[node] = {h: node in data[h]["nodes"] for h in hostnames}
+        matrix[node] = {h: node_status(data[h], node) for h in hostnames}
 
+    # "on all machines" means actually enabled everywhere, not just present
+    # in some state -- a disabled copy doesn't give you the node's function.
+    on_all = {n for n, row in matrix.items() if all(v == "on" for v in row.values())}
+
+    # "missing" = not fully working there (either truly absent or disabled)
+    # -- both are states worth flagging for someone deciding what to install
+    # or re-enable.
     missing_per_machine = {}
     for hostname in hostnames:
-        missing_per_machine[hostname] = sorted(n for n in all_nodes if n not in data[hostname]["nodes"])
+        missing_per_machine[hostname] = sorted(
+            n for n in all_nodes if matrix[n][hostname] != "on"
+        )
 
     return {
         "all_nodes":    sorted(all_nodes),
@@ -576,14 +618,19 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
     for h in nodes_data["hostnames"]:
         node_matrix_html += f'<th>{h}</th>'
     node_matrix_html += '</tr>'
+    def node_badge(status):
+        color = {"on": "#2ecc71", "disabled": "#f39c12", "off": "#e74c3c"}[status]
+        text  = {"on": "YES", "disabled": "DISABLED", "off": "NO"}[status]
+        return f'<span style="background:{color};color:white;padding:2px 8px;border-radius:4px;font-size:0.85em">{text}</span>'
+
     for node in nodes_data["all_nodes"]:
         row_vals = nodes_data["matrix"][node]
-        all_yes  = all(row_vals.values())
-        bg = "" if all_yes else ' style="background:#fff8e1"'
+        all_on   = all(v == "on" for v in row_vals.values())
+        bg = "" if all_on else ' style="background:#fff8e1"'
         node_matrix_html += f'<tr{bg}><td>{node}</td>'
         for h in nodes_data["hostnames"]:
-            present = row_vals.get(h, False)
-            node_matrix_html += f'<td style="text-align:center">{badge(present)}</td>'
+            status = row_vals.get(h, "off")
+            node_matrix_html += f'<td style="text-align:center">{node_badge(status)}</td>'
         node_matrix_html += '</tr>'
     node_matrix_html += "</table>"
 
@@ -1110,6 +1157,13 @@ def scan_starting_images(data: dict) -> dict:
             # travel readiness set even if they live in 000 Starting Images.
             if machine_tag(wf_name) == "ib":
                 continue
+            # Background-model rows (JoyCaption/RMBG/insightface-style nodes)
+            # carry a synthetic, never-resolvable model_filename -- including
+            # it here would show up as a permanently "missing" model on every
+            # machine. These nodes aren't file-based, so they're simply not
+            # part of readiness/coverage tracking.
+            if row.get("model_category", "") == "background-model":
+                continue
             fn = row.get("model_filename", "")
             if fn and fn != "(not found on disk)":
                 key = fn.lower()
@@ -1525,7 +1579,8 @@ def build_actions(gaps: list, readiness: dict, drift: dict, nodes_data: dict, co
 # Fleet Explorer HTML generator
 # ---------------------------------------------------------------------------
 
-def generate_explorer_html(data: dict, timestamp: str, year_filter: str) -> str:
+def generate_explorer_html(data: dict, timestamp: str, year_filter: str,
+                            nodes_data: dict = None, priority_nodes: set = None) -> str:
     """Generate interactive fleet explorer HTML with workflow/model cross-reference."""
     import json as _json
 
@@ -1575,6 +1630,15 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str) -> str:
 
     for hostname, machine in data.items():
         for row in machine.get("full_map", []):
+            # Background-model rows (JoyCaption/RMBG/insightface-style nodes)
+            # carry a shared synthetic model_filename that isn't a real,
+            # resolvable file -- treating it as a model would collapse every
+            # such node across every workflow into one fake "model" entry
+            # shown as permanently missing on every host. Skip them here;
+            # they're not part of the model-presence picture this table
+            # builds. (They still fully appear in the raw full_map CSV.)
+            if row.get("model_category", "") == "background-model":
+                continue
             src     = row.get("source", "workflows")
             wf_fname = row["workflow_file"].split("\\")[-1]
             wf_dir   = row.get("workflow_dir", "").replace("\\", "/")
@@ -1691,6 +1755,21 @@ def generate_explorer_html(data: dict, timestamp: str, year_filter: str) -> str:
     png_wfs   = wf_list(source_filter=["png-outputs"])
     ml        = model_list()
 
+    # Custom node fleet comparison -- same on/disabled/off matrix the static
+    # HTML report and summary.txt use, just made searchable/filterable like
+    # the models panel instead of a flat table.
+    nodes_data = nodes_data or {"all_nodes": [], "matrix": {}, "hostnames": hostnames}
+    priority_nodes = priority_nodes or set()
+    node_list = []
+    for node in nodes_data.get("all_nodes", []):
+        row = nodes_data["matrix"].get(node, {})
+        node_list.append({
+            "name":     node,
+            "status":   {h: row.get(h, "off") for h in hostnames},
+            "priority": node in priority_nodes,
+        })
+    node_list.sort(key=lambda x: x["name"])
+
     CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -1710,6 +1789,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 .panel { background: #1a1a2e; display: flex; flex-direction: column; overflow: hidden; }
 .panel-workflows { flex: 1.4; }
 .panel-models { flex: 1; }
+.panel-nodes { flex: 0.8; }
+.dot-disabled { background: #f39c12; }
 .panel-header { background: #16213e; padding: 8px 12px; border-bottom: 1px solid #0f3460; flex-shrink: 0; }
 .panel-header h2 { font-size: 0.85em; color: #4fc3f7; margin-bottom: 6px; }
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -1768,8 +1849,9 @@ const SI_WF    = {js(si_wfs)};
 const PNG_WF   = {js(png_wfs)};
 const ALL_WF   = {js(all_wfs)};
 const MODELS  = {js(ml)};
+const NODES   = {js(node_list)};
 
-let wfTab='all', modelTab='all';
+let wfTab='all', modelTab='all', nodeFilter='all';
 let wfFilter='all', modelFilter='all', statusFilter='all', wfShowFilter='all';
 let locFilter='all', recentFilter='all';
 let wfSort='name';
@@ -1824,6 +1906,49 @@ function switchModelTab(t) {{
   renderModels();
 }}
 
+function setNodeFilter(f) {{
+  nodeFilter=f;
+  ['all','priority','onall','disabled','missing'].forEach(id=>{{const el=document.getElementById('fnode-'+id);if(el)el.classList.toggle('active',id===f)}});
+  renderNodes();
+}}
+
+function nodeMatchesFilter(n) {{
+  const states=Object.values(n.status);
+  if(nodeFilter==='priority' && !n.priority) return false;
+  if(nodeFilter==='onall' && !states.every(s=>s==='on')) return false;
+  if(nodeFilter==='disabled' && !states.some(s=>s==='disabled')) return false;
+  if(nodeFilter==='missing' && !states.some(s=>s==='off')) return false;
+  return true;
+}}
+
+function nodeDots(status) {{
+  return HN.map(h=>{{
+    const st=status[h]||'off';
+    const cls='dot dot-'+(st==='on'?'on':st==='disabled'?'disabled':'off');
+    const label=st==='on'?'enabled':st==='disabled'?'installed but disabled':'not installed';
+    return '<span class="'+cls+'" title="'+HS[h]+': '+label+'"></span>';
+  }}).join('');
+}}
+
+function renderNodes() {{
+  const container=document.getElementById('node-list');
+  const filtered=NODES.filter(n=>{{
+    if(!nodeMatchesFilter(n)) return false;
+    if(searchTerm && !n.name.toLowerCase().includes(searchTerm)) return false;
+    return true;
+  }});
+  document.getElementById('cnt-nodes').textContent='('+NODES.length+')';
+  if(!filtered.length){{
+    container.innerHTML='<div class="empty">No custom nodes match</div>';
+    return;
+  }}
+  container.innerHTML=filtered.map(n=>{{
+    const dots='<div class="host-dots">'+nodeDots(n.status)+'</div>';
+    const pri=n.priority?'<span class="cat-tag" title="priority custom node">★</span>':'';
+    return '<div class="item">'+dots+pri+'<span class="item-name" title="'+n.name+'">'+n.name+'</span></div>';
+  }}).join('');
+}}
+
 function setWfFilter(f) {{
   wfFilter=f;
   ['all','bare','tb','c','i','none'].forEach(id=>{{const el=document.getElementById('fwf-'+id);if(el)el.classList.toggle('active',id===f)}});
@@ -1873,7 +1998,7 @@ function setModelFilter(f) {{
 
 function applySearch() {{
   searchTerm=document.getElementById('globalSearch').value.toLowerCase();
-  renderWf(); renderModels();
+  renderWf(); renderModels(); renderNodes();
 }}
 
 function handleWfClick(el) {{
@@ -2115,7 +2240,7 @@ function selectModel(mk,filename) {{
   renderWf(); renderModels();
 }}
 
-renderWf(); renderModels();
+renderWf(); renderModels(); renderNodes();
 """
 
     return f"""<!DOCTYPE html>
@@ -2199,6 +2324,21 @@ renderWf(); renderModels();
     </div>
     <div class="list-container" id="model-list"></div>
     <div class="info-bar" style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span id="model-info">Click a model to see its workflows</span><button id="toggleModel" class="filter-chip" onclick="toggleShowOnlyModel()">Show Only</button></div>
+  </div>
+  <div class="panel panel-nodes">
+    <div class="panel-header">
+      <h2>CUSTOM NODES <span id="cnt-nodes"></span></h2>
+    </div>
+    <div class="filters">
+      <span class="filter-label">Show:</span>
+      <button class="filter-chip active" id="fnode-all" onclick="setNodeFilter('all')">All</button>
+      <button class="filter-chip" id="fnode-priority" onclick="setNodeFilter('priority')">Priority ★</button>
+      <button class="filter-chip" id="fnode-onall" onclick="setNodeFilter('onall')">On All</button>
+      <button class="filter-chip" id="fnode-disabled" onclick="setNodeFilter('disabled')">Disabled Anywhere</button>
+      <button class="filter-chip" id="fnode-missing" onclick="setNodeFilter('missing')">Missing Anywhere</button>
+    </div>
+    <div class="list-container" id="node-list"></div>
+    <div class="info-bar">Green = enabled &nbsp;|&nbsp; Orange = installed but disabled &nbsp;|&nbsp; Red = not installed</div>
   </div>
 </div>
 <script>{JS}</script>
@@ -2459,10 +2599,13 @@ def main():
     nodes_lines.append("=" * 68)
     nodes_lines.append(f"  {'Node':<45} " + "  ".join(f"[{h[:6]}]" for h in nodes_data["hostnames"]))
     nodes_lines.append("-" * 68)
+    _node_col = {"on": "Y", "disabled": "D", "off": " "}
     for node in nodes_data["all_nodes"]:
         row = nodes_data["matrix"][node]
-        cols = "     ".join("Y" if row.get(h) else " " for h in nodes_data["hostnames"])
+        cols = "     ".join(_node_col.get(row.get(h, "off"), " ") for h in nodes_data["hostnames"])
         nodes_lines.append(f"  {node:<45} {cols}")
+    nodes_lines.append("")
+    nodes_lines.append("  (Y = enabled, D = installed but disabled, blank = not installed)")
     nodes_lines.append("")
     nodes_lines.append("ON ALL MACHINES: " + ", ".join(nodes_data["on_all"]))
     (output_dir / f"custom_nodes_{timestamp}.txt").write_text("\n".join(nodes_lines))
@@ -2500,7 +2643,11 @@ def main():
     print(f"Written: fleet_report_{timestamp}.html")
 
     # Fleet explorer
-    explorer_html = generate_explorer_html(data, timestamp, year_filter)
+    explorer_html = generate_explorer_html(
+        data, timestamp, year_filter,
+        nodes_data=nodes_data,
+        priority_nodes=set(config.get("priority_custom_nodes", [])),
+    )
     explorer_path = output_dir / f"fleet_explorer_{timestamp}.html"
     explorer_path.write_text(explorer_html)
     print(f"Written: fleet_explorer_{timestamp}.html")
