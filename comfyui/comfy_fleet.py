@@ -278,11 +278,12 @@ def build_model_universe(data: dict) -> dict:
     return universe
 
 
-def build_workflow_model_data(data: dict, year_filter: str) -> dict:
+def build_workflow_model_data(data: dict, year_filter: str, evidence: set = None) -> dict:
     """
     For each model, collect which workflows reference it (filtered by year)
     and whether it's on disk on each machine.
     """
+    evidence = evidence or set()
     model_wf = defaultdict(lambda: {
         "workflows": defaultdict(set),  # machine -> set of workflow names
         "on":        set(),
@@ -300,16 +301,22 @@ def build_workflow_model_data(data: dict, year_filter: str) -> dict:
             # starting_images = same PNGs via separate scan, also handled separately.
             if row.get("source", "") != "workflows":
                 continue
-            # 999 Other = experiments, tutorials, Pixaroma reference material —
-            # not production workflows, exclude from prime/gap analysis.
-            if "999 Other" in row.get("workflow_dir", ""):
-                continue
             if row.get("model_category", "") == "background-model":
                 continue
             fn   = row["model_filename"]
             ref  = row["model_ref"]
             ref_base = ref.replace("\\", "/").split("/")[-1]
             key  = fn.lower() if fn != "(not found on disk)" else ref_base.lower()
+
+            # 999 Other = experiments, tutorials, Pixaroma reference material --
+            # not production workflows, by default excluded from the prime/gap
+            # analysis. But folder location is just a proxy for "not real" --
+            # real output-PNG evidence is the actual signal, and beats it when
+            # the two disagree (confirmed 2026-09-02: ideogram4's only template
+            # reference lives under 999 Other/Experiments, but it has 18 real
+            # outputs -- the folder-based exclusion was hiding a genuine gap).
+            if "999 Other" in row.get("workflow_dir", "") and key not in evidence:
+                continue
 
             wf_short = row["workflow_file"].split("\\")[-1]
             model_wf[key]["workflows"][hostname].add(wf_short)
@@ -641,6 +648,217 @@ def analyze_node_gaps(nodes_data: dict, source_host: str, node_usage: dict,
     return results
 
 
+def analyze_model_usage_evidence(data: dict) -> dict:
+    """Fleet-wide, per-model real usage evidence (max output-PNG date +
+    a count) -- the model-side mirror of analyze_node_usage_evidence.
+    Keyed by filename.lower() (or the ref basename when unresolved), the
+    same key scheme build_output_evidence_set uses, so it lines up with
+    every other model-evidence check in this file."""
+    usage = defaultdict(lambda: {"last_used": "", "used_count": 0})
+    for machine in data.values():
+        for row in machine.get("full_map", []):
+            if row.get("source", "") not in OUTPUT_EVIDENCE_SOURCES:
+                continue
+            if row.get("model_category", "") == "background-model":
+                continue
+            fn  = row.get("model_filename", "")
+            ref = row.get("model_ref", "").replace("\\", "/").split("/")[-1]
+            key = fn.lower() if fn and fn != "(not found on disk)" else ref.lower()
+            if not key:
+                continue
+            date = row.get("workflow_modified", "")[:10]
+            entry = usage[key]
+            entry["used_count"] += 1
+            if date > entry["last_used"]:
+                entry["last_used"] = date
+    return dict(usage)
+
+
+def analyze_model_gaps(data: dict, source_host: str, model_usage: dict,
+                        recent_days: int = 90) -> dict:
+    """
+    For each non-source machine: which models are on the source machine
+    but missing here -- the model-side mirror of analyze_node_gaps. Split
+    by real usage evidence within `recent_days` (output-PNG timestamps),
+    not just presence: a model actually used recently somewhere on the
+    fleet is worth copying before a trip; one with no recent evidence is
+    a lower-priority gap, or an ImageBeast-only experiment.
+    """
+    hostnames = list(data.keys())
+    results = {}
+    if source_host not in data:
+        return results
+
+    cutoff = (datetime.now() - timedelta(days=recent_days)).strftime("%Y-%m-%d")
+    source_models = set(data[source_host]["models"].keys())
+
+    def is_recent(fn):
+        last_used = model_usage.get(fn, {}).get("last_used", "")
+        return bool(last_used) and last_used >= cutoff
+
+    for h in hostnames:
+        if h == source_host:
+            continue
+        machine_models = set(data[h]["models"].keys())
+        gap = sorted(source_models - machine_models)
+        recent_gap = sorted((fn for fn in gap if is_recent(fn)),
+                             key=lambda fn: model_usage.get(fn, {}).get("last_used", ""), reverse=True)
+        other_gap  = sorted(fn for fn in gap if not is_recent(fn))
+
+        def entry(fn):
+            row = data[source_host]["models"].get(fn, {})
+            u   = model_usage.get(fn, {})
+            return {
+                "filename": row.get("filename", fn),
+                "size_gb":  float(row.get("size_gb", 0) or 0),
+                "category": row.get("category", ""),
+                "last_used":  u.get("last_used", ""),
+                "used_count": u.get("used_count", 0),
+            }
+
+        results[h] = {
+            "recent_gap":      [entry(fn) for fn in recent_gap],
+            "other_gap":       [entry(fn) for fn in other_gap],
+            "on_source_count": len(source_models),
+        }
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Deletion candidates (the inverse of the sync-gap analysis above): models
+# on a machine's own disk that are dead weight, per host, split into two
+# confidence tiers -- both reuse data already computed elsewhere, no new
+# scanning.
+# ---------------------------------------------------------------------------
+
+def build_deletion_candidates(data: dict, output_usage: dict) -> dict:
+    """
+    Per host, two tiers:
+      unused    -- zero references anywhere on that host's own scan (no
+                   workflow, no template, no real output ever) -- straight
+                   from that host's own unused_models.csv. The strongest
+                   signal: this file has never been touched by anything.
+      never_run -- referenced by some workflow/template on this host, but
+                   with zero real output-PNG evidence it was ever actually
+                   generated with (analyze_output_usage's "stale, no output
+                   ever seen" bucket). Weaker than 'unused' -- it's wired
+                   into a workflow, just never confirmed run -- worth a
+                   second look before deleting, not a clear no-brainer.
+    Both tiers carry full_path (needed to actually move/delete the file),
+    pulled from that host's own Models CSV.
+    """
+    results = {}
+    for hostname, machine in data.items():
+        models = machine.get("models", {})
+
+        unused = []
+        for r in machine.get("unused", []):
+            # unused_models.csv already carries this exact row's own
+            # full_path -- use it directly. Looking it up again via the
+            # models dict (keyed only by lowercased filename) was wrong:
+            # two genuinely different files can share a generic filename
+            # (e.g. a sharded checkpoint's "model-00002-of-00004.safetensors"
+            # under two different model folders), and that dict collapses
+            # them to one entry, silently pointing both unused rows at the
+            # same path -- confirmed 2026-09-02 on IMAGEBEAST's LLM/
+            # llama-joycaption-{alpha-two,beta-one} shards.
+            full_path = r.get("full_path", "")
+            unused.append({
+                "filename": r.get("filename", ""),
+                "category": r.get("category", ""),
+                "size_gb":  float(r.get("size_gb", 0) or 0),
+                "full_path": full_path,
+            })
+        unused.sort(key=lambda x: -x["size_gb"])
+
+        # analyze_output_usage()'s "never" bucket is purely evidence-based
+        # (zero real output, ever) -- it does NOT check whether anything
+        # actually references the model, so it's a superset that already
+        # includes every 'unused' entry too. Excluding those here is what
+        # actually makes 'never_run' mean "referenced by something, just
+        # never produced output" rather than silently duplicating 'unused'
+        # (confirmed 2026-09-02: realisticVisionV51_v51VAE.safetensors
+        # showed up in both tiers before this fix).
+        unused_names = {m["filename"].lower() for m in unused}
+
+        never_run = []
+        stale = output_usage.get(hostname, {}).get("stale", [])
+        for m in stale:
+            if m.get("last_used") != "never":
+                continue
+            fn_lower = m["filename"].lower()
+            if fn_lower in unused_names:
+                continue
+            full_path = models.get(fn_lower, {}).get("full_path", "")
+            if not full_path:
+                continue  # shouldn't happen (these come from this host's own models dict), but skip rather than emit an empty path
+            never_run.append({
+                "filename": m["filename"], "category": m["category"],
+                "size_gb": m["size_gb"], "full_path": full_path,
+            })
+        never_run.sort(key=lambda x: -x["size_gb"])
+
+        results[hostname] = {"unused": unused, "never_run": never_run}
+    return results
+
+
+def generate_cleanup_script(hostname: str, candidates: dict, is_source: bool) -> str:
+    """
+    Per-host cleanup script. ImageBeast (the source -- the only machine
+    where a deleted model is actually gone, not just a re-copyable replica)
+    gets a MOVE to a local quarantine folder instead of a delete, so a wrong
+    call is recoverable. TravelBeast/ChatWorkhorse get a straight delete --
+    they're synced replicas of ImageBeast's models, so worst case is
+    re-running the sync script, not real data loss.
+    """
+    unused, never_run = candidates["unused"], candidates["never_run"]
+    total_gb = sum(m["size_gb"] for m in unused + never_run)
+    action = "MOVE to quarantine" if is_source else "DELETE"
+    lines = [
+        "@echo off",
+        "REM " + "=" * 60,
+        f"REM  Cleanup candidates on {hostname}",
+        f"REM  Action: {action}",
+        f"REM  {len(unused)} unused (zero references anywhere) + {len(never_run)} referenced-but-never-run",
+        f"REM  {total_gb:.2f} GB total",
+        "REM " + "=" * 60,
+        "",
+    ]
+    if is_source:
+        lines += [
+            'set "QUARANTINE=C:\\models_unused"',
+            'if not exist "%QUARANTINE%" mkdir "%QUARANTINE%"',
+            "",
+        ]
+
+    def emit_group(models, title):
+        lines.append(f"REM --- {title} ({len(models)} files, {sum(m['size_gb'] for m in models):.2f} GB) ---")
+        for m in models:
+            lines.append(f'REM   {m["size_gb"]:.2f} GB  [{m["category"]}]  {m["filename"]}')
+            if is_source:
+                lines.append(f'move "{m["full_path"]}" "%QUARANTINE%\\"')
+            else:
+                lines.append(f'del "{m["full_path"]}"')
+        lines.append("")
+
+    if unused:
+        emit_group(unused, "UNUSED -- zero references anywhere")
+    if never_run:
+        emit_group(never_run, "REFERENCED BUT NEVER RUN -- review before trusting this tier")
+
+    lines += [
+        "echo.",
+        "echo " + "=" * 60,
+        f"echo  Cleanup on {hostname} -- COMPLETE",
+        f"echo  {len(unused) + len(never_run)} files ({total_gb:.2f} GB)",
+        ("echo  Moved to %QUARANTINE%  -- review and empty it manually" if is_source
+         else "echo  Deleted -- re-run the sync script if you need any of these back"),
+        "echo " + "=" * 60,
+        "pause",
+    ]
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Sync script generation
 # ---------------------------------------------------------------------------
@@ -714,6 +932,8 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
     node_gaps         = report_data.get("node_gaps", {})
     source_host       = report_data.get("source_host", "")
     object_info_status = report_data.get("object_info_status", {})
+    model_gaps        = report_data.get("model_gaps", {})
+    deletion_candidates = report_data.get("deletion_candidates", {})
 
     hostnames = list(machines.keys())
 
@@ -952,6 +1172,71 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
     else:
         si_html = '<p>No Starting Images PNGs found. Add test output PNGs to the 000 Starting Images folder.</p>'
 
+    # --- MODEL GAPS, RECENTLY USED (vs source machine) ---
+    # Model-side mirror of the node gaps section below: which models are on
+    # the source machine and have real output-PNG evidence within the last
+    # 90 days, but are missing here.
+    if model_gaps:
+        model_gaps_html = f'<p>Models on <strong>{source_host}</strong> (source), compared against each other machine. "Recently used" = real output-PNG evidence within the last 90 days.</p>'
+        for hostname, g in model_gaps.items():
+            recent, other, src_n = g["recent_gap"], g["other_gap"], g["on_source_count"]
+            recent_gb = sum(m["size_gb"] for m in recent)
+            model_gaps_html += f'<h4>{hostname}</h4><p>'
+            if recent:
+                model_gaps_html += f'<span style="color:#e74c3c">&#10007; {len(recent)} recently-used gap(s) ({recent_gb:.2f} GB)</span> &nbsp;|&nbsp; '
+            else:
+                model_gaps_html += '<span style="color:#2ecc71">&#10003; no recently-used gaps</span> &nbsp;|&nbsp; '
+            model_gaps_html += f'<span style="color:#888">{len(other)} other gap(s) &nbsp;|&nbsp; {src_n} on {source_host}</span></p>'
+            if recent:
+                model_gaps_html += '<table><tr><th style="background:#e74c3c">Recently used elsewhere — copy before relying on this machine</th><th>Category</th><th>Size</th><th>Last used</th><th>Seen in</th></tr>'
+                for m in recent:
+                    model_gaps_html += (
+                        f'<tr style="background:#fff0f0"><td>★ {m["filename"]}</td><td>{m["category"]}</td>'
+                        f'<td>{m["size_gb"]:.2f} GB</td><td>{m["last_used"]}</td><td>{m["used_count"]} output(s)</td></tr>'
+                    )
+                model_gaps_html += '</table>'
+            if other:
+                other_gb = sum(m["size_gb"] for m in other)
+                model_gaps_html += f'<details><summary style="cursor:pointer;color:#888">{len(other)} other gap(s) ({other_gb:.2f} GB), no usage evidence within 90 days (click to expand)</summary>'
+                model_gaps_html += '<table><tr><th>Model</th><th>Category</th><th>Size</th></tr>'
+                for m in other:
+                    model_gaps_html += f'<tr><td>{m["filename"]}</td><td>{m["category"]}</td><td>{m["size_gb"]:.2f} GB</td></tr>'
+                model_gaps_html += '</table></details>'
+    else:
+        model_gaps_html = '<p>No source machine configured, or no gaps to report.</p>'
+
+    # --- DELETION CANDIDATES (dead weight, per host) ---
+    # Inverse of the gap analysis above: models sitting on a machine's own
+    # disk that look like reclaimable space. Two confidence tiers -- see
+    # build_deletion_candidates()'s docstring.
+    if deletion_candidates:
+        del_html = ""
+        for hostname, cand in deletion_candidates.items():
+            unused, never_run = cand["unused"], cand["never_run"]
+            if not (unused or never_run):
+                continue
+            is_source = hostname == source_host
+            unused_gb = sum(m["size_gb"] for m in unused)
+            never_gb  = sum(m["size_gb"] for m in never_run)
+            action = "moved to C:\\models_unused (quarantine)" if is_source else "deleted (re-syncable from ImageBeast)"
+            del_html += f'<h4>{hostname}</h4><p><span style="color:#888">{len(unused)} unused ({unused_gb:.2f} GB) + {len(never_run)} referenced-but-never-run ({never_gb:.2f} GB) &nbsp;|&nbsp; script action: {action}</span></p>'
+            if unused:
+                del_html += f'<details open><summary style="cursor:pointer;color:#2c3e50;font-weight:bold">Unused — zero references anywhere ({len(unused)} files, {unused_gb:.2f} GB)</summary>'
+                del_html += '<table><tr><th>Model</th><th>Category</th><th>Size</th></tr>'
+                for m in unused:
+                    del_html += f'<tr><td>{m["filename"]}</td><td>{m["category"]}</td><td>{m["size_gb"]:.2f} GB</td></tr>'
+                del_html += '</table></details>'
+            if never_run:
+                del_html += f'<details><summary style="cursor:pointer;color:#888">Referenced but never run — review before trusting ({len(never_run)} files, {never_gb:.2f} GB)</summary>'
+                del_html += '<table><tr><th>Model</th><th>Category</th><th>Size</th></tr>'
+                for m in never_run:
+                    del_html += f'<tr><td>{m["filename"]}</td><td>{m["category"]}</td><td>{m["size_gb"]:.2f} GB</td></tr>'
+                del_html += '</table></details>'
+        if not del_html:
+            del_html = '<p style="color:#2ecc71">No deletion candidates found on any machine.</p>'
+    else:
+        del_html = '<p>No deletion candidate data available.</p>'
+
     # --- CUSTOM NODE GAPS (vs source machine) ---
     # "Which nodes does ImageBeast have that this machine doesn't" -- the
     # pre-travel/offline checklist. Split by real usage evidence -- has this
@@ -1141,11 +1426,17 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
 <h2>Starting Images — Travel Readiness</h2>
 <div class="card">{si_html}</div>
 
+<h2>Model Gaps — Travel Readiness (Recently Used)</h2>
+<div class="card">{model_gaps_html}</div>
+
 <h2>Custom Node Gaps — Travel Readiness</h2>
 <div class="card">{node_gaps_html}</div>
 
-<h2>Model Gaps</h2>
+<h2>Model Gaps (VRAM-Sorted Sync Lists)</h2>
 <div class="card">{gaps_html}</div>
+
+<h2>Model Deletion Candidates</h2>
+<div class="card">{del_html}</div>
 
 <h2>Subdir Structure Mismatches</h2>
 <div class="card">{mismatch_html}</div>
@@ -2827,7 +3118,12 @@ def main():
 
     # Build universe
     universe = build_model_universe(data)
-    wf_data  = build_workflow_model_data(data, year_filter)
+    # Computed early (moved up from its previous spot near prime_coverage
+    # below) so build_workflow_model_data can use it to override the blanket
+    # "999 Other" exclusion when there's real output evidence -- see that
+    # function's docstring/comment.
+    output_evidence = build_output_evidence_set(data)
+    wf_data  = build_workflow_model_data(data, year_filter, evidence=output_evidence)
 
     # Identify source machine
     source_host = next(
@@ -2857,7 +3153,13 @@ def main():
     node_usage = analyze_node_usage_evidence(data, classtype_pkg_map)
     node_gaps  = analyze_node_gaps(nodes_data, source_host, node_usage)
 
-    # Model gaps
+    # Real per-model usage evidence + gaps (mirrors node_usage/node_gaps
+    # above) -- "which models were actually used recently somewhere on the
+    # fleet, but are missing on this machine."
+    model_usage_evidence = analyze_model_usage_evidence(data)
+    model_gaps = analyze_model_gaps(data, source_host, model_usage_evidence)
+
+    # Model gaps (VRAM-threshold sync-script generation, below -- unrelated
     vram_ok    = config["vram_thresholds"]["ok"]
     vram_maybe = config["vram_thresholds"]["maybe"]
 
@@ -2974,7 +3276,6 @@ def main():
 
     # Prime workflow coverage analysis
     prime_scan     = scan_prime_workflows(config)
-    output_evidence = build_output_evidence_set(data)
     prime_coverage = analyze_prime_coverage(data, prime_scan, config, output_evidence)
     if prime_scan:
         print(f"Current year workflows scanned: {prime_scan['json_count']} JSON, {prime_scan['png_count']} PNG  ({len(prime_scan['prime_models'])} unique model refs)")
@@ -2992,6 +3293,16 @@ def main():
     # Output-based model usage (what's actually been produced, not just referenced)
     output_usage = analyze_output_usage(data, year_filter)
 
+    # Deletion candidates -- the inverse of the sync-gap analysis: dead
+    # weight on each machine's own disk, split by confidence tier.
+    deletion_candidates = build_deletion_candidates(data, output_usage)
+    cleanup_scripts = {}
+    for hostname, cand in deletion_candidates.items():
+        if not (cand["unused"] or cand["never_run"]):
+            continue
+        is_source = hostname == source_host
+        cleanup_scripts[f"cleanup_unused_{hostname}.bat"] = generate_cleanup_script(hostname, cand, is_source)
+
     # Build actions
     report_data = {
         "machines":         data,
@@ -3000,6 +3311,7 @@ def main():
         "nodes":            nodes_data,
         "node_gaps":        node_gaps,
         "object_info_status": object_info,
+        "model_gaps":       model_gaps,
         "source_host":      source_host,
         "gaps":             gaps,
         "universe":         universe,
@@ -3010,6 +3322,7 @@ def main():
         "si_coverage":      si_coverage,
         "si_scan":          si_scan,
         "output_usage":     output_usage,
+        "deletion_candidates": deletion_candidates,
     }
     report_data["actions"] = build_actions(gaps, readiness, drift, nodes_data, config, data, node_gaps)
 
@@ -3017,6 +3330,12 @@ def main():
 
     # Robocopy scripts
     for name, script in sync_scripts.items():
+        out = output_dir / name
+        out.write_text(script)
+        print(f"Written: {out.name}")
+
+    # Cleanup (deletion candidate) scripts
+    for name, script in cleanup_scripts.items():
         out = output_dir / name
         out.write_text(script)
         print(f"Written: {out.name}")
@@ -3144,6 +3463,20 @@ def main():
             for m in missing:
                 summary_lines.append(f"    !! MISSING: {m}")
 
+    if model_gaps:
+        summary_lines.append("")
+        summary_lines.append("MODEL GAPS — TRAVEL READINESS (RECENTLY USED)")
+        summary_lines.append("-" * 60)
+        summary_lines.append(f"  Models on {source_host} (source), compared per machine")
+        summary_lines.append(f"  \"Recently used\" = real output-PNG evidence within the last 90 days")
+        for hostname, g in model_gaps.items():
+            recent, other, src_n = g["recent_gap"], g["other_gap"], g["on_source_count"]
+            recent_gb = sum(m["size_gb"] for m in recent)
+            summary_lines.append(f"  {hostname}: {len(recent)} recently-used gap(s) ({recent_gb:.2f} GB), {len(other)} other gap(s)  ({src_n} on {source_host})")
+            for m in recent:
+                summary_lines.append(f"    !! USED ★ {m['filename']}  ({m['size_gb']:.2f} GB, [{m['category']}], last used {m['last_used']}, seen in {m['used_count']} output(s))")
+        summary_lines.append(f"  (other gaps -- no usage evidence within 90 days -- omitted here; see per-machine missing_models.csv)")
+
     if node_gaps:
         summary_lines.append("")
         summary_lines.append("CUSTOM NODE GAPS — TRAVEL READINESS")
@@ -3167,6 +3500,25 @@ def main():
             for n in other:
                 where = "disabled" if n["status"] == "disabled" else "not installed"
                 summary_lines.append(f"    ?? {n['name']}  ({where}, no usage evidence -- folder last touched {n['modified'] or '?'})")
+
+    if deletion_candidates:
+        summary_lines.append("")
+        summary_lines.append("MODEL DELETION CANDIDATES (dead weight, per host)")
+        summary_lines.append("-" * 60)
+        for hostname, cand in deletion_candidates.items():
+            unused, never_run = cand["unused"], cand["never_run"]
+            if not (unused or never_run):
+                continue
+            is_source = hostname == source_host
+            unused_gb = sum(m["size_gb"] for m in unused)
+            never_gb  = sum(m["size_gb"] for m in never_run)
+            action = "cleanup script MOVEs to C:\\models_unused" if is_source else "cleanup script DELETEs (re-syncable from ImageBeast)"
+            summary_lines.append(f"  {hostname}: {len(unused)} unused ({unused_gb:.2f} GB) + {len(never_run)} referenced-but-never-run ({never_gb:.2f} GB)  [{action}]")
+            for m in unused:
+                summary_lines.append(f"    -- unused: {m['filename']}  ({m['size_gb']:.2f} GB, [{m['category']}])")
+            for m in never_run:
+                summary_lines.append(f"    ?? never run: {m['filename']}  ({m['size_gb']:.2f} GB, [{m['category']}])")
+        summary_lines.append("  See cleanup_unused_<HOST>.bat in fleet-output/ to act on these.")
 
     if output_usage:
         summary_lines.append("")
