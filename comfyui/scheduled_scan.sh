@@ -39,8 +39,14 @@ echo "=== $(date) -- scheduled fleet scan starting ==="
 # had been dying at exactly this point, so the timestamped reports were being
 # written but *_latest.html was never refreshed, nothing was ever pruned, and
 # the local mirror the web server actually serves was never updated.
-latest_report=$(ls -t "$OUTPUT_DIR"/fleet_report_*.html 2>/dev/null | head -1) || true
-latest_explorer=$(ls -t "$OUTPUT_DIR"/fleet_explorer_*.html 2>/dev/null | head -1) || true
+# The [0-9] in the glob is also load-bearing: a bare fleet_report_*.html
+# matches fleet_report_latest.html itself, which -- having just been written --
+# is the newest file by mtime on the *next* run. That made `ls -t | head -1`
+# return latest.html, and `cp latest.html latest.html` fails with "are
+# identical (not copied)", exit 1, script dead. Only timestamped reports
+# (fleet_report_2026-...) should ever be copy sources.
+latest_report=$(ls -t "$OUTPUT_DIR"/fleet_report_[0-9]*.html 2>/dev/null | head -1) || true
+latest_explorer=$(ls -t "$OUTPUT_DIR"/fleet_explorer_[0-9]*.html 2>/dev/null | head -1) || true
 [ -n "$latest_report" ] && cp "$latest_report" "$OUTPUT_DIR/fleet_report_latest.html"
 [ -n "$latest_explorer" ] && cp "$latest_explorer" "$OUTPUT_DIR/fleet_explorer_latest.html"
 

@@ -65,7 +65,7 @@ default "recent" window (~3 months).
 ~/repos/scripts/comfyui/comfy_fleet.sh
 ```
 SSHes into all three machines over Tailscale, runs three PowerShell scan scripts on
-each, then runs the Mac-side analysis. **Budget 15–45 min** (sequential, 3 machines).
+each, then runs the Mac-side analysis. **Budget ~5–20 min** (sequential, 3 machines; 5 min observed 2026-09-04, ~20 min when output folders have grown).
 
 ```bash
 comfy_fleet.sh --local-only          # skip SSH scan, re-analyze already-synced CSVs (fast, ~30s)
