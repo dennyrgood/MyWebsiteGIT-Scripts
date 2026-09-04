@@ -24,16 +24,15 @@ MSMTP="/opt/homebrew/bin/msmtp"
 TO="dennyrgood@yahoo.com"
 HOST="denniss-2nd-macbook-air"
 MONITOR_STATE="/tmp/denniss-2nd-macbook-air-monitor-state.tmp"
-# 2026-09-04: was 600s (10 min), matched to mb2-health-monitor's 5-min run interval —
-# but that ignores mb2 being a laptop that sleeps overnight. StartInterval launchd jobs
-# don't fire (or catch up) while asleep, so a normal night's sleep alone pushed this past
-# 10 min every single morning (confirmed: 05:12->07:00 gap, box asleep, health-monitor
-# itself was fine — ran clean the instant it was manually kicked). This check only runs
-# once/day (07:00), so a tight threshold buys nothing anyway: it can't catch a same-day
-# failure before the next morning regardless of its value. Padded to ride out a full
-# overnight sleep (matches comfy-fleet-scan's stale-threshold reasoning in mb's version
-# of this script) while still catching a health-monitor that's been dead for a day+.
-MONITOR_STALE_SECS=43200   # 12h
+# 2026-09-04: briefly padded to 43200s (12h) after mb2 slept overnight (05:12->07:00 gap;
+# StartInterval launchd jobs don't fire/catch up while asleep) and falsely flagged
+# mb-health-monitor as stale — it was fine, ran clean the instant it was kicked. Root
+# cause fixed at the source instead: mb2 is now `sudo pmset -a sleep 0 standby 0
+# powernap 0`'d (always on AC, lid never closed), so it shouldn't sleep at all going
+# forward. Reverted to a tight-ish threshold so this check is actually useful again for
+# catching a same-day health-monitor failure — padded a bit past the 5-min run interval
+# to absorb ordinary scheduling jitter, not to ride out sleep.
+MONITOR_STALE_SECS=1800   # 30 min (6x the 5-min run interval)
 
 OK=1
 REASON="all healthy"
