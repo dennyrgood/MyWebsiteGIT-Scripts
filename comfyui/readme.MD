@@ -10,6 +10,15 @@ report, an interactive explorer, and ready-to-run `.bat` scripts.
 
 ---
 
+> **✅ 2026-09-04 — the review's findings are fixed.** The full review is in
+> **`report_deep_dive.MD`**; the plan and what was done is in **`action_plan.MD`**.
+> Fixed the same day: the `cleanup_*.bat` false positives (background-loaded models are
+> now a separate, never-scripted tier), the quarantine filename collision (paths are
+> mirrored now), the Readiness denominator (counts prime workflows, not PNG outputs),
+> the two fatal bugs that stopped the daily scan from ever completing, and the
+> installed-but-not-loading node blind spot. One change of direction: the prime set is
+> now **root-level `workflows/*.json`**, not `000 Starting Images` — see below.
+
 ## Goals
 
 These are the reasons this project exists — read them before changing anything, since
@@ -137,11 +146,24 @@ Parsed by `MACHINE_TAG_RE`; `(i)` normalizes to `ib`. The `(i)` tag is load-bear
 models referenced *only* by `(i)` workflows are deliberately excluded from "copy to
 Travel/Chat" gap lists.
 
-### `000 Starting Images`
+### The prime set: root-level `workflows/*.json`
+The fleet's **special group** — what travel-readiness is measured against — is every
+`.json` sitting *directly* in `workflows\`, no subfolder. That deliberately keeps
+`999 TRY THIS - foo.json` (a root file) and drops the whole `999 Other\` experiments
+subtree (a folder). 124 files today, 70 excluding `(i)`-tagged. Same predicate the
+Explorer's "Root Only" filter already used; implemented as `is_prime_row()`.
+
+> **Changed 2026-09-04 — this used to be `000 Starting Images`.** That set scored 100%
+> on Travel/Chat precisely because it was *curated to*: it measured "did I remember to
+> prepare the demo PNGs," not "can this machine run my work." Root-level templates are
+> ~2× the size and immediately surfaced **11 genuinely broken workflows** the 100% was
+> hiding — Outpaint, Remove Background, both OneNode FaceSwap/Merge, and more.
+
+### `000 Starting Images` (secondary)
 `workflows/000 Starting Images/` holds curated PNGs with embedded workflows — one per
-prime `tb` workflow. Drag onto the ComfyUI canvas to load. These are the **definitive
-travel-readiness check**: if every model referenced by these PNGs is present on
-TravelBeast, it can run the set.
+prime `tb` workflow. Drag onto the ComfyUI canvas to load. Still scanned, still real
+output evidence (`OUTPUT_EVIDENCE_SOURCES`), still reported — as a **secondary check**.
+Demoted from headline, not removed.
 
 ---
 
@@ -175,7 +197,7 @@ TravelBeast, it can run the set.
       │                        │                                           │
       ├─► copy to *_latest.html                                            │
       ├─► prune to newest 3 runs                                           │
-      └─► rsync ──► fleet-output-local/ ──► http.server :5050 ─────────────┘
+      └─► python3 mirror ─► fleet-output-local/ ─► http.server :5050 ──────┘
 ```
 
 **Why the local mirror exists:** the HTTP server used to serve OneDrive's live
@@ -189,11 +211,46 @@ that's how results reach the Mac. Expect a lag of seconds-to-minutes after a sca
 before the CSVs appear locally. (OneDrive is otherwise being retired fleet-wide; this
 and ComfyUI workflow/image sharing are its last jobs.)
 
+### ⚠ The launchd agent has no shell access to the OneDrive folder (macOS TCC)
+
+**Read this before touching `scheduled_scan.sh`.** Probed directly on 2026-09-04 from a
+real launchd-launched process, against `comfy-reports/fleet-output/`:
+
+```
+ls   : DENIED          cp  : DENIED
+cmp  : DENIED          rsync: DENIED   ("Operation not permitted")
+/opt/homebrew/bin/python3 : OK
+```
+
+macOS grants Full Disk Access **per binary**. The Homebrew `python3` has it; the system
+shell utilities do not. **This is invisible to every manual test**, because a Terminal
+shell inherits Terminal's own grant — run the exact same line by hand and it works.
+
+Consequences, all confirmed the hard way:
+
+- The daily agent had **never once completed** — 10 runs, 0 successes, no error in the
+  log. Every "current" report had actually come from a manual run.
+- Three bugs stacked here, each masking the next: (1) `ls -t … | head -1` under
+  `set -euo pipefail` died of SIGPIPE; (2) the bare glob matched
+  `fleet_report_latest.html` itself, so `cp X X` failed; (3) underneath both, `ls`/`cp`/
+  `cmp`/`rsync` were being denied the whole time. "Fixing" (1) with `|| true` made it
+  *worse* — the failing `ls` returned an empty variable, so the guarded `cp` silently
+  never ran and the staleness looked like success.
+
+**Rule: any step that touches `$OUTPUT_DIR` from the agent must run inside
+`/opt/homebrew/bin/python3`.** The post-scan block (publish `_latest`, mirror, verify)
+is one python heredoc for exactly this reason. Don't "simplify" it back to shell
+utilities — it will appear to work when you test it and silently do nothing at 05:00.
+
+An `ERR` trap reports the failing line number, and the housekeeping verifies the served
+file byte-for-byte rather than trusting an exit code. Both exist because absence of an
+error here was never evidence of success.
+
 ### Scheduling & serving
 
 | Agent | What |
 |---|---|
-| `com.dennis.comfy-fleet-scan` | Daily 05:00, runs `scheduled_scan.sh`. `ProcessType Interactive` (avoids launchd throttling network I/O). Log: `~/Library/Logs/comfy_fleet_scan.log` |
+| `com.dennis.comfy-fleet-scan` | Daily 05:00, runs `scheduled_scan.sh`. `ProcessType Interactive` (avoids launchd throttling network I/O). Log: `~/Library/Logs/comfy_fleet_scan.log`. Verify with `grep 'scan complete'` — see the TCC warning above |
 | `com.dennis.comfy-fleet-http` | `python3 -m http.server 5050 --bind 0.0.0.0`, `WorkingDirectory` = `fleet-output-local/`. `KeepAlive`. Log: `~/Library/Logs/comfy_fleet_http.log` |
 
 Installed via `~/repos/scripts/launchagents/install.sh` (host-aware — matches on
@@ -210,6 +267,26 @@ grep "scan complete" ~/Library/Logs/comfy_fleet_scan.log | tail -3
 > refreshed, nothing was pruned, and the served mirror went stale. Fixed with `|| true`
 > on those two assignments. **If you touch `scheduled_scan.sh`, check for the
 > "scan complete" line afterward** — absence of an error is not evidence of success.
+>
+> **Second bug, same eight lines, same day:** a bare `fleet_report_*.html` glob also
+> matches `fleet_report_latest.html` itself, which — having just been written — is the
+> newest file by mtime on the *next* run. `ls -t | head -1` then returns `latest.html`,
+> `cp latest.html latest.html` fails with "are identical (not copied)", exit 1, script
+> dead. Fixed by narrowing the glob to `fleet_report_[0-9]*.html`; only timestamped
+> reports should ever be copy sources.
+>
+> **Neither fix has yet survived a real scheduled run.** As of 2026-09-04 the log holds
+> 7 `scan starting` lines (Aug 29 – Sep 4) and **0** `scan complete` lines, and
+> `launchctl list | grep comfy` reports last exit status **1** for
+> `com.dennis.comfy-fleet-scan`. Every timestamped report and every `*_latest.html` to
+> date came from a manual run. Verify after the next 05:00 firing before trusting
+> anything downstream of it.
+>
+> Structurally, the problem is that `set -e` truncates the run *silently*. Two fatal
+> bugs in eight lines of housekeeping, the first hidden for a week, argues for a
+> `trap 'echo "FAILED at line $LINENO"' ERR` and a staleness check on the "scan
+> complete" line in `mb-health-monitor.sh` (which already watches this project's HTTP
+> server) rather than relying on remembering to grep.
 
 ---
 
@@ -280,8 +357,25 @@ lookup.
 
 **`<HOST>-WorkflowMap-<TS>-unused_models.csv`** — models on disk that **no workflow of
 any kind references**, including outputs. `filename, category, full_path,
-relative_path, size_gb`. *Why:* the strongest deletion signal available — nothing has
-ever pointed at this file. Feeds the cleanup scripts' first tier.
+relative_path, size_gb`. *Why:* the strongest *graph-reference* signal available —
+nothing in any workflow graph has ever named this file. Feeds the cleanup scripts'
+first tier.
+
+> **Fixed 2026-09-04 — was NOT safe to run as-is.** "Unused" here means *no workflow
+> graph names the file*, and a background-loaded model can never satisfy that test by
+> construction — it has no filename widget, which is exactly why
+> `Get-WorkflowModelMap.ps1` deliberately keeps its synthetic marker out of
+> `allModelRefs`. That consequence hadn't been followed through to the deletion side, so
+> **every background-loaded model was guaranteed to land on the delete list** —
+> `pulid_flux_v0.9.1.safetensors` (19 real outputs), `open_clip_*` (19),
+> `ip-adapter-faceid-plusv2_sdxl.bin` (30), all 8 `vae_approx/taesd*` (ComfyUI's own
+> live previewer). On the replicas, 17 of 19 entries were background-loaded — and that
+> script is a straight `del`.
+>
+> Now: `PROTECTED_CATEGORIES` (plus any category a `[background-model:X]` marker with
+> real output evidence implicates) diverts these into an **`unverifiable` tier** that is
+> listed in the report and emitted **commented-out** in the `.bat`, never as live
+> commands. Replica delete lists dropped 20 → 3.
 
 **`<HOST>-WorkflowMap-<TS>-missing_models.csv`** — referenced but not on disk:
 `model_ref, workflow_file, node_label`. *Why:* per-machine gap detail with the
@@ -311,8 +405,9 @@ current.
 | `custom_nodes_<TS>.txt` | Node matrix, `Y` = enabled / `D` = installed-but-disabled / blank = absent. |
 | `sync_ModelsBase_MIN.bat` | **Copy** to Models_bare: models ≤8GB (safe for 8GB VRAM). |
 | `sync_ModelsBase_MAYBE.bat` | **Copy**: 8–12GB, marginal — test before trusting. |
-| `cleanup_unused_IMAGEBEAST.bat` | **Move** deletion candidates to `C:\models_unused` (quarantine — IB's copy is the only one). |
-| `cleanup_unused_CHATWORKHORSE.bat` / `..._TRAVELBEAST.bat` | **Delete** outright — replicas, re-syncable from IB. |
+| `cleanup_unused_IMAGEBEAST.bat` | **Move** to `C:\models_unused\<category>\<subfolder>\` — quarantine with the source path mirrored, since IB's copy is the only one. |
+| `cleanup_unused_ModelsBase.bat` | **Delete** outright — **one** script covering CHATWORKHORSE **+** TRAVELBEAST, which share the folder. Run once, on either. |
+| `cleanup_unused_<REPLICA>.bat` | Superseded no-op stubs, regenerated to point at the ModelsBase script. |
 | `fix_subdir_structure.bat` | Robocopy models sitting at wrong relative paths vs IB. |
 | `subdir_mismatches_<TS>.txt` | Detail for the above. |
 | `history/snapshot-*.json` | Per-run snapshot, used for drift detection ("what changed since last run"). |
@@ -321,6 +416,24 @@ current.
 > target machine and run there. `robocopy` always uses `/COPY:DAT`, never `/COPYALL`
 > (which needs audit privileges even admins lack by default).
 
+**Both `cleanup_*.bat` generator defects found on 2026-09-04 are fixed:**
+
+1. **The candidate list is now filtered.** Background-loaded models go to a separate
+   `unverifiable` tier, emitted commented-out — see the `unused_models.csv` note above.
+2. **Quarantine mirrors the source path.** It used to move everything into a *flat*
+   `%QUARANTINE%`, where 4 basenames collided among the 61 `move` lines (the JoyCaption
+   `model-0000N-of-00004.safetensors` shards from `alpha-two` and `beta-one`). `move`
+   onto an existing file either prompts — hanging a double-clicked `.bat` — or
+   overwrites, defeating the entire point of quarantining instead of deleting. Now
+   `%QUARANTINE%\<category>\<subfolder>\`, `mkdir`'d first, so a restore is a copy-back
+   rather than a guess.
+3. **One script per shared folder.** CHATWORKHORSE and TRAVELBEAST resolve different
+   user paths to the same OneDrive `Models_bare`, so the two per-machine scripts held
+   identical filename sets and must never both have been run. They're now a single
+   `cleanup_unused_ModelsBase.bat`; the old per-machine names regenerate as no-op stubs
+   pointing at it.
+
+
 ---
 
 ## HTML Report Sections
@@ -328,18 +441,55 @@ current.
 | Section | What it answers |
 |---|---|
 | **Next Actions** | Prioritized to-do, including stale-scan warnings (>3 days). |
-| **Travel / Workflow Readiness** | % of current-year workflows runnable per machine. |
-| **Starting Images — Travel Readiness** | Per-PNG readiness for the curated `tb` prime set. The definitive travel check. |
+| **Travel / Workflow Readiness** | % of **prime** (root-level) workflows runnable per machine. Denominator fixed 2026-09-04. |
+| **Prime Workflows — Travel Readiness** | **The headline.** Blocked workflows, and the missing models ordered by how many each unblocks. |
+| **Starting Images — Secondary Check** | Per-PNG readiness for the curated set. Demoted from headline 2026-09-04 — it scored 100% because it was curated to. |
 | **Model Gaps — Travel Readiness (Recently Used)** | **Models with real output evidence in the last 90 days that are missing here.** Evidence-based; the list to act on before a trip. |
 | **Custom Node Gaps — Travel Readiness** | Same, for node packages. Shows per-machine `object_info` freshness. |
 | **Model Gaps (VRAM-Sorted Sync Lists)** | The same gaps bucketed OK / MAYBE / BIG against each machine's VRAM — because "missing" ≠ "would actually run." Drives `sync_*.bat`. |
-| **Model Deletion Candidates** | Per host, two tiers: *unused* (zero references anywhere) and *referenced but never run*. Drives `cleanup_*.bat`. |
+| **Model Deletion Candidates** | Per host, **three** tiers: *unused*, *referenced but never run*, and *cannot be verified* (background-loaded — listed, never scripted). Drives `cleanup_*.bat`. |
 | **Subdir Structure Mismatches** | Models at wrong relative paths vs IB's structure. |
 | **Model Drift (vs Last Run)** | Added/removed since the previous snapshot. |
 | **Current Year Workflow Coverage** | Per machine: confirmed / missing-evidenced / likely-renamed / unconfirmed. |
 | **Model Usage — By Actual Output** | Recent (90d) / no output this year / stale, split by "used earlier, gone quiet" vs "never seen." |
-| *Unused Models on ImageBeast* (collapsed) | Raw unused list. |
+| *Unused Models on ImageBeast* (collapsed) | Raw `unused_models.csv` view, split into *genuinely unreferenced* vs *background-loaded / cannot be verified* — the headline "reclaimable" figure counts only the former (fixed 2026-09-04; it used to claim all 48 / 55.99 GB). Shows the relative path, since generic shard names repeat across model folders. |
 | *Custom Nodes — Fleet Matrix* (collapsed) | Full per-node × per-machine grid. |
+
+### The Readiness percentage: fixed, and re-pointed at the prime set (2026-09-04)
+
+`compute_readiness()` used to build its workflow set from **every** `full_map` row in
+the filter year. It correctly dropped `(ib)`-tagged files and `on_disk = N/A` background
+rows, but — unlike `build_workflow_model_data()` 120 lines above it, which filters on
+`source` and explains why — it never excluded `png-outputs`. Since all three machines'
+`png_dir` is the same OneDrive-synced output folder, **Chat and Travel were being scored
+on every image ImageBeast had ever generated.** It answered "could Travel reproduce
+ImageBeast's back catalogue," not "can Travel run its workflows."
+
+CHATWORKHORSE's old 2026 denominator, decomposed:
+
+```
+workflows        123   <- actual JSON templates
+workflows-png     58
+starting_images   38
+png-outputs      739   <- 80% of the total
+                 ---
+total distinct   920
+```
+
+Now it counts the **prime set** (root-level templates) only, and the headline moved with
+it:
+
+| Machine | Old (all sources) | Now (prime set) |
+|---|---|---|
+| IMAGEBEAST | 95% (934/983) | **91%** (106/117) |
+| CHATWORKHORSE | 45% (410/920) | **84%** (59/70) |
+| TRAVELBEAST | 45% (410/920) | **84%** (59/70) |
+
+The old 45% also carried a Next Actions line rationalising it away — *"expected for
+lower-VRAM machine"* — which trained you to ignore the one field on the report labelled
+"readiness." That excuse is gone; a low prime score is now a real, actionable gap, and
+the Prime Workflows section names the blocked workflows and orders the missing models by
+how many each unblocks.
 
 ### Two distinctions the report leans on constantly
 
@@ -407,8 +557,9 @@ reintroduce a hand-maintained list.
 | `remote_scan.sh` | SSHes each machine, runs the three `.ps1` scanners |
 | `comfy_fleet.py` | **All analysis + report/explorer/script generation** (~3k lines) |
 | `scheduled_scan.sh` | launchd wrapper: scan → latest copies → prune → mirror |
-| `fleet-output-local/` | Local mirror served on :5050 (rsync target; don't edit) |
+| `fleet-output-local/` | Local mirror served on :5050 (written by the scan's python3 mirror step; don't edit) |
 | `fleet_config_reference.md` | Config field reference |
+| `report_deep_dive.MD` | 2026-09-04 review: 7 findings + recommended order of work |
 | `audit_tb_c_pairs.py` | One-off: compare `(tb)`/`(c)` workflow pairs |
 
 ### Each Windows machine — `C:\repos\scripts\comfyui\`
@@ -448,21 +599,71 @@ so a raw `scp` creates uncommitted local drift there.
   filename-keyed dicts. Row-level data (`unused_models.csv`) has correct per-row paths —
   use those when generating file operations, don't re-look-up by filename.
 - Background-model rows must be excluded from disk/coverage math (they have no file).
+  **But excluding them from the evidence set does not make the models they load
+  unused** — that inversion is the 2026-09-04 deletion-list defect. A background-loaded
+  model is *unverifiable by graph reference*, never *proven unused*.
+- Filename-collapse cuts both ways: the *lookup* side was fixed 2026-09-02, but the
+  quarantine *destination* is still flat, so duplicate basenames overwrite each other.
+- A partial scan degrades silently. `load_all_machines()` skips a machine only when
+  **no** file of any type was found; a machine with a `Models` CSV but a missing
+  `full_map` proceeds with an empty `full_map`, which reads downstream as "this machine
+  references nothing" — i.e. its entire disk becomes deletion candidates. The per-key
+  `WARNING: No <key> file found` is printed but never escalated. A missing `full_map`
+  should be fatal for that machine.
 - `clip`/`text_encoders` and `diffusion_models`/`unet` are interchangeable for their
   loaders; **`unet` vs `checkpoints` is not.**
 - Starting Images PNGs with no model refs (resize / bg-removal) are correctly skipped in
   coverage — they run regardless.
 
+**Config lives in three places, with no cross-checking**
+Fleet topology is declared three times; adding a machine means editing all three.
+1. `fleet_config.json` — Mac-side analysis (VRAM, roots, tailscale hosts).
+2. `remote_scan.sh` `case` block — the Windows-side paths, hardcoded. Miss this and the
+   machine is never scanned. These duplicate `models_root` / `models_bare` / `png_dir` /
+   `comfy_root`, all of which already exist in #1.
+3. `comfy_fleet.py` prune regex — `^(IMAGEBEAST|CHATWORKHORSE|TRAVELBEAST)-…`. Miss this
+   and the new machine's scan inputs accumulate forever, with no error.
+
+Low-effort fix: have `remote_scan.sh` read the roots out of `fleet_config.json`, and
+derive the prune regex from `config["machines"].keys()`.
+
 **Python**
-- Use `/opt/homebrew/bin/python3` (3.10+ required for `str | None`).
+- Use `/opt/homebrew/bin/python3` (3.10+ required for `str | None`). Pinned in
+  `comfy_fleet.sh` and `scheduled_scan.sh` — but **`remote_scan.sh` still calls bare
+  `python3`** in its own analysis branch. Latent, not currently broken: that branch only
+  fires when `remote_scan.sh` is run *without* `--no-analyze`, which the normal path
+  never does.
 - `STALE_OUTPUT_DAYS` as a default arg is evaluated at def-time — keep constants defined
   above any function that defaults to them, or use a literal.
+- `find_latest()` sorts glob matches lexicographically. Correct *only* because the
+  PowerShell timestamp format is `yyyy-MM-dd_HHmm`; changing that format would silently
+  select the wrong file rather than error.
+- `comfy_fleet.py:2928` emits a `SyntaxWarning` — `\(` in a non-raw f-string. Cosmetic
+  today, an error in a future Python.
 
 ---
 
 ## Where to Pick Up
 
-Ideas discussed and deliberately **not** built:
+### Installed-but-not-loading detection (added 2026-09-04)
+
+A package can sit in `custom_nodes/` and still register nothing — a failed import from a
+missing dependency, a version mismatch, a bad update. Folder presence alone used to be
+reported as green, which hid three broken packages on TravelBeast:
+`comfyui-nunchaku`, **`comfyui-rmbg`** (a background-model family with 50 recorded output
+uses) and **`seedvr2_videoupscaler`** (the consumer of the SEEDVR2 models the sync script
+was about to copy there). Exactly the "what breaks on the plane" failure this project
+exists to catch.
+
+`node_status()` now cross-references folder presence against that machine's live
+`object_info` and returns a fourth state, `installed-not-loaded` — rendered `X` in the
+text matrix, dark red in the report and Explorer, and raised as a **high**-priority Next
+Action. `comfyui-manager` is exempt (it registers no nodes by design). If a machine's
+`object_info` is unavailable *and* uncached, the check falls back to presence-only rather
+than reporting a false negative.
+
+
+### Ideas discussed and deliberately **not** built
 
 - **Git commit-hash tracking per node package** — repeatedly deferred. Fragile (not all
   installs are clones), high maintenance, and usage evidence answers "is this stale"
@@ -474,7 +675,13 @@ Ideas discussed and deliberately **not** built:
   many-to-many aggregate.
 - **`CreationTime` on node folders** — distinguish "just installed" from "installed long
   ago, recently updated." Cheap; not done.
-- **Installed-vs-loaded node cross-reference** — a package present in `custom_nodes/` but
-  absent from that machine's `object_info` either failed to import or registers nothing.
-  Both signals are already collected; nothing compares them yet. Would catch broken
-  installs that currently look fine.
+*(The installed-vs-loaded cross-reference used to be listed here as a deferred
+nice-to-have. It stopped being hypothetical on 2026-09-04 — it was already failing on
+TravelBeast — and is now **built**. See "Installed-but-not-loading detection" above.)*
+
+**Still open, from the 2026-09-04 review:**
+- **`remote_scan.sh` still hardcodes the Windows-side paths** that `fleet_config.json`
+  already carries. Deliberate: that script's `ssh` + PowerShell quoting is fragile (see
+  the one-line `-Command` rule) and it is the single path that captures all fleet data,
+  so it was not worth rewriting for tidiness. The *silent* half of the duplication is
+  handled — it now warns loudly if a machine in the config has no `case` entry.

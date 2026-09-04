@@ -33,6 +33,31 @@ if [ ${#HOSTS[@]} -eq 0 ]; then
   HOSTS=(imagebeast chatworkhorse travelbeast)
 fi
 
+# --- Topology cross-check against fleet_config.json ---------------------------
+# The Windows-side paths below duplicate fields that already exist in
+# fleet_config.json (comfy_root / models_root|models_bare / png_dir). They are
+# NOT read from it deliberately: this script's ssh+PowerShell invocation is
+# quoting-sensitive (see the one-line -Command rule in readme.MD), and rewriting
+# it to interpolate config values is a real risk to the one path that captures
+# all fleet data.
+#
+# What IS worth catching is the silent half of that duplication: adding a
+# machine to fleet_config.json and forgetting to add a case entry here, so it
+# never gets scanned and nothing ever says so. This check makes that loud.
+CONFIG_JSON="$HOME/OneDrive/DropBoxReplacement/MathesDropBox/0ComfyUI/Work/comfy-reports/fleet_config.json"
+if [ -f "$CONFIG_JSON" ]; then
+  for cfg_host in $(/opt/homebrew/bin/python3 -c '
+import json,sys
+c=json.load(open(sys.argv[1]))
+print(" ".join(m.get("tailscale_host", h.lower()) for h,m in c.get("machines",{}).items()))
+' "$CONFIG_JSON" 2>/dev/null); do
+    if ! grep -qE "^[[:space:]]*${cfg_host}\)" "$0"; then
+      echo "WARNING: '${cfg_host}' is in fleet_config.json but has no case entry in $(basename "$0") --" >&2
+      echo "         it will never be scanned, and its inputs will never appear in the reports." >&2
+    fi
+  done
+fi
+
 scan_host() {
   local host="$1"
   local comfy scripts models wfdir pngdir primedir output
@@ -90,5 +115,5 @@ if [ "$NO_ANALYZE" = false ]; then
   # Call comfy_fleet.py directly (not comfy_fleet.sh) -- comfy_fleet.sh calls
   # this script by default, and going back through it here would loop.
   REPORTS_DIR="$HOME/OneDrive/DropBoxReplacement/MathesDropBox/0ComfyUI/Work/comfy-reports"
-  ( cd "$REPORTS_DIR" && python3 "$SCRIPT_DIR/comfy_fleet.py" )
+  ( cd "$REPORTS_DIR" && /opt/homebrew/bin/python3 "$SCRIPT_DIR/comfy_fleet.py" )
 fi

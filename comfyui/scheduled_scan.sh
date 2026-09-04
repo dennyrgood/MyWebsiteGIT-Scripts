@@ -25,46 +25,101 @@ OUTPUT_DIR="$REPORTS_DIR/fleet-output"
 # of every scan below -- same-day fresh, but immune to OneDrive's sync churn.
 LOCAL_OUTPUT_DIR="$SCRIPT_DIR/fleet-output-local"
 
+# Two fatal bugs hid in this file's eight lines of housekeeping (2026-09-04),
+# and the first one went unnoticed for a week: `set -e` kills the script
+# silently, so a truncated run looks exactly like a successful one in the log.
+# Never again -- announce the line number and exit code on any unexpected death.
+trap 'rc=$?; echo "*** FAILED: ${BASH_SOURCE[0]} line $LINENO exited $rc ***" >&2' ERR
+
 echo "=== $(date) -- scheduled fleet scan starting ==="
 
 "$SCRIPT_DIR/comfy_fleet.sh"
 
-# Stable-named copies of the newest report + explorer, so a bookmark/tile
-# always points at something current without picking a timestamp.
-# NOTE: the `|| true` on these two is load-bearing. Under `set -euo pipefail`,
-# `ls | head -1` makes ls die of SIGPIPE once head has its one line, pipefail
-# turns that into a failed pipeline, and set -e kills the whole script --
-# silently, right here, with the log ending mid-run at comfy_fleet.py's last
-# line. Found 2026-09-04: every scheduled run since this wrapper was installed
-# had been dying at exactly this point, so the timestamped reports were being
-# written but *_latest.html was never refreshed, nothing was ever pruned, and
-# the local mirror the web server actually serves was never updated.
-# The [0-9] in the glob is also load-bearing: a bare fleet_report_*.html
-# matches fleet_report_latest.html itself, which -- having just been written --
-# is the newest file by mtime on the *next* run. That made `ls -t | head -1`
-# return latest.html, and `cp latest.html latest.html` fails with "are
-# identical (not copied)", exit 1, script dead. Only timestamped reports
-# (fleet_report_2026-...) should ever be copy sources.
-latest_report=$(ls -t "$OUTPUT_DIR"/fleet_report_[0-9]*.html 2>/dev/null | head -1) || true
-latest_explorer=$(ls -t "$OUTPUT_DIR"/fleet_explorer_[0-9]*.html 2>/dev/null | head -1) || true
-[ -n "$latest_report" ] && cp "$latest_report" "$OUTPUT_DIR/fleet_report_latest.html"
-[ -n "$latest_explorer" ] && cp "$latest_explorer" "$OUTPUT_DIR/fleet_explorer_latest.html"
-
 # Keep the last 3 runs' worth of timestamped files (inputs, fleet-output,
-# history) -- same retention already used interactively this session.
-# 2026-08-30: pinned to the Homebrew interpreter explicitly -- under launchd's
-# minimal PATH, bare `python3` resolves to Apple's system Python (/usr/bin/python3,
-# 3.9.6), which predates PEP 604's `str | None` syntax (added in 3.10) that
-# comfy_fleet.py's own type hints use. Ran fine interactively (Homebrew's 3.14.7
-# is first on an interactive shell's PATH) but crashed every night under launchd
-# with "TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'".
-/opt/homebrew/bin/python3 "$SCRIPT_DIR/comfy_fleet.py" --config "$REPORTS_DIR/fleet_config.json" --prune-output --confirm-prune --keep-runs 3
+# history). Runs BEFORE the latest/mirror step below so the published copies
+# and the mirror reflect the same retention window -- prune always keeps the
+# newest run, so the report just generated is never the one pruned.
+# Pinned to the Homebrew interpreter: under launchd's minimal PATH a bare
+# `python3` resolves to Apple's 3.9.6, which predates the PEP 604 `str | None`
+# hints this file uses (and, per the TCC note below, lacks the Full Disk Access
+# the Homebrew build has).
+/opt/homebrew/bin/python3 "$SCRIPT_DIR/comfy_fleet.py" --config "$REPORTS_DIR/fleet_config.json" \
+    --prune-output --confirm-prune --keep-runs 3
 
-# Mirror the (now-pruned) output out of OneDrive to the plain local dir
-# comfy-fleet-http actually serves. --delete so removed/pruned files don't
-# linger in the local copy; run after pruning so the mirror reflects the same
-# retention window as $OUTPUT_DIR itself.
-mkdir -p "$LOCAL_OUTPUT_DIR"
-rsync -a --delete "$OUTPUT_DIR/" "$LOCAL_OUTPUT_DIR/"
+# --- Post-scan housekeeping: ALL of it in python3, deliberately -----------------
+# Under launchd this agent has NO shell-level access to the OneDrive
+# CloudStorage folder. Probed directly 2026-09-04 from a launchd-launched
+# process:
+#     ls  : DENIED      cp : DENIED      cmp : DENIED
+#     /opt/homebrew/bin/python3 : OK (23 entries)
+# That is macOS TCC granting Full Disk Access per-binary; python3 has it,
+# the system shell utilities do not. It works interactively because a Terminal
+# shell inherits Terminal's own grant.
+#
+# This is why three separate bugs hid here for weeks, each masking the next:
+#   1. `ls -t ... | head -1` under `set -euo pipefail` -> SIGPIPE killed the run
+#      before anything else could be reached.
+#   2. the bare glob matched fleet_report_latest.html itself -> `cp X X` failed.
+#   3. and underneath both: ls/cp/cmp/rsync were being DENIED the whole time,
+#      so even "fixed" the copies silently did nothing -- `|| true` turned the
+#      failure into an empty variable and the guarded `cp` just never ran,
+#      leaving fleet_report_latest.html and the served mirror permanently stale.
+# Doing the work in the one binary that actually has access removes the class
+# of problem rather than patching each symptom.
+/opt/homebrew/bin/python3 - "$OUTPUT_DIR" "$LOCAL_OUTPUT_DIR" <<'HOUSEKEEP_PY'
+import filecmp, os, re, shutil, sys
+
+out_dir, local_dir = sys.argv[1], sys.argv[2]
+os.makedirs(local_dir, exist_ok=True)
+TS = re.compile(r"^fleet_(report|explorer)_\d{4}-\d{2}-\d{2}_\d{4}\.html$")
+
+# 1. Stable "latest" copies, so a bookmark/tile always resolves to something
+#    current. Only timestamped files are ever copy SOURCES -- matching
+#    fleet_*_latest.html here is what made the old `cp X X` fail.
+newest = {}
+for name in os.listdir(out_dir):
+    m = TS.match(name)
+    if m:
+        kind = m.group(1)
+        if name > newest.get(kind, ""):      # yyyy-mm-dd_HHmm sorts chronologically
+            newest[kind] = name
+for kind, name in sorted(newest.items()):
+    dst = os.path.join(out_dir, f"fleet_{kind}_latest.html")
+    shutil.copy2(os.path.join(out_dir, name), dst)
+    print(f"latest: fleet_{kind}_latest.html <- {name}")
+if not newest:
+    print("ERROR: no timestamped report/explorer found to publish", file=sys.stderr)
+    sys.exit(1)
+
+# 2. Mirror to the plain local dir the web server serves (OneDrive never
+#    touches that one -- see the 2026-08-31 note on the http agent).
+copied = removed = 0
+src_names = set()
+for name in os.listdir(out_dir):
+    sp = os.path.join(out_dir, name)
+    if not os.path.isfile(sp):
+        continue
+    src_names.add(name)
+    dp = os.path.join(local_dir, name)
+    if not os.path.exists(dp) or not filecmp.cmp(sp, dp, shallow=False):
+        shutil.copy2(sp, dp)
+        copied += 1
+for name in os.listdir(local_dir):                       # --delete equivalent
+    dp = os.path.join(local_dir, name)
+    if os.path.isfile(dp) and name not in src_names:
+        os.remove(dp)
+        removed += 1
+print(f"mirror: {copied} copied, {removed} removed, {len(src_names)} in sync")
+
+# 3. Verify the outcome instead of trusting any exit code -- the served report
+#    must actually be the one just generated.
+for kind in newest:
+    a = os.path.join(out_dir,   f"fleet_{kind}_latest.html")
+    b = os.path.join(local_dir, f"fleet_{kind}_latest.html")
+    if not (os.path.exists(b) and filecmp.cmp(a, b, shallow=False)):
+        print(f"ERROR: served fleet_{kind}_latest.html does not match source", file=sys.stderr)
+        sys.exit(1)
+print("verified: served copies match the current run")
+HOUSEKEEP_PY
 
 echo "=== $(date) -- scheduled fleet scan complete ==="

@@ -65,11 +65,23 @@ SEARCH_SHOWS_PROC_PATTERN="search_shows_web.py"
 SEARCH_SHOWS_URL="http://127.0.0.1:5020/"
 TMDB_PROC_PATTERN="tmdb_explorer.py"
 TMDB_URL="http://127.0.0.1:5035/"
+# comfy-fleet-scan is a daily launchd job, not a service -- there is no process
+# to find and no port to probe, so like HEARTBEAT_WRITER its health is purely a
+# freshness question. It earns a check because it failed silently for a week
+# (2026-09-04: 7 scheduled runs, 0 completions -- `set -e` truncating the script
+# left a log that ended mid-run and looked exactly like success). The readme's
+# own rule, "absence of an error is not evidence of success", is what this
+# enforces. 36h threshold: daily job, so one missed run is a real failure while
+# still tolerating a late/slow run.
+COMFY_SCAN_LOG="$HOME/Library/Logs/comfy_fleet_scan.log"
+COMFY_SCAN_STALE_SECS=$((36 * 3600))
+COMFY_SCAN_PROC_PATTERN=""     # no long-lived process -- freshness check only
+
 TRAVEL_HTTP_PROC_PATTERN="http.server 5030"
 TRAVEL_HTTP_URL="http://127.0.0.1:5030/"
 
 # --- Load state (defaults to zero/inactive if file absent) ---
-for svc in COMFY_HTTP METRICS_SERVER HEARTBEAT_WRITER SEARCH_ADV SEARCH_SHOWS TMDB TRAVEL_HTTP; do
+for svc in COMFY_HTTP COMFY_SCAN METRICS_SERVER HEARTBEAT_WRITER SEARCH_ADV SEARCH_SHOWS TMDB TRAVEL_HTTP; do
     eval "MISSING_${svc}_LAST_ALERT=0; MISSING_${svc}_ACTIVE=0; MISSING_${svc}_STREAK=0"
     eval "DOWN_${svc}_LAST_ALERT=0;    DOWN_${svc}_ACTIVE=0;    DOWN_${svc}_STREAK=0"
 done
@@ -78,6 +90,10 @@ done
 
 # --- Check: all services (process presence, then HTTP health if present) ---
 declare -A MISSING_TRIGGERED DOWN_TRIGGERED
+# COMFY_SCAN has no process/endpoint; its state comes from the freshness check
+# further down, so seed it as present-and-up here.
+MISSING_TRIGGERED[COMFY_SCAN]=0
+DOWN_TRIGGERED[COMFY_SCAN]=0
 check_service() {
     local svc=$1 pattern=$2 url=$3
     if ! pgrep -f "$pattern" >/dev/null 2>&1; then
@@ -157,6 +173,54 @@ if [ "${MISSING_TRIGGERED[HEARTBEAT_WRITER]}" -eq 0 ]; then
     fi
 fi
 
+# --- Check: comfy-fleet-scan actually COMPLETED recently ---
+# Keyed on the *completion* marker, not the log's mtime and not "scan starting":
+# the failure this exists to catch (2026-09-04) wrote a perfectly fresh log full
+# of successful-looking output and simply never reached the end.
+#
+# Distinguishes the two failure shapes, because they need different messages:
+#   a) a run STARTED and never completed  -> that run died. Real, actionable.
+#   b) no run has started in >36h         -> the launchd agent isn't firing.
+# A start with no completion is only treated as death once it is older than
+# MAX_RUN_SECS, so an in-progress scan (they take ~5-20 min) is never flagged.
+DOWN_DETAIL_COMFY_SCAN=""
+COMFY_SCAN_MAX_RUN_SECS=$((2 * 3600))
+parse_scan_ts() { date -j -f "%a %b %e %T %Z %Y" "$1" +%s 2>/dev/null || echo 0; }
+
+if [ ! -f "$COMFY_SCAN_LOG" ]; then
+    DOWN_TRIGGERED[COMFY_SCAN]=1
+    DOWN_DETAIL_COMFY_SCAN="${COMFY_SCAN_LOG} does not exist -- the daily scan has never run.\n"
+else
+    LAST_START_RAW=$(grep "scheduled fleet scan starting" "$COMFY_SCAN_LOG" 2>/dev/null | tail -1 \
+        | sed -E 's/^=== (.*) -- scheduled fleet scan starting ===$/\1/')
+    LAST_OK_RAW=$(grep "scheduled fleet scan complete" "$COMFY_SCAN_LOG" 2>/dev/null | tail -1 \
+        | sed -E 's/^=== (.*) -- scheduled fleet scan complete ===$/\1/')
+    LAST_START_TS=$([ -n "$LAST_START_RAW" ] && parse_scan_ts "$LAST_START_RAW" || echo 0)
+    LAST_OK_TS=$([ -n "$LAST_OK_RAW" ] && parse_scan_ts "$LAST_OK_RAW" || echo 0)
+    FAILED_RUNS=$(( $(grep -c "scheduled fleet scan starting" "$COMFY_SCAN_LOG") \
+                  - $(grep -c "scheduled fleet scan complete" "$COMFY_SCAN_LOG") ))
+
+    if [ "$LAST_START_TS" -gt "$LAST_OK_TS" ] \
+       && [ $(( NOW - LAST_START_TS )) -gt "$COMFY_SCAN_MAX_RUN_SECS" ]; then
+        # (a) started, never finished
+        DOWN_TRIGGERED[COMFY_SCAN]=1
+        DOWN_DETAIL_COMFY_SCAN="Last run started ${LAST_START_RAW} and never logged completion ($(( (NOW - LAST_START_TS) / 3600 ))h ago).\n"
+        DOWN_DETAIL_COMFY_SCAN+="${FAILED_RUNS} run(s) have started without completing.\n"
+        if [ "$LAST_OK_TS" -eq 0 ]; then
+            DOWN_DETAIL_COMFY_SCAN+="No run has EVER completed. Reports are only as fresh as the last manual run.\n"
+        else
+            DOWN_DETAIL_COMFY_SCAN+="Last successful completion: ${LAST_OK_RAW}.\n"
+        fi
+    elif [ "$LAST_OK_TS" -eq 0 ] && [ "$LAST_START_TS" -eq 0 ]; then
+        DOWN_TRIGGERED[COMFY_SCAN]=1
+        DOWN_DETAIL_COMFY_SCAN="No scan activity at all in ${COMFY_SCAN_LOG}.\n"
+    elif [ "$LAST_OK_TS" -ne 0 ] && [ $(( NOW - LAST_OK_TS )) -gt "$COMFY_SCAN_STALE_SECS" ]; then
+        # (b) completing, but too long ago -- agent not firing
+        DOWN_TRIGGERED[COMFY_SCAN]=1
+        DOWN_DETAIL_COMFY_SCAN="Last successful scan completed $(( (NOW - LAST_OK_TS) / 3600 ))h ago (threshold $((COMFY_SCAN_STALE_SECS / 3600))h) -- the daily agent may not be firing.\n"
+    fi
+fi
+
 # --- Evaluate each condition: alert / suppress / clear / ok ---
 check_condition_streak() {
     local triggered=$1 last_alert=$2 was_active=$3 streak=$4 threshold=$5
@@ -181,7 +245,7 @@ check_condition_streak() {
 ALERT_BODY=""
 CLEAR_BODY=""
 
-for svc in COMFY_HTTP METRICS_SERVER HEARTBEAT_WRITER SEARCH_ADV SEARCH_SHOWS TMDB TRAVEL_HTTP; do
+for svc in COMFY_HTTP COMFY_SCAN METRICS_SERVER HEARTBEAT_WRITER SEARCH_ADV SEARCH_SHOWS TMDB TRAVEL_HTTP; do
     # Missing (process not found)
     trig=${MISSING_TRIGGERED[$svc]}
     last=$(eval echo \$MISSING_${svc}_LAST_ALERT)
@@ -210,6 +274,9 @@ for svc in COMFY_HTTP METRICS_SERVER HEARTBEAT_WRITER SEARCH_ADV SEARCH_SHOWS TM
     # eval entirely when missing leaves DOWN_${svc}_ACTIVE/STREAK untouched (frozen, not
     # cleared), so a real recovery still gets correctly reported once the service is
     # actually back and healthy again.
+    #
+    # COMFY_SCAN is unaffected by that guard: it is a freshness-only pseudo-service with
+    # no process, seeded MISSING_TRIGGERED=0, so its DOWN state is always evaluated.
     if [ "${MISSING_TRIGGERED[$svc]}" -eq 0 ]; then
         trig=${DOWN_TRIGGERED[$svc]}
         last=$(eval echo \$DOWN_${svc}_LAST_ALERT)
@@ -220,8 +287,14 @@ for svc in COMFY_HTTP METRICS_SERVER HEARTBEAT_WRITER SEARCH_ADV SEARCH_SHOWS TM
         case "$verdict" in
             alert)
                 eval "DOWN_${svc}_LAST_ALERT=$NOW; DOWN_${svc}_ACTIVE=1"
-                ALERT_BODY+="=== ${svc} NOT RESPONDING ===\n"
-                if [ "$svc" = "HEARTBEAT_WRITER" ] && [ -n "$DOWN_DETAIL_HEARTBEAT_WRITER" ]; then
+                if [ "$svc" = "COMFY_SCAN" ]; then
+                    ALERT_BODY+="=== COMFY FLEET SCAN STALE ===\n"
+                else
+                    ALERT_BODY+="=== ${svc} NOT RESPONDING ===\n"
+                fi
+                if [ "$svc" = "COMFY_SCAN" ] && [ -n "$DOWN_DETAIL_COMFY_SCAN" ]; then
+                    ALERT_BODY+="$(echo -e "$DOWN_DETAIL_COMFY_SCAN")\nCheck: grep -E 'scan complete|FAILED' ${COMFY_SCAN_LOG} | tail\n\n"
+                elif [ "$svc" = "HEARTBEAT_WRITER" ] && [ -n "$DOWN_DETAIL_HEARTBEAT_WRITER" ]; then
                     ALERT_BODY+="Present for ${new_streak} consecutive checks (~$((new_streak * 5)) min):\n$(echo -e "$DOWN_DETAIL_HEARTBEAT_WRITER")\n\n"
                 else
                     ALERT_BODY+="Process is running but its HTTP endpoint did not return 200 for ${new_streak} consecutive checks.\n\n"
@@ -292,7 +365,7 @@ What to do:
 
 # --- Save state ---
 {
-    for svc in COMFY_HTTP METRICS_SERVER HEARTBEAT_WRITER SEARCH_ADV SEARCH_SHOWS TMDB TRAVEL_HTTP; do
+    for svc in COMFY_HTTP COMFY_SCAN METRICS_SERVER HEARTBEAT_WRITER SEARCH_ADV SEARCH_SHOWS TMDB TRAVEL_HTTP; do
         for k in MISSING_${svc}_LAST_ALERT MISSING_${svc}_ACTIVE MISSING_${svc}_STREAK \
                  DOWN_${svc}_LAST_ALERT DOWN_${svc}_ACTIVE DOWN_${svc}_STREAK; do
             echo "$k=$(eval echo \$$k)"

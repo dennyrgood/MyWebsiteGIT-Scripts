@@ -29,7 +29,7 @@ import shutil
 import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 
 STALE_DAYS = 3  # warn when a machine's newest scan file is older than this
@@ -118,7 +118,12 @@ def load_config(config_path: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def find_latest(reports_dir: Path, hostname: str, pattern: str) -> Path | None:
-    """Find the most recent file matching hostname + pattern glob."""
+    """Find the most recent file matching hostname + pattern glob.
+
+    Lexicographic sort == chronological ONLY because the PowerShell scanners
+    stamp filenames `yyyy-MM-dd_HHmm`. If that format ever changes this picks
+    the wrong file silently rather than erroring, so change both together.
+    """
     matches = sorted(reports_dir.glob(f"{hostname}-{pattern}"))
     return matches[-1] if matches else None
 
@@ -241,6 +246,15 @@ def load_all_machines(config: dict) -> dict:
         if "full_map" in files:
             entry["full_map"] = load_csv(files["full_map"])
             print(f"  {len(entry['full_map'])} full_map rows")
+        else:
+            # Hard skip, not a warning. Without full_map this machine looks
+            # like it references nothing, which downstream reads as "every
+            # model on its disk is a deletion candidate" -- a partial scan
+            # would silently generate a script that wipes the box. A machine
+            # with no reference data contributes nothing analysable anyway.
+            print(f"  ERROR: no full_map for {hostname} -- skipping this machine entirely "
+                  f"(a partial scan would turn its whole disk into deletion candidates)")
+            continue
 
         if "node_types" in files:
             entry["node_types"] = load_csv(files["node_types"])
@@ -404,6 +418,39 @@ def compute_drift(previous: dict | None, data: dict) -> dict:
 # Travel readiness score
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# The prime set: root-level workflow templates.
+#
+# 2026-09-04 -- replaced "000 Starting Images" as the fleet's special/headline
+# group. Starting Images is a *curated, deliberately-satisfiable* set: it scored
+# 100% on Travel/Chat precisely because it was maintained to, so it measured
+# "did I remember to prepare the demo PNGs" rather than "can this machine run my
+# work." Root-level templates are ~2x the size (70 vs 36 excluding (i)) and
+# immediately surfaced 11 genuinely broken workflows the 100% was hiding.
+#
+# Root-level == a .json sitting directly in workflows\, no subfolder. That
+# deliberately keeps "999 TRY THIS - foo.json" (a root file) and drops the
+# whole "999 Other\..." experiments subtree (a folder). Same predicate the
+# Explorer's "Root Only" filter already used.
+#
+# Starting Images is NOT removed -- it is still scanned, still counts as real
+# output evidence (OUTPUT_EVIDENCE_SOURCES), and is still reported as its own
+# secondary check. It is demoted from headline, not deleted.
+# ---------------------------------------------------------------------------
+
+def is_prime_row(row: dict, include_ib: bool = True) -> bool:
+    """True if this full_map row belongs to a root-level workflow template."""
+    if row.get("source", "") != "workflows":
+        return False
+    wf = row.get("workflow_file", "")
+    rel = wf.split("\\", 1)[1] if "\\" in wf else wf
+    if "\\" in rel:          # lives in a subfolder -> not prime
+        return False
+    if not include_ib and machine_tag(rel) == "ib":
+        return False
+    return True
+
+
 def compute_readiness(data: dict, wf_model_data: dict, hostname: str, year_filter: str) -> dict:
     """What % of year_filter workflows can run on this machine."""
     machine = data.get(hostname)
@@ -417,13 +464,21 @@ def compute_readiness(data: dict, wf_model_data: dict, hostname: str, year_filte
     is_source = data.get(hostname, {}).get("config", {}).get("is_source", False)
 
     for row in machine["full_map"]:
-        if not row.get("workflow_modified", "").startswith(year_filter):
+        # Prime set only. This filter is the fix for the readiness metric being
+        # meaningless: it previously counted EVERY full_map row for the year,
+        # and since all three machines share one OneDrive output folder, ~80% of
+        # the denominator was png-outputs -- i.e. Travel/Chat were being scored
+        # on whether they could reproduce ImageBeast's entire back catalogue
+        # (CWH 2026: 123 templates vs 739 png-outputs). It answered the wrong
+        # question and the headline number (45%) was then rationalised away in
+        # Next Actions as "expected for lower-VRAM machine."
+        if not is_prime_row(row, include_ib=is_source):
+            continue
+        # Background-model rows carry on_disk == "N/A" and no resolvable file;
+        # they must never count as a missing model.
+        if row.get("model_category", "") == "background-model":
             continue
         wf = row["workflow_file"].split("\\")[-1]
-        # Non-source machines (Chat/Travel) cannot run (i)/(ib) workflows — exclude
-        # them so they don't inflate the missing count or drive unnecessary sync candidates.
-        if not is_source and machine_tag(wf) == "ib":
-            continue
         wf_total.add(wf)
         if row["on_disk"] == "NO":
             wf_missing[wf].add(row["model_ref"].replace("\\", "/").split("/")[-1])
@@ -444,17 +499,41 @@ def compute_readiness(data: dict, wf_model_data: dict, hostname: str, year_filte
 # Custom node analysis
 # ---------------------------------------------------------------------------
 
-def node_status(hostname_data: dict, node: str) -> str:
-    """'on' (installed+enabled), 'disabled' (folder present but Manager-
-    disabled), or 'off' (not installed) for one node on one machine."""
+# ComfyUI-Manager registers no nodes of its own, so it is legitimately absent
+# from object_info on every machine. Never flag it as a failed import.
+NO_NODE_PACKAGES = {"comfyui-manager"}
+
+
+def node_status(hostname_data: dict, node: str, loaded_pkgs: set = None) -> str:
+    """
+    'on'                  installed, enabled, and confirmed loaded by ComfyUI
+    'installed-not-loaded' folder present but ComfyUI didn't register it --
+                          a failed import (missing dep, version mismatch, a
+                          bad update). Looks fine on disk; does not work.
+    'disabled'            folder present but Manager-disabled (.disabled)
+    'off'                 not installed
+
+    2026-09-04: 'installed-not-loaded' added. Folder presence alone had been
+    reported as green, which hid three broken packages on TravelBeast --
+    including comfyui-rmbg (a background-model family with 50 recorded output
+    uses) and seedvr2_videoupscaler (consumer of the SEEDVR2 models the sync
+    script was about to copy there). Exactly the "what breaks on the plane"
+    failure this project exists to catch.
+
+    loaded_pkgs is None when that machine's object_info was unavailable AND had
+    no cache -- in that case we cannot distinguish and fall back to the old
+    presence-only answer rather than reporting a false negative.
+    """
     if node in hostname_data.get("nodes_disabled", set()):
         return "disabled"
     if node in hostname_data.get("nodes", set()):
+        if loaded_pkgs is not None and node not in loaded_pkgs and node not in NO_NODE_PACKAGES:
+            return "installed-not-loaded"
         return "on"
     return "off"
 
 
-def analyze_nodes(data: dict, wf_model_data: dict) -> dict:
+def analyze_nodes(data: dict, wf_model_data: dict, loaded_by_host: dict = None) -> dict:
     all_nodes   = set()
     for machine in data.values():
         all_nodes |= machine["nodes"]
@@ -463,7 +542,7 @@ def analyze_nodes(data: dict, wf_model_data: dict) -> dict:
     matrix    = {}
     modified  = {}
     for node in sorted(all_nodes):
-        matrix[node] = {h: node_status(data[h], node) for h in hostnames}
+        matrix[node] = {h: node_status(data[h], node, (loaded_by_host or {}).get(h)) for h in hostnames}
         # Recency isn't per-host in the UI (unlike models/workflows) -- take
         # the most recent folder mtime seen anywhere on the fleet as the
         # node's overall "last touched" signal.
@@ -731,7 +810,68 @@ def analyze_model_gaps(data: dict, source_host: str, model_usage: dict,
 # scanning.
 # ---------------------------------------------------------------------------
 
-def build_deletion_candidates(data: dict, output_usage: dict) -> dict:
+# Categories whose models are loaded *internally* by a node rather than picked
+# from a filename widget. A model here can never appear in `allModelRefs` (the
+# PS1 scan deliberately keeps synthetic background-model markers out of that
+# set), so it is GUARANTEED to land in unused_models.csv no matter how heavily
+# it is used. Treating that as "the strongest deletion signal" is exactly
+# backwards for these -- confirmed 2026-09-04: pulid_flux_v0.9.1 (19 real
+# outputs), open_clip_* (PuLID EVA-CLIP, 19), ip-adapter-faceid-plusv2_sdxl
+# (30), and all 8 vae_approx/taesd* (ComfyUI's own live previewer, never
+# graph-referenced on any install by design) were all queued for deletion --
+# and on the replicas that script is a straight `del`. These are
+# *unverifiable*, not *unused*.
+PROTECTED_CATEGORIES = {
+    "vae_approx", "liveportrait", "ultralytics", "sams", "grounding-dino",
+    "facexllib", "facexlib", "insightface", "clip_vision", "pulid", "llm",
+    "rmbg", "birefnet", "reactor", "facerestore",
+}
+
+# Node families seen in real output as [background-model:X] markers, mapped to
+# the model categories they load. Used to *dynamically* protect a category when
+# the fleet has evidence that family actually ran -- belt-and-braces on top of
+# the static set above, which stays as the floor.
+BACKGROUND_NODE_CATEGORIES = {
+    "rmbg":         {"rmbg", "birefnet"},
+    "birefnet":     {"rmbg", "birefnet"},
+    "pulid":        {"pulid", "clip_vision", "insightface"},
+    "insightface":  {"insightface", "ipadapter"},
+    "ipadapter":    {"ipadapter", "clip_vision", "insightface"},
+    "jc":           {"llm"},
+    "sam":          {"sams"},
+    "facerestore":  {"facexlib", "facexllib"},
+    "faceparsing":  {"facexlib", "facexllib"},
+    "liveportrait": {"liveportrait"},
+}
+
+
+def protected_categories_for(data: dict) -> set:
+    """Static protected set, plus any category loaded by a background-model
+    node family that has real output evidence on this fleet."""
+    protected = set(PROTECTED_CATEGORIES)
+    for machine in data.values():
+        for row in machine.get("full_map", []):
+            if row.get("model_category", "") != "background-model":
+                continue
+            if row.get("source", "") not in OUTPUT_EVIDENCE_SOURCES:
+                continue
+            marker = row.get("model_ref", "").lower()   # e.g. [background-model:RMBG]
+            for family, cats in BACKGROUND_NODE_CATEGORIES.items():
+                if family in marker:
+                    protected |= cats
+    return protected
+
+
+def is_protected_category(category: str, protected: set) -> bool:
+    """Category match is prefix/normalised -- real folders include things like
+    'ipadapter - Copy' and 'facexllib' (sic, the fleet's own spelling)."""
+    c = (category or "").strip().lower()
+    if not c:
+        return False
+    return any(c == p or c.startswith(p) for p in protected)
+
+
+def build_deletion_candidates(data: dict, output_usage: dict, protected: set = None) -> dict:
     """
     Per host, two tiers:
       unused    -- zero references anywhere on that host's own scan (no
@@ -747,6 +887,7 @@ def build_deletion_candidates(data: dict, output_usage: dict) -> dict:
     Both tiers carry full_path (needed to actually move/delete the file),
     pulled from that host's own Models CSV.
     """
+    protected = protected if protected is not None else set(PROTECTED_CATEGORIES)
     results = {}
     for hostname, machine in data.items():
         models = machine.get("models", {})
@@ -798,30 +939,90 @@ def build_deletion_candidates(data: dict, output_usage: dict) -> dict:
             })
         never_run.sort(key=lambda x: -x["size_gb"])
 
-        results[hostname] = {"unused": unused, "never_run": never_run}
+        # Divert anything in a background-loaded category into its own tier.
+        # These are unverifiable by graph reference, not unused -- they must
+        # never be emitted as live del/move lines. See PROTECTED_CATEGORIES.
+        def split(rows):
+            keep, prot = [], []
+            for m in rows:
+                (prot if is_protected_category(m["category"], protected) else keep).append(m)
+            return keep, prot
+
+        unused, unused_prot       = split(unused)
+        never_run, never_run_prot = split(never_run)
+        unverifiable = sorted(unused_prot + never_run_prot, key=lambda x: -x["size_gb"])
+
+        results[hostname] = {
+            "unused": unused,
+            "never_run": never_run,
+            "unverifiable": unverifiable,
+        }
     return results
 
 
-def generate_cleanup_script(hostname: str, candidates: dict, is_source: bool) -> str:
+def _quarantine_rel(m: dict, models_root: str) -> str:
+    """Relative path under the models root, used to mirror the source tree
+    into quarantine. Falls back to <category>\\<filename> when the path can't
+    be made relative."""
+    fp   = (m.get("full_path") or "").replace("/", "\\")
+    root = (models_root or "").replace("/", "\\").rstrip("\\")
+    if root and fp.lower().startswith(root.lower() + "\\"):
+        return fp[len(root) + 1:]
+    cat = (m.get("category") or "misc").strip() or "misc"
+    return f"{cat}\\{m.get('filename','')}"
+
+
+def generate_cleanup_script(label: str, candidates: dict, is_source: bool,
+                             machines_covered: list, models_root: str = "") -> str:
     """
-    Per-host cleanup script. ImageBeast (the source -- the only machine
-    where a deleted model is actually gone, not just a re-copyable replica)
-    gets a MOVE to a local quarantine folder instead of a delete, so a wrong
-    call is recoverable. TravelBeast/ChatWorkhorse get a straight delete --
-    they're synced replicas of ImageBeast's models, so worst case is
-    re-running the sync script, not real data loss.
+    Cleanup script for one machine, or one sync_group of machines.
+
+    The source machine (ImageBeast -- the only place a deleted model is
+    actually gone rather than a re-copyable replica) MOVES to a quarantine
+    folder; replicas DELETE outright.
+
+    Two things this gets right that the first version did not:
+
+    * Quarantine mirrors the model's relative path (2026-09-04). A flat
+      destination collided on four pairs of identically-named shards
+      (model-0000N-of-00004.safetensors under llama-joycaption-alpha-two and
+      -beta-one): `move` onto an existing file either prompts -- hanging an
+      unattended run -- or overwrites, destroying exactly the recoverability
+      that justifies quarantining instead of deleting.
+
+    * Replicas that share a Models_bare folder get ONE script, not one each.
+      CHATWORKHORSE and TRAVELBEAST resolve different user paths to the same
+      OneDrive folder, so the two per-machine scripts held identical filename
+      sets and must never both be run.
+
+    The 'unverifiable' tier is emitted commented-out, never as live commands.
     """
-    unused, never_run = candidates["unused"], candidates["never_run"]
+    unused       = candidates.get("unused", [])
+    never_run    = candidates.get("never_run", [])
+    unverifiable = candidates.get("unverifiable", [])
     total_gb = sum(m["size_gb"] for m in unused + never_run)
-    action = "MOVE to quarantine" if is_source else "DELETE"
+    action   = "MOVE to quarantine" if is_source else "DELETE"
+
     lines = [
         "@echo off",
-        "REM " + "=" * 60,
-        f"REM  Cleanup candidates on {hostname}",
+        "REM " + "=" * 68,
+        f"REM  Cleanup candidates -- {label}",
         f"REM  Action: {action}",
-        f"REM  {len(unused)} unused (zero references anywhere) + {len(never_run)} referenced-but-never-run",
-        f"REM  {total_gb:.2f} GB total",
-        "REM " + "=" * 60,
+    ]
+    if len(machines_covered) > 1:
+        lines += [
+            "REM",
+            "REM  *** AFFECTS BOTH MACHINES: " + " + ".join(machines_covered) + " ***",
+            "REM  They share one OneDrive Models_bare folder, so deleting here",
+            "REM  removes the file for both. Run this ONCE, on either machine.",
+            "REM",
+        ]
+    lines += [
+        f"REM  {len(unused)} unused (zero references anywhere)",
+        f"REM  + {len(never_run)} referenced-but-never-run",
+        f"REM  = {total_gb:.2f} GB reclaimable",
+        f"REM  ({len(unverifiable)} further files are listed but COMMENTED OUT -- see bottom)",
+        "REM " + "=" * 68,
         "",
     ]
     if is_source:
@@ -832,26 +1033,59 @@ def generate_cleanup_script(hostname: str, candidates: dict, is_source: bool) ->
         ]
 
     def emit_group(models, title):
+        if not models:
+            return
         lines.append(f"REM --- {title} ({len(models)} files, {sum(m['size_gb'] for m in models):.2f} GB) ---")
         for m in models:
             lines.append(f'REM   {m["size_gb"]:.2f} GB  [{m["category"]}]  {m["filename"]}')
             if is_source:
-                lines.append(f'move "{m["full_path"]}" "%QUARANTINE%\\"')
+                rel = _quarantine_rel(m, models_root)
+                sub = "\\".join(rel.split("\\")[:-1])
+                dest_dir = f'%QUARANTINE%\\{sub}' if sub else "%QUARANTINE%"
+                lines.append(f'if not exist "{dest_dir}" mkdir "{dest_dir}"')
+                lines.append(f'move "{m["full_path"]}" "{dest_dir}\\"')
             else:
                 lines.append(f'del "{m["full_path"]}"')
         lines.append("")
 
-    if unused:
-        emit_group(unused, "UNUSED -- zero references anywhere")
-    if never_run:
-        emit_group(never_run, "REFERENCED BUT NEVER RUN -- review before trusting this tier")
+    emit_group(unused,    "UNUSED -- zero references anywhere")
+    emit_group(never_run, "REFERENCED BUT NEVER RUN -- review before trusting this tier")
+
+    if unverifiable:
+        gb = sum(m["size_gb"] for m in unverifiable)
+        lines += [
+            "REM " + "=" * 68,
+            f"REM  NOT SAFE TO AUTOMATE -- {len(unverifiable)} files, {gb:.2f} GB",
+            "REM",
+            "REM  These live in categories whose models are loaded internally by a",
+            "REM  node rather than chosen from a filename dropdown (RMBG, PuLID,",
+            "REM  IPAdapter/InsightFace, LivePortrait, SAM, ultralytics detectors,",
+            "REM  ComfyUI's own vae_approx previewer, LLM shards...). A workflow",
+            "REM  graph never names them, so 'unreferenced' proves nothing here.",
+            "REM  Verified false positives at the time of writing: pulid_flux_v0.9.1",
+            "REM  (19 real outputs), open_clip_* (19), ip-adapter-faceid-plusv2_sdxl",
+            "REM  (30), all 8 vae_approx/taesd* (built-in live previewer).",
+            "REM",
+            "REM  Left COMMENTED OUT deliberately. Verify by hand before enabling.",
+            "REM " + "=" * 68,
+        ]
+        for m in unverifiable:
+            lines.append(f'REM   {m["size_gb"]:.2f} GB  [{m["category"]}]  {m["filename"]}')
+            if is_source:
+                rel = _quarantine_rel(m, models_root)
+                sub = "\\".join(rel.split("\\")[:-1])
+                dest_dir = f'%QUARANTINE%\\{sub}' if sub else "%QUARANTINE%"
+                lines.append(f'REM move "{m["full_path"]}" "{dest_dir}\\"')
+            else:
+                lines.append(f'REM del "{m["full_path"]}"')
+        lines.append("")
 
     lines += [
         "echo.",
         "echo " + "=" * 60,
-        f"echo  Cleanup on {hostname} -- COMPLETE",
+        f"echo  Cleanup -- {label} -- COMPLETE",
         f"echo  {len(unused) + len(never_run)} files ({total_gb:.2f} GB)",
-        ("echo  Moved to %QUARANTINE%  -- review and empty it manually" if is_source
+        ("echo  Moved to %QUARANTINE% -- review and empty it manually" if is_source
          else "echo  Deleted -- re-run the sync script if you need any of these back"),
         "echo " + "=" * 60,
         "pause",
@@ -927,6 +1161,7 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
     prime_coverage    = report_data.get("prime_coverage", {})
     prime_scan        = report_data.get("prime_scan", {})
     si_coverage       = report_data.get("si_coverage", {})
+    prime_wf_coverage = report_data.get("prime_wf_coverage", {})
     si_scan           = report_data.get("si_scan", {})
     output_usage      = report_data.get("output_usage", {})
     node_gaps         = report_data.get("node_gaps", {})
@@ -1023,8 +1258,10 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
         node_matrix_html += f'<th>{h}</th>'
     node_matrix_html += '</tr>'
     def node_badge(status):
-        color = {"on": "#2ecc71", "disabled": "#f39c12", "off": "#e74c3c"}[status]
-        text  = {"on": "YES", "disabled": "DISABLED", "off": "NO"}[status]
+        color = {"on": "#2ecc71", "disabled": "#f39c12", "off": "#e74c3c",
+                 "installed-not-loaded": "#c0392b"}.get(status, "#e74c3c")
+        text  = {"on": "YES", "disabled": "DISABLED", "off": "NO",
+                 "installed-not-loaded": "NOT LOADED"}.get(status, "NO")
         return f'<span style="background:{color};color:white;padding:2px 8px;border-radius:4px;font-size:0.85em">{text}</span>'
 
     for node in nodes_data["all_nodes"]:
@@ -1172,6 +1409,35 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
     else:
         si_html = '<p>No Starting Images PNGs found. Add test output PNGs to the 000 Starting Images folder.</p>'
 
+    # --- PRIME WORKFLOWS (root-level templates) -- the headline readiness ---
+    if prime_wf_coverage:
+        prime_wf_html = ('<p>Root-level <code>workflows\\*.json</code> — the fleet\'s prime set. '
+                         'Excludes the <code>999 Other\\</code> subtree (subfolder) and, for replicas, '
+                         '<code>(i)</code>-tagged ImageBeast-only workflows.</p>')
+        for hostname, cov in prime_wf_coverage.items():
+            pct, run, tot = cov["pct"], cov["runnable"], cov["total"]
+            color = "#2ecc71" if pct >= 90 else "#f39c12" if pct >= 70 else "#e74c3c"
+            prime_wf_html += (f'<h4>{hostname}</h4><p>'
+                              f'<span style="background:{color};color:white;padding:3px 10px;border-radius:4px;'
+                              f'font-weight:bold">{pct}%</span> &nbsp; {run}/{tot} prime workflows runnable</p>')
+            if cov["blocking_models"]:
+                prime_wf_html += ('<p style="color:#888">Copy these first — ordered by how many prime '
+                                  'workflows each unblocks:</p><table>'
+                                  '<tr><th>Missing model</th><th>Unblocks</th></tr>')
+                for m, n in cov["blocking_models"]:
+                    prime_wf_html += f'<tr><td style="font-family:monospace">{m}</td><td>{n} workflow(s)</td></tr>'
+                prime_wf_html += '</table>'
+            if cov["blocked"]:
+                prime_wf_html += (f'<details><summary style="cursor:pointer;color:#e74c3c">'
+                                  f'{len(cov["blocked"])} blocked workflow(s) — click for detail</summary>'
+                                  '<table><tr><th>Workflow</th><th>Missing</th></tr>')
+                for wf, ms in cov["blocked"].items():
+                    prime_wf_html += (f'<tr><td>{wf}</td><td style="font-family:monospace;font-size:0.85em">'
+                                      + "<br>".join(ms) + '</td></tr>')
+                prime_wf_html += '</table></details>'
+    else:
+        prime_wf_html = '<p>No prime workflow data.</p>'
+
     # --- MODEL GAPS, RECENTLY USED (vs source machine) ---
     # Model-side mirror of the node gaps section below: which models are on
     # the source machine and have real output-PNG evidence within the last
@@ -1213,7 +1479,8 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
         del_html = ""
         for hostname, cand in deletion_candidates.items():
             unused, never_run = cand["unused"], cand["never_run"]
-            if not (unused or never_run):
+            unverifiable = cand.get("unverifiable", [])
+            if not (unused or never_run or unverifiable):
                 continue
             is_source = hostname == source_host
             unused_gb = sum(m["size_gb"] for m in unused)
@@ -1230,6 +1497,19 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
                 del_html += f'<details><summary style="cursor:pointer;color:#888">Referenced but never run — review before trusting ({len(never_run)} files, {never_gb:.2f} GB)</summary>'
                 del_html += '<table><tr><th>Model</th><th>Category</th><th>Size</th></tr>'
                 for m in never_run:
+                    del_html += f'<tr><td>{m["filename"]}</td><td>{m["category"]}</td><td>{m["size_gb"]:.2f} GB</td></tr>'
+                del_html += '</table></details>'
+            if unverifiable:
+                unver_gb = sum(m["size_gb"] for m in unverifiable)
+                del_html += (f'<details><summary style="cursor:pointer;color:#e67e22;font-weight:bold">'
+                             f'&#9888; Cannot be verified by graph reference — {len(unverifiable)} files, '
+                             f'{unver_gb:.2f} GB (NOT in the delete script)</summary>'
+                             '<p style="color:#888">Loaded internally by a node (RMBG, PuLID, IPAdapter/InsightFace, '
+                             'LivePortrait, SAM, ultralytics, ComfyUI\'s own vae_approx previewer, LLM shards…), so no '
+                             'workflow graph ever names them and "unreferenced" proves nothing. Emitted commented-out '
+                             'in the .bat. Verify by hand before deleting.</p>')
+                del_html += '<table><tr><th>Model</th><th>Category</th><th>Size</th></tr>'
+                for m in unverifiable:
                     del_html += f'<tr><td>{m["filename"]}</td><td>{m["category"]}</td><td>{m["size_gb"]:.2f} GB</td></tr>'
                 del_html += '</table></details>'
         if not del_html:
@@ -1356,18 +1636,48 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
     if not usage_html:
         usage_html = '<p>No output PNG data available (no png-outputs/starting_images/workflows-png rows found).</p>'
 
-    # --- UNUSED ON IMAGEBEAST ---
+    # --- UNUSED ON IMAGEBEAST (raw unused_models.csv view) ---
+    # 2026-09-04: this section used to headline the raw CSV total as "N GB
+    # reclaimable", which was the same structural false positive the deletion
+    # candidates had -- a background-loaded model can never be named by a
+    # workflow graph, so it is guaranteed to appear here no matter how heavily
+    # used. Split into the same two buckets so the number can't mislead, and
+    # show the relative path: generic shard names (model-0000N-of-00004) repeat
+    # across model folders and were indistinguishable by filename alone.
     unused_html = ""
     source = [h for h, m in machines.items() if m["config"].get("is_source")][0] if machines else ""
     if source and "unused" in machines.get(source, {}).get("files", {}):
         unused_rows = machines[source].get("unused", [])
         if unused_rows:
-            total_waste = sum(float(r.get("size_gb", 0)) for r in unused_rows)
-            unused_html = f'<p>{len(unused_rows)} unused models | {total_waste:.2f} GB reclaimable</p>'
-            unused_html += '<table><tr><th>Model</th><th>Category</th><th>Size</th></tr>'
-            for r in sorted(unused_rows, key=lambda x: float(x.get("size_gb", 0)), reverse=True):
-                unused_html += f'<tr><td>{r.get("filename","")}</td><td>{r.get("category","")}</td><td>{float(r.get("size_gb",0)):.2f} GB</td></tr>'
-            unused_html += "</table>"
+            prot_set = report_data.get("protected_categories") or PROTECTED_CATEGORIES
+            checkable, unverif = [], []
+            for r in unused_rows:
+                (unverif if is_protected_category(r.get("category", ""), prot_set) else checkable).append(r)
+            gb = lambda rows: sum(float(x.get("size_gb", 0)) for x in rows)
+
+            def rows_table(rows):
+                out = '<table><tr><th>Model</th><th>Category</th><th>Path</th><th>Size</th></tr>'
+                for r in sorted(rows, key=lambda x: float(x.get("size_gb", 0)), reverse=True):
+                    rel = r.get("relative_path", "") or r.get("full_path", "")
+                    sub = "\\".join(rel.replace("/", "\\").split("\\")[:-1])
+                    out += (f'<tr><td>{r.get("filename","")}</td><td>{r.get("category","")}</td>'
+                            f'<td style="font-family:monospace;font-size:0.8em;color:#888">{sub}</td>'
+                            f'<td>{float(r.get("size_gb",0)):.2f} GB</td></tr>')
+                return out + "</table>"
+
+            unused_html = (f'<p><strong>{len(checkable)} genuinely unreferenced</strong> — '
+                           f'{gb(checkable):.2f} GB reclaimable.<br>'
+                           f'<span style="color:#e67e22">{len(unverif)} more ({gb(unverif):.2f} GB) '
+                           f'cannot be verified this way</span> and are <em>not</em> counted above.</p>')
+            unused_html += rows_table(checkable)
+            if unverif:
+                unused_html += (f'<details><summary style="cursor:pointer;color:#e67e22;font-weight:bold">'
+                                f'&#9888; {len(unverif)} background-loaded — listed here only, never scripted '
+                                f'({gb(unverif):.2f} GB)</summary>'
+                                '<p style="color:#888">Loaded internally by a node rather than picked from a '
+                                'filename dropdown, so no workflow graph names them and "unreferenced" proves '
+                                'nothing. Several have heavy recorded output use.</p>')
+                unused_html += rows_table(unverif) + '</details>' 
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -1423,7 +1733,10 @@ def generate_html(report_data: dict, timestamp: str, year_filter: str) -> str:
 <h2>Travel / Workflow Readiness ({year_filter})</h2>
 <div class="card">{readiness_html}</div>
 
-<h2>Starting Images — Travel Readiness</h2>
+<h2>Prime Workflows — Travel Readiness</h2>
+<div class="card">{prime_wf_html}</div>
+
+<h2>Starting Images — Secondary Check</h2>
 <div class="card">{si_html}</div>
 
 <h2>Model Gaps — Travel Readiness (Recently Used)</h2>
@@ -1665,6 +1978,44 @@ def analyze_prime_coverage(data: dict, prime_scan: dict, config: dict, output_ev
 # Starting Images dedicated coverage report
 # Scans ONLY the PNGs in 000 Starting Images — the curated travel set
 # ---------------------------------------------------------------------------
+
+def analyze_prime_workflow_coverage(data: dict, source_host: str) -> dict:
+    """
+    Per machine: which root-level workflow templates can actually run, and for
+    the ones that can't, exactly which models are missing. This is the fleet's
+    headline travel-readiness answer -- "if I close the lid and get on a plane,
+    what breaks?" -- replacing the curated Starting Images set.
+    """
+    results = {}
+    for hostname, machine in data.items():
+        is_source = hostname == source_host
+        wf_missing = defaultdict(set)
+        wf_all     = set()
+        for row in machine.get("full_map", []):
+            if not is_prime_row(row, include_ib=is_source):
+                continue
+            if row.get("model_category", "") == "background-model":
+                continue
+            wf = row["workflow_file"].split("\\")[-1]
+            wf_all.add(wf)
+            if row.get("on_disk") == "NO":
+                wf_missing[wf].add(row["model_ref"].replace("\\", "/").split("/")[-1])
+
+        # Which models block the most workflows -- the copy-this-first order.
+        blocking = Counter()
+        for models in wf_missing.values():
+            for m in models:
+                blocking[m] += 1
+
+        results[hostname] = {
+            "total":    len(wf_all),
+            "runnable": len(wf_all) - len(wf_missing),
+            "pct":      round((len(wf_all) - len(wf_missing)) / len(wf_all) * 100) if wf_all else 0,
+            "blocked":  {wf: sorted(ms) for wf, ms in sorted(wf_missing.items())},
+            "blocking_models": blocking.most_common(),
+        }
+    return results
+
 
 def scan_starting_images(data: dict) -> dict:
     """
@@ -1951,7 +2302,22 @@ def generate_subdir_fix_bat(mismatches: list, src_root: str, dest_root: str) -> 
 # passes --confirm-prune, so a plain run is always non-destructive.
 # ---------------------------------------------------------------------------
 
-def find_prune_candidates(output_dir: Path, history_dir: Path, reports_dir: Path, keep: int) -> dict:
+def _machine_prefix_re(machine_names: list = None) -> str:
+    """Alternation of machine names for the input-file prune regex.
+
+    Derived from fleet_config.json rather than hardcoded (2026-09-04): the
+    machine list previously appeared literally here as a third, uncrosschecked
+    copy of the fleet topology. Adding a machine and missing this one meant its
+    scan inputs accumulated forever with no error -- a silent leak, since prune
+    simply never matched them. Falls back to the historical three so an
+    explicit --prune-output with no config still behaves.
+    """
+    names = machine_names or ["IMAGEBEAST", "CHATWORKHORSE", "TRAVELBEAST"]
+    return "^(" + "|".join(re.escape(n) for n in names) + ")"
+
+
+def find_prune_candidates(output_dir: Path, history_dir: Path, reports_dir: Path, keep: int,
+                           machine_names: list = None) -> dict:
     """Return {'output': [...], 'history': [...], 'inputs': [...]} beyond the newest `keep` runs."""
     run_ts = sorted({
         m.group(1)
@@ -1980,7 +2346,7 @@ def find_prune_candidates(output_dir: Path, history_dir: Path, reports_dir: Path
     for f in reports_dir.iterdir():
         if not f.is_file():
             continue
-        m = re.match(r"^(IMAGEBEAST|CHATWORKHORSE|TRAVELBEAST)-.*?(\d{4}-\d{2}-\d{2}_\d{4})", f.name)
+        m = re.match(_machine_prefix_re(machine_names) + r"-.*?(\d{4}-\d{2}-\d{2}_\d{4})", f.name)
         if m:
             by_machine_ts[m.group(1)].add(m.group(2))
 
@@ -1992,7 +2358,7 @@ def find_prune_candidates(output_dir: Path, history_dir: Path, reports_dir: Path
     for f in reports_dir.iterdir():
         if not f.is_file():
             continue
-        m = re.match(r"^(IMAGEBEAST|CHATWORKHORSE|TRAVELBEAST)-.*?(\d{4}-\d{2}-\d{2}_\d{4})", f.name)
+        m = re.match(_machine_prefix_re(machine_names) + r"-.*?(\d{4}-\d{2}-\d{2}_\d{4})", f.name)
         if m and m.group(2) in stale_input_ts.get(m.group(1), set()):
             input_candidates.append(f)
 
@@ -2003,8 +2369,9 @@ def find_prune_candidates(output_dir: Path, history_dir: Path, reports_dir: Path
     }
 
 
-def prune_outputs(output_dir: Path, history_dir: Path, reports_dir: Path, keep: int, confirm: bool):
-    candidates = find_prune_candidates(output_dir, history_dir, reports_dir, keep)
+def prune_outputs(output_dir: Path, history_dir: Path, reports_dir: Path, keep: int, confirm: bool,
+                   machine_names: list = None):
+    candidates = find_prune_candidates(output_dir, history_dir, reports_dir, keep, machine_names)
     total = len(candidates["output"]) + len(candidates["history"]) + len(candidates["inputs"])
     if total == 0:
         print(f"Prune: nothing beyond the last {keep} runs — nothing to do.")
@@ -2065,11 +2432,31 @@ def build_actions(gaps: list, readiness: dict, drift: dict, nodes_data: dict, co
     # Readiness - only flag if low AND not explained by VRAM
     for h, r in readiness.items():
         pct = r.get("pct", 100)
-        if pct < 60:
+        # No "expected for lower-VRAM machine" excuse any more. That line was
+        # attached to a number computed over the wrong denominator (see
+        # compute_readiness) and it taught you to ignore the one field on the
+        # report labelled "readiness". Now that the metric counts only prime
+        # workflows, a low score is a real, actionable gap.
+        if pct < 90:
+            blocked = len(r.get("blocked_wf", {}))
             actions.append({
-                "priority": "medium",
-                "title":    f"{h} readiness {pct}% — expected for lower-VRAM machine",
-                "detail":   f"{r['can_run']}/{r['total']} workflows runnable. Blocked workflows require large models only suited for ImageBeast.",
+                "priority": "high" if pct < 75 else "medium",
+                "title":    f"{h}: {pct}% of prime workflows runnable ({blocked} blocked)",
+                "detail":   f"{r['can_run']}/{r['total']} root-level workflows can run. "
+                            f"See 'Prime Workflows — Travel Readiness' for the copy-first model order.",
+            })
+
+    # Installed-but-not-loading packages: on disk, look fine, do nothing.
+    for h, m in data.items():
+        broken = sorted(n for n in nodes_data.get("all_nodes", [])
+                        if nodes_data["matrix"].get(n, {}).get(h) == "installed-not-loaded")
+        if broken:
+            actions.append({
+                "priority": "high",
+                "title":    f"{h}: {len(broken)} custom node package(s) installed but FAILING TO LOAD",
+                "detail":   "ComfyUI did not register these -- failed import (missing dep, version "
+                            "mismatch, bad update). They look installed on disk and will silently do "
+                            "nothing: " + ", ".join(broken),
             })
 
     # Missing nodes on TravelBeast, ranked by real usage evidence (output-PNG
@@ -2373,6 +2760,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 .panel-models { flex: 1; }
 .panel-nodes { flex: 0.8; }
 .dot-disabled { background: #f39c12; }
+.dot-broken { background: #c0392b; box-shadow: 0 0 0 1px #fff inset; }
 .panel-header { background: #16213e; padding: 8px 12px; border-bottom: 1px solid #0f3460; flex-shrink: 0; }
 .panel-header h2 { font-size: 0.85em; color: #4fc3f7; margin-bottom: 6px; }
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -2540,8 +2928,8 @@ function nodeMatchesFilter(n) {{
 function nodeDots(status) {{
   return HN.map(h=>{{
     const st=status[h]||'off';
-    const cls='dot dot-'+(st==='on'?'on':st==='disabled'?'disabled':'off');
-    const label=st==='on'?'enabled':st==='disabled'?'installed but disabled':'not installed';
+    const cls='dot dot-'+(st==='on'?'on':st==='disabled'?'disabled':st==='installed-not-loaded'?'broken':'off');
+    const label=st==='on'?'enabled':st==='disabled'?'installed but disabled':st==='installed-not-loaded'?'INSTALLED BUT FAILED TO LOAD':'not installed';
     return '<span class="'+cls+'" title="'+HS[h]+': '+label+'"></span>';
   }}).join('');
 }}
@@ -2716,7 +3104,7 @@ function getWfSource() {{
   return ALL_WF;
 }}
 
-const MACHINE_TAG_RE = /\(\s*(tb|c|ib|i|bare)\s*\)/i;
+const MACHINE_TAG_RE = /\\(\\s*(tb|c|ib|i|bare)\\s*\\)/i;
 function machineTag(name) {{
   const m = MACHINE_TAG_RE.exec(name);
   if(!m) return null;
@@ -3041,7 +3429,7 @@ renderWf(); renderModels(); renderNodes();
     </div>
     <div class="list-container" id="node-list"></div>
     <div class="info-bar" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-      <span id="node-info">Click a node to see its workflows &nbsp;|&nbsp; green=enabled, orange=disabled, red=not installed</span>
+      <span id="node-info">Click a node to see its workflows &nbsp;|&nbsp; green=enabled, dark red=failed to load, orange=disabled, red=not installed</span>
       <button id="toggleNode" class="filter-chip" onclick="toggleShowOnlyNode()">Show Only</button>
     </div>
   </div>
@@ -3094,7 +3482,8 @@ def main():
     history_dir.mkdir(parents=True, exist_ok=True)
 
     if args.prune_output:
-        prune_outputs(output_dir, history_dir, reports_dir, args.keep_runs, args.confirm_prune)
+        prune_outputs(output_dir, history_dir, reports_dir, args.keep_runs, args.confirm_prune,
+                      list(config.get("machines", {}).keys()))
         return
 
     print(f"\nReports dir : {reports_dir}")
@@ -3138,17 +3527,35 @@ def main():
     for hostname in data:
         readiness[hostname] = compute_readiness(data, wf_data, hostname, year_filter)
 
-    # Node analysis
-    nodes_data = analyze_nodes(data, wf_data)
-
     # Live per-machine ComfyUI /object_info -- real class_type -> package
     # registry, straight from ComfyUI itself, used to turn "this class_type
     # showed up in an output PNG" into genuine per-package usage evidence
     # (replaces the old hand-curated, unrecalled priority_custom_nodes list).
+    # Fetched BEFORE analyze_nodes so the node matrix can tell "installed and
+    # actually loaded" from "installed but failed to import".
     object_info = scan_object_info(config, reports_dir)
     for hostname, oi in object_info.items():
         status = "live" if oi["live"] else (f"cached from {oi['fetched_at']}" if oi["fetched_at"] else "unavailable")
         print(f"  {hostname}: object_info {status} ({len(oi.get('object_info', {}))} node types)")
+
+    # Per machine: which custom_nodes packages ComfyUI actually registered.
+    # None (not empty set) when we have no data at all for that machine, so
+    # node_status can fall back rather than report every package as broken.
+    loaded_by_host = {}
+    for hostname, oi in object_info.items():
+        info = oi.get("object_info") or {}
+        if not info:
+            loaded_by_host[hostname] = None
+            continue
+        pkgs = set()
+        for meta in info.values():
+            mod = (meta or {}).get("python_module", "")
+            if mod.startswith("custom_nodes."):
+                pkgs.add(mod[len("custom_nodes."):].split(".")[0].lower())
+        loaded_by_host[hostname] = pkgs
+
+    # Node analysis
+    nodes_data = analyze_nodes(data, wf_data, loaded_by_host)
     classtype_pkg_map = build_classtype_package_map(object_info)
     node_usage = analyze_node_usage_evidence(data, classtype_pkg_map)
     node_gaps  = analyze_node_gaps(nodes_data, source_host, node_usage)
@@ -3283,6 +3690,7 @@ def main():
         print("Prime workflows: no prime_workflows_dir configured")
 
     # Starting Images dedicated coverage (from CSV source=starting_images rows)
+    prime_wf_coverage = analyze_prime_workflow_coverage(data, source_host)
     si_scan     = scan_starting_images(data)
     si_coverage = analyze_starting_images_coverage(data, si_scan)
     if si_scan.get("png_count", 0) > 0:
@@ -3295,13 +3703,54 @@ def main():
 
     # Deletion candidates -- the inverse of the sync-gap analysis: dead
     # weight on each machine's own disk, split by confidence tier.
-    deletion_candidates = build_deletion_candidates(data, output_usage)
+    protected_cats = protected_categories_for(data)
+    deletion_candidates = build_deletion_candidates(data, output_usage, protected_cats)
+
+    # One script per *destination*, not per machine: replicas sharing a
+    # Models_bare folder resolve different user paths to the same OneDrive
+    # directory, so emitting one script each produced two files with identical
+    # filename sets that must never both be run.
     cleanup_scripts = {}
-    for hostname, cand in deletion_candidates.items():
-        if not (cand["unused"] or cand["never_run"]):
+    dest_groups = defaultdict(list)
+    for hostname in deletion_candidates:
+        if hostname == source_host:
+            dest_groups[hostname].append(hostname)
+        else:
+            dest_groups[config["machines"][hostname].get("sync_group", hostname)].append(hostname)
+
+    for group_key, members in dest_groups.items():
+        is_source = group_key == source_host
+        # Members of a sync_group see the same files; take the first as
+        # representative rather than emitting duplicate command sets.
+        rep = members[0]
+        cand = deletion_candidates[rep]
+        if not (cand["unused"] or cand["never_run"] or cand["unverifiable"]):
             continue
-        is_source = hostname == source_host
-        cleanup_scripts[f"cleanup_unused_{hostname}.bat"] = generate_cleanup_script(hostname, cand, is_source)
+        mcfg = config["machines"][rep]
+        models_root = mcfg.get("models_root") or mcfg.get("models_bare") or ""
+        label = group_key if len(members) == 1 else f"{group_key} ({' + '.join(members)})"
+        cleanup_scripts[f"cleanup_unused_{group_key}.bat"] = generate_cleanup_script(
+            label, cand, is_source, members, models_root)
+
+        # Neutralise any superseded per-machine script left over from before
+        # the sync_group merge. Overwritten rather than deleted -- these are
+        # regenerated artifacts, and a stale file full of live `del` lines
+        # sitting next to the current one is a genuine foot-gun.
+        if len(members) > 1:
+            for m in members:
+                stale = output_dir / f"cleanup_unused_{m}.bat"
+                if stale.exists():
+                    stale.write_text("\n".join([
+                        "@echo off",
+                        "REM " + "=" * 68,
+                        f"REM  SUPERSEDED -- do not run.",
+                        f"REM  {m} shares a Models_bare folder with: "
+                        + ", ".join(x for x in members if x != m),
+                        f"REM  Use cleanup_unused_{group_key}.bat instead (one script for both).",
+                        "REM " + "=" * 68,
+                        "echo This script is superseded. Use cleanup_unused_" + group_key + ".bat",
+                        "pause",
+                    ]))
 
     # Build actions
     report_data = {
@@ -3320,9 +3769,11 @@ def main():
         "prime_coverage":   prime_coverage,
         "prime_scan":       prime_scan,
         "si_coverage":      si_coverage,
+        "prime_wf_coverage": prime_wf_coverage,
         "si_scan":          si_scan,
         "output_usage":     output_usage,
         "deletion_candidates": deletion_candidates,
+        "protected_categories": protected_cats,
     }
     report_data["actions"] = build_actions(gaps, readiness, drift, nodes_data, config, data, node_gaps)
 
@@ -3347,13 +3798,13 @@ def main():
     nodes_lines.append("=" * 68)
     nodes_lines.append(f"  {'Node':<45} " + "  ".join(f"[{h[:6]}]" for h in nodes_data["hostnames"]))
     nodes_lines.append("-" * 68)
-    _node_col = {"on": "Y", "disabled": "D", "off": " "}
+    _node_col = {"on": "Y", "disabled": "D", "off": " ", "installed-not-loaded": "X"}
     for node in nodes_data["all_nodes"]:
         row = nodes_data["matrix"][node]
         cols = "     ".join(_node_col.get(row.get(h, "off"), " ") for h in nodes_data["hostnames"])
         nodes_lines.append(f"  {node:<45} {cols}")
     nodes_lines.append("")
-    nodes_lines.append("  (Y = enabled, D = installed but disabled, blank = not installed)")
+    nodes_lines.append("  (Y = enabled+loaded, X = INSTALLED BUT FAILED TO LOAD, D = disabled, blank = not installed)")
     nodes_lines.append("")
     nodes_lines.append("ON ALL MACHINES: " + ", ".join(nodes_data["on_all"]))
     (output_dir / f"custom_nodes_{timestamp}.txt").write_text("\n".join(nodes_lines))
@@ -3448,9 +3899,22 @@ def main():
             for m in no_evidence:
                 summary_lines.append(f"    ?? unconfirmed (no output evidence): {m}")
 
+    if prime_wf_coverage:
+        summary_lines.append("")
+        summary_lines.append("PRIME WORKFLOWS — TRAVEL READINESS (root-level workflows\\*.json)")
+        summary_lines.append("-" * 60)
+        for hostname, cov in prime_wf_coverage.items():
+            summary_lines.append(f"  {hostname}: {cov['pct']}%  ({cov['runnable']}/{cov['total']} runnable)")
+            for m, n in cov["blocking_models"]:
+                summary_lines.append(f"    !! copy {m}  -- unblocks {n} workflow(s)")
+            for wf, ms in cov["blocked"].items():
+                summary_lines.append(f"    -- BLOCKED {wf}")
+                for m in ms:
+                    summary_lines.append(f"         needs: {m}")
+
     if si_coverage and si_scan and si_scan.get("png_count", 0) > 0:
         summary_lines.append("")
-        summary_lines.append("STARTING IMAGES — TRAVEL READINESS")
+        summary_lines.append("STARTING IMAGES — SECONDARY CHECK")
         summary_lines.append("-" * 60)
         summary_lines.append(f"  {si_scan['png_count']} PNGs scanned | {len(si_scan.get('models', set()))} model refs")
         for hostname, cov in si_coverage.items():
@@ -3507,13 +3971,17 @@ def main():
         summary_lines.append("-" * 60)
         for hostname, cand in deletion_candidates.items():
             unused, never_run = cand["unused"], cand["never_run"]
-            if not (unused or never_run):
+            unverifiable = cand.get("unverifiable", [])
+            if not (unused or never_run or unverifiable):
                 continue
             is_source = hostname == source_host
             unused_gb = sum(m["size_gb"] for m in unused)
             never_gb  = sum(m["size_gb"] for m in never_run)
             action = "cleanup script MOVEs to C:\\models_unused" if is_source else "cleanup script DELETEs (re-syncable from ImageBeast)"
+            unver_gb = sum(m["size_gb"] for m in unverifiable)
             summary_lines.append(f"  {hostname}: {len(unused)} unused ({unused_gb:.2f} GB) + {len(never_run)} referenced-but-never-run ({never_gb:.2f} GB)  [{action}]")
+            if unverifiable:
+                summary_lines.append(f"    !! {len(unverifiable)} more ({unver_gb:.2f} GB) NOT scripted -- background-loaded categories, unverifiable by graph reference")
             for m in unused:
                 summary_lines.append(f"    -- unused: {m['filename']}  ({m['size_gb']:.2f} GB, [{m['category']}])")
             for m in never_run:
