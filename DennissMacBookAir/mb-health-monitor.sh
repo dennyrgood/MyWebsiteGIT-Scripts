@@ -201,28 +201,38 @@ for svc in COMFY_HTTP METRICS_SERVER HEARTBEAT_WRITER SEARCH_ADV SEARCH_SHOWS TM
         wait|ok) eval "MISSING_${svc}_ACTIVE=0" ;;
     esac
 
-    # Down (process present, HTTP health check failing)
-    trig=${DOWN_TRIGGERED[$svc]}
-    last=$(eval echo \$DOWN_${svc}_LAST_ALERT)
-    active=$(eval echo \$DOWN_${svc}_ACTIVE)
-    streak=$(eval echo \$DOWN_${svc}_STREAK)
-    read verdict new_streak <<< "$(check_condition_streak $trig $last $active $streak $(threshold_for $svc))"
-    eval "DOWN_${svc}_STREAK=$new_streak"
-    case "$verdict" in
-        alert)
-            eval "DOWN_${svc}_LAST_ALERT=$NOW; DOWN_${svc}_ACTIVE=1"
-            ALERT_BODY+="=== ${svc} NOT RESPONDING ===\n"
-            if [ "$svc" = "HEARTBEAT_WRITER" ] && [ -n "$DOWN_DETAIL_HEARTBEAT_WRITER" ]; then
-                ALERT_BODY+="Present for ${new_streak} consecutive checks (~$((new_streak * 5)) min):\n$(echo -e "$DOWN_DETAIL_HEARTBEAT_WRITER")\n\n"
-            else
-                ALERT_BODY+="Process is running but its HTTP endpoint did not return 200 for ${new_streak} consecutive checks.\n\n"
-            fi
-            ;;
-        clear)   eval "DOWN_${svc}_ACTIVE=0"
-                 CLEAR_BODY+="  - ${svc} is responding again\n" ;;
-        suppress) eval "DOWN_${svc}_ACTIVE=1" ;;
-        wait|ok) eval "DOWN_${svc}_ACTIVE=0" ;;
-    esac
+    # Down (process present, HTTP health check failing). 2026-09-04 fix: only evaluate
+    # this at all when the service isn't ALSO missing this round. check_service() sets
+    # DOWN_TRIGGERED[$svc]=0 whenever the process is gone (there's nothing to curl), but
+    # treating that as a real "down" reading of 0 fed a false "<svc> is responding
+    # again" CLEAR_BODY line the moment a service went from down-but-running straight to
+    # missing/crashed — the exact same run that also reports it MISSING. Skipping the
+    # eval entirely when missing leaves DOWN_${svc}_ACTIVE/STREAK untouched (frozen, not
+    # cleared), so a real recovery still gets correctly reported once the service is
+    # actually back and healthy again.
+    if [ "${MISSING_TRIGGERED[$svc]}" -eq 0 ]; then
+        trig=${DOWN_TRIGGERED[$svc]}
+        last=$(eval echo \$DOWN_${svc}_LAST_ALERT)
+        active=$(eval echo \$DOWN_${svc}_ACTIVE)
+        streak=$(eval echo \$DOWN_${svc}_STREAK)
+        read verdict new_streak <<< "$(check_condition_streak $trig $last $active $streak $(threshold_for $svc))"
+        eval "DOWN_${svc}_STREAK=$new_streak"
+        case "$verdict" in
+            alert)
+                eval "DOWN_${svc}_LAST_ALERT=$NOW; DOWN_${svc}_ACTIVE=1"
+                ALERT_BODY+="=== ${svc} NOT RESPONDING ===\n"
+                if [ "$svc" = "HEARTBEAT_WRITER" ] && [ -n "$DOWN_DETAIL_HEARTBEAT_WRITER" ]; then
+                    ALERT_BODY+="Present for ${new_streak} consecutive checks (~$((new_streak * 5)) min):\n$(echo -e "$DOWN_DETAIL_HEARTBEAT_WRITER")\n\n"
+                else
+                    ALERT_BODY+="Process is running but its HTTP endpoint did not return 200 for ${new_streak} consecutive checks.\n\n"
+                fi
+                ;;
+            clear)   eval "DOWN_${svc}_ACTIVE=0"
+                     CLEAR_BODY+="  - ${svc} is responding again\n" ;;
+            suppress) eval "DOWN_${svc}_ACTIVE=1" ;;
+            wait|ok) eval "DOWN_${svc}_ACTIVE=0" ;;
+        esac
+    fi
 done
 
 # --- Educational footer ---
