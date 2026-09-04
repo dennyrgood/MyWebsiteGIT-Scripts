@@ -31,8 +31,16 @@ echo "=== $(date) -- scheduled fleet scan starting ==="
 
 # Stable-named copies of the newest report + explorer, so a bookmark/tile
 # always points at something current without picking a timestamp.
-latest_report=$(ls -t "$OUTPUT_DIR"/fleet_report_*.html 2>/dev/null | head -1)
-latest_explorer=$(ls -t "$OUTPUT_DIR"/fleet_explorer_*.html 2>/dev/null | head -1)
+# NOTE: the `|| true` on these two is load-bearing. Under `set -euo pipefail`,
+# `ls | head -1` makes ls die of SIGPIPE once head has its one line, pipefail
+# turns that into a failed pipeline, and set -e kills the whole script --
+# silently, right here, with the log ending mid-run at comfy_fleet.py's last
+# line. Found 2026-09-04: every scheduled run since this wrapper was installed
+# had been dying at exactly this point, so the timestamped reports were being
+# written but *_latest.html was never refreshed, nothing was ever pruned, and
+# the local mirror the web server actually serves was never updated.
+latest_report=$(ls -t "$OUTPUT_DIR"/fleet_report_*.html 2>/dev/null | head -1) || true
+latest_explorer=$(ls -t "$OUTPUT_DIR"/fleet_explorer_*.html 2>/dev/null | head -1) || true
 [ -n "$latest_report" ] && cp "$latest_report" "$OUTPUT_DIR/fleet_report_latest.html"
 [ -n "$latest_explorer" ] && cp "$latest_explorer" "$OUTPUT_DIR/fleet_explorer_latest.html"
 
