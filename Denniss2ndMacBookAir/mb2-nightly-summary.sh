@@ -24,7 +24,16 @@ MSMTP="/opt/homebrew/bin/msmtp"
 TO="dennyrgood@yahoo.com"
 HOST="denniss-2nd-macbook-air"
 MONITOR_STATE="/tmp/denniss-2nd-macbook-air-monitor-state.tmp"
-MONITOR_STALE_SECS=600   # 10 min — mb2-health-monitor runs every 5 min via launchd
+# 2026-09-04: was 600s (10 min), matched to mb2-health-monitor's 5-min run interval —
+# but that ignores mb2 being a laptop that sleeps overnight. StartInterval launchd jobs
+# don't fire (or catch up) while asleep, so a normal night's sleep alone pushed this past
+# 10 min every single morning (confirmed: 05:12->07:00 gap, box asleep, health-monitor
+# itself was fine — ran clean the instant it was manually kicked). This check only runs
+# once/day (07:00), so a tight threshold buys nothing anyway: it can't catch a same-day
+# failure before the next morning regardless of its value. Padded to ride out a full
+# overnight sleep (matches comfy-fleet-scan's stale-threshold reasoning in mb's version
+# of this script) while still catching a health-monitor that's been dead for a day+.
+MONITOR_STALE_SECS=43200   # 12h
 
 OK=1
 REASON="all healthy"

@@ -17,7 +17,15 @@ TO="dennyrgood@yahoo.com"
 HOST="denniss-macbook-air"
 LINES=10
 MONITOR_STATE="/tmp/denniss-macbook-air-monitor-state.tmp"
-MONITOR_STALE_SECS=600   # 10 min — mb-health-monitor runs every 5 min via launchd
+# 2026-09-04: was 600s (10 min), matched to mb-health-monitor's 5-min run interval — but
+# that ignores mb being a laptop that sleeps overnight. StartInterval launchd jobs don't
+# fire (or catch up) while asleep, so a normal night's sleep alone pushes this well past
+# 10 min most mornings (confirmed on mb2, same code, same failure: box asleep, health
+# monitor itself fine, ran clean the instant it was manually kicked). This check only
+# runs once/day (07:00), so a tight threshold buys nothing anyway — same reasoning as
+# SCAN_STALE_SECS below. Padded to ride out a full overnight sleep while still catching
+# a health-monitor that's been dead for a day+.
+MONITOR_STALE_SECS=43200   # 12h
 
 SCAN_LOG="$HOME/Library/Logs/comfy_fleet_scan.log"
 SCAN_STALE_SECS=115200   # 32h — scan fires 05:00, nightly summary runs a few hours
