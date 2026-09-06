@@ -173,6 +173,20 @@ function Get-RefsFromWorkflow {
 
     foreach ($node in $nodesList) {
         if ($null -eq $node) { continue }
+        # ComfyUI's own bypass/mute flag: 0 = active, 2 = Bypass, 4 = Never.
+        # The frontend prunes 2/4 nodes when building the actual execution
+        # prompt -- a parked "here's the gguf version if I switch to it"
+        # loader sitting at mode 4 is not a real requirement, even though it's
+        # still present in the raw canvas JSON we read. Missed entirely until
+        # 2026-09-05, when a workflow was reported blocked by a model that was
+        # only referenced by a disabled loader -- confirmed fleet-wide: 239
+        # node instances at mode 4, 6 at mode 2, across 19 workflow files. The
+        # API/"prompt" JSON format (the $workflow.PSObject.Properties.Value
+        # fallback below) has already had disconnected nodes pruned by
+        # ComfyUI itself and carries no `mode` property at all -- absence of
+        # the property means "was never eligible to be excluded", so it's
+        # correctly treated as active here, not skipped.
+        if ($node.PSObject.Properties['mode'] -and ($node.mode -eq 2 -or $node.mode -eq 4)) { continue }
         $classType = ""
         $nodeTitle = ""
         if ($node.PSObject.Properties['class_type']) { $classType = $node.class_type }
@@ -258,6 +272,10 @@ function Get-AllNodeTypes {
 
     foreach ($node in $nodesList) {
         if ($null -eq $node) { continue }
+        # Same mode 2/4 (Bypass/Never) exclusion as Get-RefsFromWorkflow above
+        # -- a disabled node's class_type isn't a real "this workflow uses
+        # this custom node package" signal either.
+        if ($node.PSObject.Properties['mode'] -and ($node.mode -eq 2 -or $node.mode -eq 4)) { continue }
         $classType = ""
         if ($node.PSObject.Properties['class_type']) { $classType = $node.class_type }
         if ($node.PSObject.Properties['type'])        { $classType = $node.type }

@@ -150,8 +150,27 @@ def load_machine_files(reports_dir: Path, hostname: str) -> dict:
 
 
 def load_csv(path: Path) -> list[dict]:
-    with open(path, encoding="utf-8-sig") as f:
-        return list(csv.DictReader(f))
+    """Reads a CSV, retrying on a transient OneDrive lock.
+
+    Found 2026-09-05: comfy_fleet.py can start reading a file within seconds
+    of the SSH scan that wrote it, and OneDrive's own sync of that just-written
+    file to this Mac was still holding it, producing
+    `OSError: [Errno 11] Resource deadlock avoided` -- not corrupt data, just
+    read-too-soon. Confirmed by hand: the same file read cleanly moments
+    later with no other change. A short retry is cheaper and more honest than
+    a fixed sleep before the whole analysis phase.
+    """
+    import time
+    last_err = None
+    for attempt in range(5):
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                return list(csv.DictReader(f))
+        except OSError as e:
+            last_err = e
+            if attempt < 4:
+                time.sleep(1 + attempt)
+    raise last_err
 
 
 DISABLED_SUFFIX = ".disabled"

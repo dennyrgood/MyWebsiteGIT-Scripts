@@ -46,6 +46,16 @@ echo "=== $(date) -- scheduled fleet scan starting ==="
 /opt/homebrew/bin/python3 "$SCRIPT_DIR/comfy_fleet.py" --config "$REPORTS_DIR/fleet_config.json" \
     --prune-output --confirm-prune --keep-runs 3
 
+# Needed_In_Bare.html -- separate, single-purpose report (not part of
+# comfy_fleet.py's own pipeline), added 2026-09-04. Regenerated every run so
+# it never goes stale, using the fresh CSVs comfy_fleet.sh just produced.
+# Writes only into $OUTPUT_DIR/ (report) and $OUTPUT_DIR/thumbs/ (PNG
+# thumbnails via `sips`) -- both already proven python3-writable under
+# launchd; `sips`'s own TCC access under launchd is unconfirmed as of this
+# writing, so a thumbnail failure must not be treated as a fatal error here
+# (the report already degrades gracefully to "no PNG" placeholders).
+/opt/homebrew/bin/python3 "$SCRIPT_DIR/needed_in_bare.py" --config "$REPORTS_DIR/fleet_config.json"
+
 # --- Post-scan housekeeping: ALL of it in python3, deliberately -----------------
 # Under launchd this agent has NO shell-level access to the OneDrive
 # CloudStorage folder. Probed directly 2026-09-04 from a launchd-launched
@@ -92,24 +102,31 @@ if not newest:
     sys.exit(1)
 
 # 2. Mirror to the plain local dir the web server serves (OneDrive never
-#    touches that one -- see the 2026-08-31 note on the http agent).
+#    touches that one -- see the 2026-08-31 note on the http agent). Walks
+#    subdirectories too (added 2026-09-04 for thumbs/, from Needed_In_Bare.html
+#    -- the original flat-files-only version silently never mirrored it).
 copied = removed = 0
-src_names = set()
-for name in os.listdir(out_dir):
-    sp = os.path.join(out_dir, name)
-    if not os.path.isfile(sp):
-        continue
-    src_names.add(name)
-    dp = os.path.join(local_dir, name)
-    if not os.path.exists(dp) or not filecmp.cmp(sp, dp, shallow=False):
-        shutil.copy2(sp, dp)
-        copied += 1
-for name in os.listdir(local_dir):                       # --delete equivalent
-    dp = os.path.join(local_dir, name)
-    if os.path.isfile(dp) and name not in src_names:
-        os.remove(dp)
-        removed += 1
-print(f"mirror: {copied} copied, {removed} removed, {len(src_names)} in sync")
+src_rel = set()
+for root, dirs, files in os.walk(out_dir):
+    rel_root = os.path.relpath(root, out_dir)
+    for name in files:
+        rel = name if rel_root == "." else os.path.join(rel_root, name)
+        src_rel.add(rel)
+        sp, dp = os.path.join(root, name), os.path.join(local_dir, rel)
+        os.makedirs(os.path.dirname(dp), exist_ok=True)
+        if not os.path.exists(dp) or not filecmp.cmp(sp, dp, shallow=False):
+            shutil.copy2(sp, dp)
+            copied += 1
+for root, dirs, files in os.walk(local_dir, topdown=False):
+    rel_root = os.path.relpath(root, local_dir)
+    for name in files:
+        rel = name if rel_root == "." else os.path.join(rel_root, name)
+        if rel not in src_rel:                           # --delete equivalent
+            os.remove(os.path.join(root, name))
+            removed += 1
+    if rel_root != "." and not os.listdir(root):
+        os.rmdir(root)
+print(f"mirror: {copied} copied, {removed} removed, {len(src_rel)} in sync")
 
 # 3. Verify the outcome instead of trusting any exit code -- the served report
 #    must actually be the one just generated.
