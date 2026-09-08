@@ -15,7 +15,12 @@ log() { logger -t upssched-cmd "$*"; }
 
 case "$CASE_NAME" in
     onbatt-shutdown)
-        log "10 minutes on battery — initiating shutdown (running as $(id -un))"
+        # Duration deliberately NOT named: this script is shared between WBU (1200s)
+        # and CWHU (300s), so any hardcoded figure is wrong on one of them. It read
+        # "10 minutes on battery" until 2026-09-08, when CWHU fired correctly at its
+        # 5-minute mark and the log said 10 — costing an hour of investigation into a
+        # timer that was never misconfigured. The real value lives in upssched.conf.
+        log "On-battery timer expired — initiating shutdown (running as $(id -un))"
         # `upsmon -c fsd` rather than calling clean.ubuntu.shutdown directly.
         #
         # This is the ending documented in `man 8 upssched`, and it matters for two
