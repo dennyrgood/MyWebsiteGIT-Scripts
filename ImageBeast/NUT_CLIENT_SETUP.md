@@ -32,6 +32,48 @@ it guaranteed.
 CWHU shuts *itself* down rather than being driven entirely from the host, so it still
 stops cleanly if the host's scheduled task is broken or misconfigured.
 
+### The router and switch are hard dependencies — put them on a UPS
+
+Every client learns about the outage by reading `ups2` over the network from
+WorkBenchUnix. **If the network path dies, no client can arm**, and each one sits
+polling into the void while running on battery.
+
+This is not theoretical. During the 2026-09-08 outage test the router was still on
+unprotected mains. It died the instant power was pulled, and every client logged this
+for seven minutes:
+
+```
+13:42:53Z  cannot read ups2@192.168.178.242: unreachable host - not armed, no action taken.
+13:43:53Z  cannot read ups2@192.168.178.242: unreachable host - not armed, no action taken.
+   ... seven consecutive failures ...
+13:49:53Z  ON BATTERY (status: OB) - 8min countdown started.
+```
+
+They only armed at 13:49:53, when the router was moved onto UPS 1 mid-outage. Had it
+stayed unprotected, none of them would have armed at all: WorkBenchUnix would have
+shut itself down alone at 20 minutes, leaving three machines running on a draining
+battery until it died under them — the exact failure this system exists to prevent.
+
+The machines were never in danger of an unclean stop *from the network loss itself*
+(they were all on UPS 2 and running fine), which is what makes this so easy to miss:
+nothing looks wrong until the moment it matters.
+
+**Requirement: the router and every switch on the path between WorkBenchUnix and its
+clients must be on UPS 1**, alongside the NAS. They are part of the shutdown
+mechanism, not just network convenience. UPS 1 exists partly for this — it carries
+only light network gear precisely so it outlives the servers on UPS 2.
+
+Their draw is negligible against a 1500VA/1050W unit: a 24-port gigabit switch is
+typically 10-20W and a consumer router 5-15W, so the pair costs a few percent of the
+UPS's capacity and a correspondingly small share of its runtime. Adding them extends
+protection for a rounding error.
+
+**One asymmetry worth knowing:** a client that is *already armed* keeps counting on
+elapsed wall-clock if the server becomes unreachable, and still fires — that fix went
+in on 2026-08-29 after ChatWorkhorse missed a shutdown by 60 seconds. But a client
+that has *not yet seen* `OB` cannot arm from nothing. Losing the network at the start
+of an outage is therefore far worse than losing it in the middle.
+
 ### One ordering axis, plus a shared floor
 
 **Minutes are the only ordering.** Every machine's position in the sequence is
