@@ -10,6 +10,16 @@ cp -p /etc/fstab "$DEST/fstab.txt"
 cp -p ~/immich-app/docker-compose.yml "$DEST/docker-compose.yml"
 cp -p ~/immich-app/hwaccel.ml.yml "$DEST/hwaccel.ml.yml"
 cp -p ~/immich-app/.env "$DEST/.env"
+
+# webtools-app (added 2026-09-08): OmniTools/Stirling-PDF/ConvertX/MeTube, same
+# self-contained-folder pattern as immich-app above. .env holds only
+# CONVERTX_JWT_SECRET -- copied in full like immich's .env, same reasoning:
+# fleet-configs is private, and losing it just invalidates ConvertX login
+# sessions on rebuild rather than anything worse. See ~/webtools-app/README.md.
+cp -p ~/webtools-app/docker-compose.yml "$DEST/webtools-docker-compose.yml"
+cp -p ~/webtools-app/.env "$DEST/webtools.env"
+cp -p ~/webtools-app/README.md "$DEST/webtools-README.md"
+
 crontab -l > "$DEST/crontab-l-dhm.txt"
 sudo crontab -l > "$DEST/crontab-l-root.txt"
 
